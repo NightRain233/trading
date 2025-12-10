@@ -16,9 +16,8 @@ export interface StockData {
   ema50: number;
   adx: number;
   // Computed statuses
-  trend: 'LONG' | 'SHORT' | 'NEUTRAL';
-  trendStrength: 'STRONG' | 'WEAK'; // Based on ADX
-  signal: 'WAIT' | 'ENTRY_Long' | 'ENTRY_Short' | 'NONE'; 
+  trend: '强势多头' | '回调多头' | '潜在转空' | '强势空头' | '反弹空头' | '潜在转多' | '震荡';
+  signal: '强烈信号' | '谨慎信号' | '观望' | 'WAIT';
 }
 
 export type Timeframe = '1D' | '4H';

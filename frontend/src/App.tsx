@@ -140,19 +140,19 @@ function App() {
                 </div>
 
                 <div className="col-span-3 sm:col-span-2 text-right flex justify-end">
-                  <StatusBadge trend={stock.trend} strength={stock.trendStrength} adx={stock.adx} />
+                  <StatusBadge trend={stock.trend} adx={stock.adx} />
                 </div>
 
                  <div className="col-span-2 hidden sm:block text-right">
-                    {stock.signal !== 'WAIT' && stock.signal !== 'NONE' ? (
+                    {stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
                         <span className={clsx(
                             "px-2 py-1 rounded text-xs font-bold",
-                            stock.signal === 'ENTRY_Long' ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"
+                            stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
                         )}>
-                            {stock.signal === 'ENTRY_Long' ? 'BUY' : 'SELL'}
+                            {stock.signal}
                         </span>
                     ) : (
-                        <span className="text-zinc-600 text-xs">-</span>
+                        <span className="text-zinc-600 text-xs">观望</span>
                     )}
                  </div>
 

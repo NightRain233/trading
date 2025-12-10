@@ -66,21 +66,39 @@ def analyze_stock(symbol: str):
     ema50 = float(last_row['EMA50'])
     adx = float(last_row['ADX']) if 'ADX' in last_row else 0
     
-    # Trend Logic
-    trend = "NEUTRAL"
-    if ema20 > ema50 and price > ema50:
-        trend = "LONG"
-    elif ema20 < ema50 and price < ema50:
-        trend = "SHORT"
-        
-    # Strength
-    strength = "STRONG" if adx > 25 else "WEAK"
+    # 第一层：趋势方向过滤（改进版）
+    trend = "震荡"
     
+    if ema20 > ema50 * 1.001:  # 加入小幅缓冲，多头环境
+        if price > ema20:  # 强势多头
+            trend = "强势多头"
+        elif price > ema50:  # 回调中多头
+            trend = "回调多头"
+        else:  # 价格跌破EMA50，潜在转空
+            trend = "潜在转空"
+            
+    elif ema20 < ema50 * 0.999:  # 空头环境
+        if price < ema20:  # 强势空头
+            trend = "强势空头"
+        elif price < ema50:  # 反弹中空头
+            trend = "反弹空头"
+        else:  # 价格突破EMA50，潜在转多
+            trend = "潜在转多"
+    else:
+        # EMA20和EMA50接近，震荡区间
+        trend = "震荡"
+    
+    # 第二层：ADX + 趋势强度过滤
     signal = "WAIT"
-    if trend == "LONG" and adx > 25:
-        signal = "ENTRY_Long"
-    elif trend == "SHORT" and adx > 25:
-        signal = "ENTRY_Short"
+    if adx > 25:
+        if trend in ["强势多头", "强势空头"]:
+            signal = "强烈信号"
+        elif trend in ["回调多头", "反弹空头"]:
+            signal = "谨慎信号"
+        else:
+            signal = "观望"
+    else:
+        signal = "观望"
         
     change_percent = ((price - df.iloc[-2]['Close']) / df.iloc[-2]['Close']) * 100
     
@@ -105,7 +123,6 @@ def analyze_stock(symbol: str):
         "ema50": ema50,
         "adx": adx,
         "trend": trend,
-        "trendStrength": strength,
         "signal": signal,
         "candles": candles
     }
