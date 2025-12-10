@@ -1,4 +1,4 @@
-import type { StockData } from './types';
+import type { StockData, WatchlistGroup } from './types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -13,9 +13,7 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
   }
 }
 
-// WATCHLIST_SYMBOLS removed as it's now dynamic from backend
-
-export async function fetchWatchlist(): Promise<StockData[]> {
+export async function fetchWatchlist(): Promise<WatchlistGroup[]> {
   try {
     const response = await fetch(`${API_BASE_URL}/watchlist`);
     if (!response.ok) return [];
@@ -26,12 +24,12 @@ export async function fetchWatchlist(): Promise<StockData[]> {
   }
 }
 
-export async function addTicker(symbol: string): Promise<boolean> {
+export async function addTicker(symbol: string, groupId?: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/watchlist`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol })
+      body: JSON.stringify({ symbol, groupId })
     });
     return response.ok;
   } catch (error) {
@@ -52,11 +50,37 @@ export async function removeTicker(symbol: string): Promise<boolean> {
   }
 }
 
-// Helper for calculated EMA (now mostly done in backend, but kept if needed for interactions)
+export async function createGroup(name: string): Promise<WatchlistGroup | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error(`Error creating group:`, error);
+    return null;
+  }
+}
+
+export async function updateWatchlist(groups: { id: string; name: string; symbols: string[]; collapsed: boolean }[]): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/watchlist`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groups })
+    });
+    return response.ok;
+  } catch (error) {
+    console.error(`Error updating watchlist:`, error);
+    return false;
+  }
+}
+
+// Helper for calculated EMA (kept for chart interactions if needed)
 export function calculateEMA(candles: any[], period: number) {
-    // If backend provides EMAs in the candle objects, we can just use that.
-    // Or if we need to recalculate on client for some interaction.
-    // For now, let's trust the backend data or if the chart needs arrays:
     const k = 2 / (period + 1);
     let ema = candles[0].close;
     const result = [{ time: candles[0].time, value: ema }];
@@ -67,4 +91,3 @@ export function calculateEMA(candles: any[], period: number) {
     }
     return result;
 }
-

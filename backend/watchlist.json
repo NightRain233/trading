@@ -1,10 +1,17 @@
 [
-  "AAPL",
-  "TSLA",
-  "NVDA",
-  "GOOGL",
-  "BTC-USD",
-  "ETH-USD",
-  "GC=F",
-  "513910.SS"
+  {
+    "id": "ce5f655d-2f33-4bfc-a88c-0dbdcf209929",
+    "name": "默认分组",
+    "symbols": [
+      "AAPL",
+      "NVDA",
+      "TSLA",
+      "GOOGL",
+      "BTC-USD",
+      "ETH-USD",
+      "GC=F",
+      "513910.SS"
+    ],
+    "collapsed": false
+  }
 ]

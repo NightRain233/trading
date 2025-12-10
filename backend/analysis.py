@@ -3,12 +3,36 @@ import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
+import pickle
+import os
 
-# Metrics cache: {symbol: (data, timestamp)}
-CACHE = {}
+# File-based cache
+CACHE_FILE = "cache.pkl"
 CACHE_DURATION_SECONDS = 60*60 # 1 hour
 
+def load_cache():
+    """Load cache from disk."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Error loading cache: {e}")
+    return {}
+
+def save_cache(cache):
+    """Save cache to disk."""
+    try:
+        with open(CACHE_FILE, "wb") as f:
+            pickle.dump(cache, f)
+    except Exception as e:
+        print(f"Error saving cache: {e}")
+
+# Initialize cache from file
+CACHE = load_cache()
+
 def fetch_stock_data(symbol: str):
+    global CACHE
     now = time.time()
     
     # Check cache
@@ -17,7 +41,7 @@ def fetch_stock_data(symbol: str):
         if now - timestamp < CACHE_DURATION_SECONDS:
             return data
 
-    # Fetch 6 months of data to ensure enough for EMA50 + ADX
+    # Fetch 6 months of data to ensure enough for EMA50 + ADX + RSI
     end_date = datetime.now()
     start_date = end_date - timedelta(days=200)
     
@@ -38,16 +62,22 @@ def fetch_stock_data(symbol: str):
         
         # ADX (requires High, Low, Close)
         adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-        # pandas_ta returns columns like ADX_14, DMP_14, DMN_14. We just need ADX_14
-        if not adx_df.empty:
+        if adx_df is not None and not adx_df.empty:
              df = df.join(adx_df)
-             # Rename for consistency if needed, but usually it's ADX_14
              df['ADX'] = df['ADX_14']
         else:
             df['ADX'] = 0
+        
+        # RSI(14)
+        rsi_series = ta.rsi(df['Close'], length=14)
+        if rsi_series is not None:
+            df['RSI'] = rsi_series
+        else:
+            df['RSI'] = 50  # Default neutral
             
-        # Update Cache
+        # Update Cache and persist
         CACHE[symbol] = (df, now)
+        save_cache(CACHE)
         return df
         
     except Exception as e:
@@ -65,6 +95,7 @@ def analyze_stock(symbol: str):
     ema20 = float(last_row['EMA20'])
     ema50 = float(last_row['EMA50'])
     adx = float(last_row['ADX']) if 'ADX' in last_row else 0
+    rsi = float(last_row['RSI']) if 'RSI' in last_row else 50
     
     # 第一层：趋势方向过滤（改进版）
     trend = "震荡"
@@ -99,6 +130,32 @@ def analyze_stock(symbol: str):
             signal = "观望"
     else:
         signal = "观望"
+    
+    # 动态RSI阈值判断
+    is_uptrend = trend in ["强势多头", "回调多头"]
+    is_downtrend = trend in ["强势空头", "反弹空头"]
+    
+    if adx > 25:  # 趋势强
+        if is_uptrend:
+            rsi_overbought = 75
+            rsi_oversold = 45
+        elif is_downtrend:
+            rsi_overbought = 60
+            rsi_oversold = 25
+        else:
+            rsi_overbought = 70
+            rsi_oversold = 30
+    else:  # 震荡市
+        rsi_overbought = 70
+        rsi_oversold = 30
+    
+    # 判断RSI状态
+    if rsi >= rsi_overbought:
+        rsi_status = "超买"
+    elif rsi <= rsi_oversold:
+        rsi_status = "超卖"
+    else:
+        rsi_status = "中性"
         
     change_percent = ((price - df.iloc[-2]['Close']) / df.iloc[-2]['Close']) * 100
     
@@ -122,6 +179,10 @@ def analyze_stock(symbol: str):
         "ema20": ema20,
         "ema50": ema50,
         "adx": adx,
+        "rsi": rsi,
+        "rsiStatus": rsi_status,  # 超买/超卖/中性
+        "rsiOverbought": rsi_overbought,  # 当前使用的超买阈值
+        "rsiOversold": rsi_oversold,  # 当前使用的超卖阈值
         "trend": trend,
         "signal": signal,
         "candles": candles

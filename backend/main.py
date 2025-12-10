@@ -5,6 +5,7 @@ from typing import List, Optional
 from analysis import analyze_stock
 import json
 import os
+import uuid
 
 app = FastAPI()
 
@@ -20,14 +21,30 @@ app.add_middleware(
 WATCHLIST_FILE = "watchlist.json"
 
 def load_watchlist():
+    """Load watchlist with migration support for legacy format."""
     if not os.path.exists(WATCHLIST_FILE):
-        return []
+        # Return default group structure
+        return [{"id": str(uuid.uuid4()), "name": "默认分组", "symbols": [], "collapsed": False}]
+    
     with open(WATCHLIST_FILE, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+    
+    # Migration: if data is a flat list (old format), convert to group format
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], str):
+        migrated = [{
+            "id": str(uuid.uuid4()),
+            "name": "默认分组",
+            "symbols": data,
+            "collapsed": False
+        }]
+        save_watchlist(migrated)
+        return migrated
+    
+    return data
 
 def save_watchlist(watchlist):
     with open(WATCHLIST_FILE, "w") as f:
-        json.dump(watchlist, f, indent=2)
+        json.dump(watchlist, f, indent=2, ensure_ascii=False)
 
 class StockResponse(BaseModel):
     symbol: str
@@ -37,13 +54,26 @@ class StockResponse(BaseModel):
     ema20: float
     ema50: float
     adx: float
+    rsi: float
     trend: str
-    trendStrength: str
     signal: str
     candles: List[dict]
 
+class Group(BaseModel):
+    id: str
+    name: str
+    symbols: List[str]
+    collapsed: bool = False
+
 class AddStockRequest(BaseModel):
     symbol: str
+    groupId: Optional[str] = None
+
+class CreateGroupRequest(BaseModel):
+    name: str
+
+class UpdateWatchlistRequest(BaseModel):
+    groups: List[Group]
 
 @app.get("/")
 def read_root():
@@ -58,48 +88,98 @@ def get_quote(symbol: str):
 
 @app.get("/api/watchlist")
 def get_watchlist():
-    symbols = load_watchlist()
-    results = []
+    """Returns groups with analyzed stock data."""
+    groups = load_watchlist()
+    result = []
     
-    # In a real app, this should be async or parallelized
-    for sym in symbols:
-        try:
-            data = analyze_stock(sym)
-            if data:
-                results.append(data)
-        except Exception as e:
-            print(f"Error fetching {sym}: {e}")
-            
-    return results
+    for group in groups:
+        stocks = []
+        for sym in group.get("symbols", []):
+            try:
+                data = analyze_stock(sym)
+                if data:
+                    stocks.append(data)
+            except Exception as e:
+                print(f"Error fetching {sym}: {e}")
+        
+        result.append({
+            "id": group["id"],
+            "name": group["name"],
+            "collapsed": group.get("collapsed", False),
+            "stocks": stocks
+        })
+    
+    return result
 
 @app.post("/api/watchlist")
 def add_to_watchlist(request: AddStockRequest):
+    """Add symbol to a group (default: first group)."""
     symbol = request.symbol.strip().upper()
     if not symbol:
         raise HTTPException(status_code=400, detail="Invalid symbol")
-        
-    current_list = load_watchlist()
-    if symbol in current_list:
-        return {"message": "Symbol already in watchlist"}
     
-    # Optional: Validate with analyze_stock first? 
-    # Let's trust user or let frontend handle validation error if fetch fails later.
+    groups = load_watchlist()
     
-    current_list.append(symbol)
-    save_watchlist(current_list)
-    return {"message": "Symbol added", "watchlist": current_list}
+    # Find target group
+    target_group = None
+    if request.groupId:
+        for g in groups:
+            if g["id"] == request.groupId:
+                target_group = g
+                break
+    else:
+        target_group = groups[0] if groups else None
+    
+    if not target_group:
+        raise HTTPException(status_code=400, detail="No group found")
+    
+    # Check if already exists in any group
+    for g in groups:
+        if symbol in g["symbols"]:
+            return {"message": "Symbol already in watchlist"}
+    
+    target_group["symbols"].append(symbol)
+    save_watchlist(groups)
+    return {"message": "Symbol added"}
 
 @app.delete("/api/watchlist/{symbol}")
 def remove_from_watchlist(symbol: str):
+    """Remove symbol from all groups."""
     symbol = symbol.strip().upper()
-    current_list = load_watchlist()
+    groups = load_watchlist()
     
-    if symbol in current_list:
-        current_list.remove(symbol)
-        save_watchlist(current_list)
-        return {"message": "Symbol removed", "watchlist": current_list}
+    found = False
+    for g in groups:
+        if symbol in g["symbols"]:
+            g["symbols"].remove(symbol)
+            found = True
+    
+    if found:
+        save_watchlist(groups)
+        return {"message": "Symbol removed"}
     
     raise HTTPException(status_code=404, detail="Symbol not found in watchlist")
+
+@app.post("/api/groups")
+def create_group(request: CreateGroupRequest):
+    """Create a new group."""
+    groups = load_watchlist()
+    new_group = {
+        "id": str(uuid.uuid4()),
+        "name": request.name,
+        "symbols": [],
+        "collapsed": False
+    }
+    groups.append(new_group)
+    save_watchlist(groups)
+    return new_group
+
+@app.put("/api/watchlist")
+def update_watchlist(request: UpdateWatchlistRequest):
+    """Replace entire watchlist structure (for drag & drop reordering)."""
+    groups = [g.dict() for g in request.groups]
+    save_watchlist(groups)
+    return {"message": "Watchlist updated"}
 
 if __name__ == "__main__":
     import uvicorn

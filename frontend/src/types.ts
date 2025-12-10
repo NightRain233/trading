@@ -15,9 +15,20 @@ export interface StockData {
   ema20: number;
   ema50: number;
   adx: number;
+  rsi: number;
+  rsiStatus: '超买' | '超卖' | '中性';
+  rsiOverbought: number;
+  rsiOversold: number;
   // Computed statuses
   trend: '强势多头' | '回调多头' | '潜在转空' | '强势空头' | '反弹空头' | '潜在转多' | '震荡';
   signal: '强烈信号' | '谨慎信号' | '观望' | 'WAIT';
+}
+
+export interface WatchlistGroup {
+  id: string;
+  name: string;
+  collapsed: boolean;
+  stocks: StockData[];
 }
 
 export type Timeframe = '1D' | '4H';
