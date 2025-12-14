@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchWatchlist, addTicker, removeTicker, createGroup, updateWatchlist } from './utils';
+import { fetchWatchlist, fetchStockData, addTicker, removeTicker, createGroup, updateWatchlist } from './utils';
 import type { StockData, WatchlistGroup } from './types';
 import { ChartModal } from './components/ChartModal';
 import { StatusBadge } from './components/StatusBadge';
@@ -225,9 +225,41 @@ function App() {
 
   const loadData = async () => {
     setLoading(true);
-    const data = await fetchWatchlist();
-    setGroups(data);
-    setLoading(false);
+    try {
+      // 1. Fetch group structure (lightweight)
+      const groupsData = await fetchWatchlist();
+      
+      // 2. Collect unique symbols
+      const uniqueSymbols = new Set<string>();
+      groupsData.forEach(g => {
+        g.symbols.forEach(s => uniqueSymbols.add(s));
+      });
+
+      // 3. Fetch stock details in parallel
+      const stockMap = new Map<string, StockData>();
+      const promises = Array.from(uniqueSymbols).map(async (symbol) => {
+        const data = await fetchStockData(symbol);
+        if (data) {
+          stockMap.set(symbol, data);
+        }
+      });
+
+      await Promise.all(promises);
+
+      // 4. Populate groups with stock data
+      const populatedGroups = groupsData.map(g => ({
+        ...g,
+        stocks: g.symbols
+          .map(sym => stockMap.get(sym))
+          .filter((s): s is StockData => s !== undefined)
+      }));
+
+      setGroups(populatedGroups);
+    } catch (error) {
+      console.error("Failed to load watchlist:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAddStock = async (e: React.FormEvent) => {

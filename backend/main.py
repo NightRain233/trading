@@ -88,27 +88,17 @@ def get_quote(symbol: str):
 
 @app.get("/api/watchlist")
 def get_watchlist():
-    """Returns groups with analyzed stock data."""
+    """Returns watchlist structure (groups and symbols) without detailed analysis."""
     groups = load_watchlist()
+    # Ensure structure consistency
     result = []
-    
     for group in groups:
-        stocks = []
-        for sym in group.get("symbols", []):
-            try:
-                data = analyze_stock(sym)
-                if data:
-                    stocks.append(data)
-            except Exception as e:
-                print(f"Error fetching {sym}: {e}")
-        
         result.append({
             "id": group["id"],
             "name": group["name"],
             "collapsed": group.get("collapsed", False),
-            "stocks": stocks
+            "symbols": group.get("symbols", [])
         })
-    
     return result
 
 @app.post("/api/watchlist")

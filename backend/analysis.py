@@ -6,6 +6,11 @@ import time
 import pickle
 import os
 
+import threading
+
+# Thread lock for thread safety with yfinance/pandas
+data_lock = threading.Lock()
+
 # File-based cache
 CACHE_FILE = "cache.pkl"
 CACHE_DURATION_SECONDS = 60*60 # 1 hour
@@ -35,29 +40,39 @@ def fetch_stock_data(symbol: str):
     global CACHE
     now = time.time()
     
-    # Check cache
-    if symbol in CACHE:
-        data, timestamp = CACHE[symbol]
-        if now - timestamp < CACHE_DURATION_SECONDS:
-            return data
+    # Check cache (thread-safe read)
+    with data_lock:
+        if symbol in CACHE:
+            data, timestamp = CACHE[symbol]
+            if now - timestamp < CACHE_DURATION_SECONDS:
+                return data.copy() # Return copy to avoid mutation issues
 
     # Fetch 6 months of data to ensure enough for EMA50 + ADX + RSI
     end_date = datetime.now()
     start_date = end_date - timedelta(days=200)
     
     try:
-        df = yf.download(symbol, start=start_date, end=end_date, interval="1d", progress=False)
-        
-        if df.empty:
-            return None
+        # yfinance download is not fully thread-safe for some internal pandas operations
+        # Adding lock around fetch and calculation to be safe
+        with data_lock:
+             # Re-check cache inside lock in case another thread populated it
+            if symbol in CACHE:
+                data, timestamp = CACHE[symbol]
+                if now - timestamp < CACHE_DURATION_SECONDS:
+                    return data.copy()
 
-        # Fix MultiIndex columns if present (yfinance update)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+            df = yf.download(symbol, start=start_date, end=end_date, interval="1d", progress=False)
+            
+            if df.empty:
+                return None
 
-        # Calculate Indicators
-        # EMA
-        df['EMA20'] = ta.ema(df['Close'], length=20)
+            # Fix MultiIndex columns if present (yfinance update)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            # Calculate Indicators
+            # EMA
+            df['EMA20'] = ta.ema(df['Close'], length=20)
         df['EMA50'] = ta.ema(df['Close'], length=50)
         
         # ADX (requires High, Low, Close)
@@ -75,10 +90,11 @@ def fetch_stock_data(symbol: str):
         else:
             df['RSI'] = 50  # Default neutral
             
-        # Update Cache and persist
+        # Update Cache and persist (inside lock)
         CACHE[symbol] = (df, now)
         save_cache(CACHE)
-        return df
+        
+        return df.copy() # Return copy
         
     except Exception as e:
         print(f"Error downloading {symbol}: {e}")

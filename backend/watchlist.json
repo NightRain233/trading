@@ -3,14 +3,32 @@
     "id": "ce5f655d-2f33-4bfc-a88c-0dbdcf209929",
     "name": "默认分组",
     "symbols": [
-      "AAPL",
+      "SPY",
+      "QQQ",
+      "BTC-USD",
+      "GC=F",
+      "513910.SS",
+      "HSTECH.HK",
+      "515070.SS"
+    ],
+    "collapsed": false
+  },
+  {
+    "id": "4c9ce74a-fe1e-4aa8-856e-887b8f3cdde4",
+    "name": "加密货币",
+    "symbols": [
+      "ETH-USD"
+    ],
+    "collapsed": false
+  },
+  {
+    "id": "bff17355-a706-432f-a57c-3c6b6a08d615",
+    "name": "美股",
+    "symbols": [
+      "GOOGL",
       "NVDA",
       "TSLA",
-      "GOOGL",
-      "BTC-USD",
-      "ETH-USD",
-      "GC=F",
-      "513910.SS"
+      "AAPL"
     ],
     "collapsed": false
   }

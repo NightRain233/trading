@@ -28,7 +28,8 @@ export interface WatchlistGroup {
   id: string;
   name: string;
   collapsed: boolean;
-  stocks: StockData[];
+  symbols: string[]; // Changed from stocks: StockData[]
+  stocks?: StockData[]; // Optional, populated after fetching
 }
 
 export type Timeframe = '1D' | '4H';
