@@ -3,13 +3,30 @@
     "id": "ce5f655d-2f33-4bfc-a88c-0dbdcf209929",
     "name": "默认分组",
     "symbols": [
-      "SPY",
-      "QQQ",
-      "BTC-USD",
-      "GC=F",
-      "513910.SS",
-      "HSTECH.HK",
-      "515070.SS"
+      {
+        "symbol": "SPY",
+        "alias": ""
+      },
+      {
+        "symbol": "QQQ",
+        "alias": ""
+      },
+      {
+        "symbol": "BTC-USD",
+        "alias": ""
+      },
+      {
+        "symbol": "GC=F",
+        "alias": "黄金期货"
+      },
+      {
+        "symbol": "512890.SS",
+        "alias": "红利低波"
+      },
+      {
+        "symbol": "513910.SS",
+        "alias": "港股央企红利"
+      }
     ],
     "collapsed": false
   },
@@ -17,7 +34,10 @@
     "id": "4c9ce74a-fe1e-4aa8-856e-887b8f3cdde4",
     "name": "加密货币",
     "symbols": [
-      "ETH-USD"
+      {
+        "symbol": "ETH-USD",
+        "alias": ""
+      }
     ],
     "collapsed": false
   },
@@ -25,10 +45,56 @@
     "id": "bff17355-a706-432f-a57c-3c6b6a08d615",
     "name": "美股",
     "symbols": [
-      "GOOGL",
-      "NVDA",
-      "TSLA",
-      "AAPL"
+      {
+        "symbol": "GOOGL",
+        "alias": ""
+      },
+      {
+        "symbol": "NVDA",
+        "alias": ""
+      },
+      {
+        "symbol": "TSLA",
+        "alias": ""
+      },
+      {
+        "symbol": "AAPL",
+        "alias": ""
+      }
+    ],
+    "collapsed": true
+  },
+  {
+    "id": "70e70f4d-03d1-4ce4-b53f-5cbdbefda51d",
+    "name": "A股",
+    "symbols": [
+      {
+        "symbol": "601288.SS",
+        "alias": "农业银行"
+      },
+      {
+        "symbol": "515070.SS",
+        "alias": "AI ETF"
+      },
+      {
+        "symbol": "159967.SZ",
+        "alias": "创成长"
+      },
+      {
+        "symbol": "159553.SZ",
+        "alias": "中证 2000 增强"
+      }
+    ],
+    "collapsed": false
+  },
+  {
+    "id": "fd9d1b9c-f09c-4526-86a1-1f4007748021",
+    "name": "港股",
+    "symbols": [
+      {
+        "symbol": "513010.SS",
+        "alias": "恒生科技"
+      }
     ],
     "collapsed": false
   }

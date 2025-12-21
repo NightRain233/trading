@@ -1,4 +1,4 @@
-import type { StockData, WatchlistGroup } from './types';
+import type { StockData, WatchlistGroup, WatchlistItem } from './types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -24,12 +24,12 @@ export async function fetchWatchlist(): Promise<WatchlistGroup[]> {
   }
 }
 
-export async function addTicker(symbol: string, groupId?: string): Promise<boolean> {
+export async function addTicker(symbol: string, groupId?: string, alias?: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/watchlist`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol, groupId })
+      body: JSON.stringify({ symbol, groupId, alias })
     });
     return response.ok;
   } catch (error) {
@@ -65,7 +65,7 @@ export async function createGroup(name: string): Promise<WatchlistGroup | null> 
   }
 }
 
-export async function updateWatchlist(groups: { id: string; name: string; symbols: string[]; collapsed: boolean }[]): Promise<boolean> {
+export async function updateWatchlist(groups: { id: string; name: string; symbols: WatchlistItem[]; collapsed: boolean }[]): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/watchlist`, {
       method: 'PUT',
@@ -75,6 +75,20 @@ export async function updateWatchlist(groups: { id: string; name: string; symbol
     return response.ok;
   } catch (error) {
     console.error(`Error updating watchlist:`, error);
+    return false;
+  }
+}
+
+export async function updateAlias(symbol: string, alias: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/watchlist/${symbol}/alias`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alias })
+    });
+    return response.ok;
+  } catch (error) {
+    console.error(`Error updating alias for ${symbol}:`, error);
     return false;
   }
 }

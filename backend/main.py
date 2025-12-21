@@ -20,31 +20,57 @@ app.add_middleware(
 
 WATCHLIST_FILE = "watchlist.json"
 
+class UpdateAliasRequest(BaseModel):
+    alias: str
+
 def load_watchlist():
     """Load watchlist with migration support for legacy format."""
     if not os.path.exists(WATCHLIST_FILE):
-        # Return default group structure
         return [{"id": str(uuid.uuid4()), "name": "默认分组", "symbols": [], "collapsed": False}]
     
     with open(WATCHLIST_FILE, "r") as f:
         data = json.load(f)
     
-    # Migration: if data is a flat list (old format), convert to group format
-    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], str):
-        migrated = [{
+    # Validation & Migration
+    migrated = False
+    
+    # 1. Root level list -> Default Group
+    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], (str, dict)) and "id" not in data[0]:
+         # It's an old raw list of symbols, convert to group
+         data = [{
             "id": str(uuid.uuid4()),
             "name": "默认分组",
             "symbols": data,
             "collapsed": False
         }]
-        save_watchlist(migrated)
-        return migrated
+         migrated = True
+
+    # 2. String symbols -> Object symbols
+    for group in data:
+        new_symbols = []
+        for item in group.get("symbols", []):
+            if isinstance(item, str):
+                new_symbols.append({"symbol": item, "alias": ""})
+                migrated = True
+            elif isinstance(item, dict) and "symbol" in item:
+                if "alias" not in item:
+                    item["alias"] = ""
+                    migrated = True
+                new_symbols.append(item)
+        group["symbols"] = new_symbols
     
+    if migrated:
+        save_watchlist(data)
+        
     return data
 
 def save_watchlist(watchlist):
     with open(WATCHLIST_FILE, "w") as f:
         json.dump(watchlist, f, indent=2, ensure_ascii=False)
+
+class SymbolItem(BaseModel):
+    symbol: str
+    alias: Optional[str] = ""
 
 class StockResponse(BaseModel):
     symbol: str
@@ -58,16 +84,18 @@ class StockResponse(BaseModel):
     trend: str
     signal: str
     candles: List[dict]
+    alias: Optional[str] = ""  # Added alias capability
 
 class Group(BaseModel):
     id: str
     name: str
-    symbols: List[str]
+    symbols: List[SymbolItem] # Changed from List[str]
     collapsed: bool = False
 
 class AddStockRequest(BaseModel):
     symbol: str
     groupId: Optional[str] = None
+    alias: Optional[str] = ""
 
 class CreateGroupRequest(BaseModel):
     name: str
@@ -90,16 +118,7 @@ def get_quote(symbol: str):
 def get_watchlist():
     """Returns watchlist structure (groups and symbols) without detailed analysis."""
     groups = load_watchlist()
-    # Ensure structure consistency
-    result = []
-    for group in groups:
-        result.append({
-            "id": group["id"],
-            "name": group["name"],
-            "collapsed": group.get("collapsed", False),
-            "symbols": group.get("symbols", [])
-        })
-    return result
+    return groups
 
 @app.post("/api/watchlist")
 def add_to_watchlist(request: AddStockRequest):
@@ -125,10 +144,14 @@ def add_to_watchlist(request: AddStockRequest):
     
     # Check if already exists in any group
     for g in groups:
-        if symbol in g["symbols"]:
-            return {"message": "Symbol already in watchlist"}
+        for s in g["symbols"]:
+            if s["symbol"] == symbol:
+                return {"message": "Symbol already in watchlist"}
     
-    target_group["symbols"].append(symbol)
+    target_group["symbols"].append({
+        "symbol": symbol,
+        "alias": request.alias or ""
+    })
     save_watchlist(groups)
     return {"message": "Symbol added"}
 
@@ -140,8 +163,10 @@ def remove_from_watchlist(symbol: str):
     
     found = False
     for g in groups:
-        if symbol in g["symbols"]:
-            g["symbols"].remove(symbol)
+        # Filter out the symbol (checking s['symbol'] since s is now a dict)
+        original_len = len(g["symbols"])
+        g["symbols"] = [s for s in g["symbols"] if s["symbol"] != symbol]
+        if len(g["symbols"]) < original_len:
             found = True
     
     if found:
@@ -149,6 +174,26 @@ def remove_from_watchlist(symbol: str):
         return {"message": "Symbol removed"}
     
     raise HTTPException(status_code=404, detail="Symbol not found in watchlist")
+
+@app.put("/api/watchlist/{symbol}/alias")
+def update_alias(symbol: str, request: UpdateAliasRequest):
+    """Update alias for a specific symbol."""
+    symbol = symbol.strip().upper()
+    groups = load_watchlist()
+    found = False
+    
+    for g in groups:
+        for s in g["symbols"]:
+            if s["symbol"] == symbol:
+                s["alias"] = request.alias
+                found = True
+                # Break inner loop, but keep checking if symbol exists in multiple groups (though usually unique)
+    
+    if found:
+        save_watchlist(groups)
+        return {"message": "Alias updated"}
+        
+    raise HTTPException(status_code=404, detail="Symbol not found")
 
 @app.post("/api/groups")
 def create_group(request: CreateGroupRequest):

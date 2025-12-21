@@ -22,13 +22,19 @@ export interface StockData {
   // Computed statuses
   trend: '强势多头' | '回调多头' | '潜在转空' | '强势空头' | '反弹空头' | '潜在转多' | '震荡';
   signal: '强烈信号' | '谨慎信号' | '观望' | 'WAIT';
+  alias?: string;
+}
+
+export interface WatchlistItem {
+  symbol: string;
+  alias?: string;
 }
 
 export interface WatchlistGroup {
   id: string;
   name: string;
   collapsed: boolean;
-  symbols: string[]; // Changed from stocks: StockData[]
+  symbols: WatchlistItem[]; 
   stocks?: StockData[]; // Optional, populated after fetching
 }
 

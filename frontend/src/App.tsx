@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { fetchWatchlist, fetchStockData, addTicker, removeTicker, createGroup, updateWatchlist } from './utils';
+import { fetchWatchlist, fetchStockData, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, WatchlistGroup } from './types';
 import { ChartModal } from './components/ChartModal';
 import { StatusBadge } from './components/StatusBadge';
-import { RefreshCw, TrendingUp, Search, Plus, Trash2, FolderPlus, GripVertical, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, TrendingUp, Search, Plus, Trash2, FolderPlus, GripVertical, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
   DndContext,
@@ -27,11 +27,13 @@ import { CSS } from '@dnd-kit/utilities';
 function SortableStockRow({ 
   stock, 
   onStockClick, 
-  onRemoveStock 
+  onRemoveStock,
+  onEditAlias
 }: { 
   stock: StockData; 
   onStockClick: (stock: StockData) => void;
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
+  onEditAlias: (stock: StockData) => void;
 }) {
   const {
     attributes,
@@ -65,7 +67,22 @@ function SortableStockRow({
       </div>
 
       <div className="col-span-4 sm:col-span-2 pl-4">
-        <div className="font-bold text-white group-hover:text-emerald-400 transition-colors">{stock.symbol}</div>
+        <div className="flex items-center gap-1 group/title">
+          <div className="font-bold text-white group-hover:text-emerald-400 transition-colors truncate">
+            {stock.alias || stock.symbol}
+            {stock.alias && <span className="ml-1 text-xs text-zinc-500 font-normal">({stock.symbol})</span>}
+          </div>
+          <button 
+            className="opacity-0 group-hover/title:opacity-100 p-0.5 text-zinc-600 hover:text-zinc-300 transition-opacity"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditAlias(stock);
+            }}
+            title="Edit Alias"
+          >
+            <Pencil size={12} />
+          </button>
+        </div>
         <div className="text-xs text-zinc-500 truncate">{stock.name}</div>
       </div>
       
@@ -136,11 +153,13 @@ function SortableGroup({
   onToggleCollapse,
   onStockClick,
   onRemoveStock,
+  onEditAlias
 }: {
   group: WatchlistGroup;
   onToggleCollapse: (groupId: string) => void;
   onStockClick: (stock: StockData) => void;
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
+  onEditAlias: (stock: StockData) => void;
 }) {
   const {
     attributes,
@@ -173,26 +192,27 @@ function SortableGroup({
             <ChevronDown className="text-zinc-400" size={18} />
           )}
           <span className="font-medium text-zinc-200">{group.name}</span>
-          <span className="text-xs text-zinc-500 ml-2">({group.stocks.length})</span>
+          <span className="text-xs text-zinc-500 ml-2">({group.stocks?.length || 0})</span>
         </div>
       </div>
       
       {/* Stocks List */}
       {!group.collapsed && (
         <div className="border border-t-0 border-zinc-700/50 rounded-b-lg overflow-hidden">
-          {group.stocks.length === 0 ? (
+          {group.stocks?.length === 0 ? (
             <div className="p-4 text-center text-zinc-600 text-sm">
               拖拽股票到此分组
             </div>
           ) : (
-            <SortableContext items={group.stocks.map(s => s.symbol)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={group.stocks?.map(s => s.symbol) || []} strategy={verticalListSortingStrategy}>
               <div className="divide-y divide-zinc-800/50">
-                {group.stocks.map(stock => (
+                {group.stocks?.map(stock => (
                   <SortableStockRow 
                     key={stock.symbol} 
                     stock={stock} 
                     onStockClick={onStockClick}
                     onRemoveStock={onRemoveStock}
+                    onEditAlias={onEditAlias}
                   />
                 ))}
               </div>
@@ -214,6 +234,28 @@ function App() {
   const [showNewGroupInput, setShowNewGroupInput] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
 
+  // Alias Editing State
+  const [aliasModalOpen, setAliasModalOpen] = useState(false);
+  const [editingAliasStock, setEditingAliasStock] = useState<StockData | null>(null);
+  const [aliasInput, setAliasInput] = useState('');
+
+  const handleEditAlias = async () => {
+    if (!editingAliasStock) return;
+    const success = await updateAlias(editingAliasStock.symbol, aliasInput);
+    if (success) {
+      setAliasModalOpen(false);
+      loadData(); // Refresh to show new alias
+    } else {
+      alert('Failed to update alias');
+    }
+  };
+
+  const openAliasModal = (stock: StockData) => {
+    setEditingAliasStock(stock);
+    setAliasInput(stock.alias || '');
+    setAliasModalOpen(true);
+  };
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -231,8 +273,15 @@ function App() {
       
       // 2. Collect unique symbols
       const uniqueSymbols = new Set<string>();
+      const aliasMap = new Map<string, string>(); // symbol -> alias
+      
       groupsData.forEach(g => {
-        g.symbols.forEach(s => uniqueSymbols.add(s));
+        g.symbols.forEach(s => {
+          uniqueSymbols.add(s.symbol);
+          if (s.alias) {
+            aliasMap.set(s.symbol, s.alias);
+          }
+        });
       });
 
       // 3. Fetch stock details in parallel
@@ -240,6 +289,10 @@ function App() {
       const promises = Array.from(uniqueSymbols).map(async (symbol) => {
         const data = await fetchStockData(symbol);
         if (data) {
+          // Merge alias if exists
+          if (aliasMap.has(symbol)) {
+            data.alias = aliasMap.get(symbol);
+          }
           stockMap.set(symbol, data);
         }
       });
@@ -250,7 +303,7 @@ function App() {
       const populatedGroups = groupsData.map(g => ({
         ...g,
         stocks: g.symbols
-          .map(sym => stockMap.get(sym))
+          .map(symObj => stockMap.get(symObj.symbol))
           .filter((s): s is StockData => s !== undefined)
       }));
 
@@ -334,7 +387,7 @@ function App() {
         await updateWatchlist(newGroups.map(g => ({
           id: g.id,
           name: g.name,
-          symbols: g.stocks.map(s => s.symbol),
+          symbols: g.stocks.map(s => ({ symbol: s.symbol, alias: s.alias })),
           collapsed: g.collapsed
         })));
       }
@@ -384,7 +437,7 @@ function App() {
       await updateWatchlist(newGroups.map(g => ({
         id: g.id,
         name: g.name,
-        symbols: g.stocks.map(s => s.symbol),
+        symbols: g.stocks.map(s => ({ symbol: s.symbol, alias: s.alias })),
         collapsed: g.collapsed
       })));
     }
@@ -492,6 +545,38 @@ function App() {
           </div>
         </div>
       )}
+      
+      {/* Alias Edit Modal */}
+      {aliasModalOpen && editingAliasStock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-80">
+            <h3 className="text-lg font-bold mb-4">Edit Alias ({editingAliasStock.symbol})</h3>
+            <input 
+              type="text" 
+              placeholder="Enter alias..." 
+              value={aliasInput}
+              onChange={e => setAliasInput(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:border-emerald-500/50"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleEditAlias()}
+            />
+            <div className="flex gap-2 justify-end">
+              <button 
+                onClick={() => setAliasModalOpen(false)}
+                className="px-4 py-2 text-sm text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleEditAlias}
+                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
@@ -520,6 +605,7 @@ function App() {
                 onToggleCollapse={handleToggleCollapse}
                 onStockClick={setSelectedStock}
                 onRemoveStock={handleRemoveStock}
+                onEditAlias={openAliasModal}
               />
             ))}
           </SortableContext>
