@@ -129,9 +129,27 @@ function SortableStockRow({
       </div>
 
       <div className="col-span-2 hidden sm:block text-right">
-        <span className={clsx("font-mono text-sm", stock.adx > 25 ? "text-zinc-200" : "text-zinc-600")}>
-          {stock.adx.toFixed(2)}
-        </span>
+        {stock.weeklyMacdStatus ? (
+          <div className="flex flex-col items-end leading-tight">
+            <span className={clsx(
+              "text-xs font-bold",
+              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" : 
+              stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
+              stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
+              "text-rose-400"
+            )}>
+              {stock.weeklyMacdStatus}
+            </span>
+            <span className={clsx(
+              "text-[10px]",
+              stock.weeklyPriceVsMA5 === '线上' ? "text-emerald-500/80" : "text-rose-500/80"
+            )}>
+              5W{stock.weeklyPriceVsMA5}
+            </span>
+          </div>
+        ) : (
+          <span className="text-zinc-600 text-xs">-</span>
+        )}
       </div>
 
       {/* Delete Action */}
@@ -233,12 +251,18 @@ function App() {
   const [newGroupName, setNewGroupName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showNewGroupInput, setShowNewGroupInput] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
-
   // Alias Editing State
   const [aliasModalOpen, setAliasModalOpen] = useState(false);
   const [editingAliasStock, setEditingAliasStock] = useState<StockData | null>(null);
   const [aliasInput, setAliasInput] = useState('');
+  
+  // Sorting and Filtering State
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof StockData | 'weeklyStatus'; 
+    direction: 'asc' | 'desc' | null 
+  }>({ key: 'price', direction: null });
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
 
   const handleEditAlias = async () => {
     if (!editingAliasStock) return;
@@ -444,15 +468,63 @@ function App() {
     }
   };
 
-  const filteredGroups = groups.map(g => ({
-    ...g,
-    stocks: searchTerm 
-      ? g.stocks.filter(s => 
-          s.symbol.toLowerCase().includes(searchTerm.toLowerCase()) || 
-          s.name.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-      : g.stocks
-  }));
+  const filteredGroups = groups.map(g => {
+    let stocks = [...(g.stocks || [])];
+    
+    // 1. Text Search
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      stocks = stocks.filter(s => 
+        s.symbol.toLowerCase().includes(term) || 
+        s.name.toLowerCase().includes(term)
+      );
+    }
+    
+    // 2. Status Filters
+    if (activeFilters.length > 0) {
+      stocks = stocks.filter(s => 
+        s.weeklyMacdStatus && activeFilters.includes(s.weeklyMacdStatus)
+      );
+    }
+    
+    // 3. Sorting
+    if (sortConfig.direction && sortConfig.key) {
+      stocks.sort((a, b) => {
+        let valA: any = a[sortConfig.key as keyof StockData];
+        let valB: any = b[sortConfig.key as keyof StockData];
+
+        // Special handling for nested or derived keys
+        if (sortConfig.key === 'weeklyStatus') {
+          valA = a.weeklyMacdStatus || '';
+          valB = b.weeklyMacdStatus || '';
+        }
+
+        if (valA === undefined || valA === null) return 1;
+        if (valB === undefined || valB === null) return -1;
+
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return { ...g, stocks };
+  });
+
+  const toggleSort = (key: any) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key 
+        ? (prev.direction === 'asc' ? 'desc' : prev.direction === 'desc' ? null : 'asc')
+        : 'asc'
+    }));
+  };
+
+  const toggleFilter = (filter: string) => {
+    setActiveFilters(prev => 
+      prev.includes(filter) ? prev.filter(f => f !== filter) : [...prev, filter]
+    );
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
@@ -502,6 +574,18 @@ function App() {
                 className="bg-zinc-900 border border-zinc-700 rounded-full pl-10 pr-4 py-1.5 text-sm focus:outline-none focus:border-emerald-500/50 w-40"
               />
             </div>
+
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className={clsx(
+                "p-2 rounded-lg transition-colors border",
+                activeFilters.length > 0 ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white"
+              )}
+              title="Filter by Weekly Status"
+            >
+              <Search size={16} className={clsx(showFilters && "rotate-90")} style={{ transition: 'transform 0.2s' }} />
+            </button>
+
             <button 
               onClick={handleRefresh}
               className={clsx(
@@ -581,14 +665,56 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
+        
+        {/* Filter Toolbar */}
+        {showFilters && (
+          <div className="mb-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2">
+            <span className="text-xs text-zinc-500 w-full mb-1">筛选周线状态:</span>
+            {['周线牛市', '周线反弹', '周线回调', '周线熊市'].map(f => (
+              <button
+                key={f}
+                onClick={() => toggleFilter(f)}
+                className={clsx(
+                  "px-3 py-1 rounded-full text-xs font-medium transition-all",
+                  activeFilters.includes(f) 
+                    ? "bg-emerald-500 text-white" 
+                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                )}
+              >
+                {f}
+              </button>
+            ))}
+            {activeFilters.length > 0 && (
+              <button 
+                onClick={() => setActiveFilters([])}
+                className="px-3 py-1 text-xs text-rose-400 hover:text-rose-300"
+              >
+                清除全部
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Column Headers */}
-        <div className="grid grid-cols-12 gap-4 px-4 pb-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-          <div className="col-span-4 sm:col-span-2 pl-4">Symbol</div>
-          <div className="col-span-3 sm:col-span-2 text-right">Price</div>
-          <div className="col-span-3 sm:col-span-2 text-right">Trend</div>
-          <div className="col-span-2 hidden sm:block text-right">Signal</div>
-          <div className="col-span-2 hidden sm:block text-right">RSI</div>
-          <div className="col-span-2 hidden sm:block text-right">ADX</div>
+        <div className="grid grid-cols-12 gap-4 px-4 pb-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider select-none">
+          <div className="col-span-4 sm:col-span-2 pl-4 cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('symbol')}>
+            Symbol {sortConfig.key === 'symbol' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
+          <div className="col-span-3 sm:col-span-2 text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('price')}>
+            Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
+          <div className="col-span-3 sm:col-span-2 text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('trend')}>
+            Trend {sortConfig.key === 'trend' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
+          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('signal')}>
+            Signal {sortConfig.key === 'signal' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
+          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('rsi')}>
+            RSI {sortConfig.key === 'rsi' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
+          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('weeklyStatus')}>
+            Weekly {sortConfig.key === 'weeklyStatus' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+          </div>
         </div>
 
         {/* Groups with Drag and Drop */}

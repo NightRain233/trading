@@ -1,2 +1,3 @@
 backend/__pycache__/analysis.cpython-312.pyc
 backend/cache.pkl
+backend/data/

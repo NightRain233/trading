@@ -8,103 +8,160 @@ import os
 
 import threading
 
-# Thread lock for thread safety with yfinance/pandas
-data_lock = threading.Lock()
 
-# File-based cache
-CACHE_FILE = "cache.pkl"
-CACHE_DURATION_SECONDS = 60*60 # 1 hour
+from collections import defaultdict
 
-def load_cache():
-    """Load cache from disk."""
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "rb") as f:
-                return pickle.load(f)
-        except Exception as e:
-            print(f"Error loading cache: {e}")
-    return {}
+# Fine-grained locks: one lock per symbol for indicator calculation
+symbol_locks = defaultdict(threading.Lock)
+# Global lock for yfinance downloads to prevent thread-safety issues with shared sessions
+global_download_lock = threading.Lock()
 
-def save_cache(cache):
-    """Save cache to disk."""
-    try:
-        with open(CACHE_FILE, "wb") as f:
-            pickle.dump(cache, f)
-    except Exception as e:
-        print(f"Error saving cache: {e}")
+def get_symbol_lock(symbol: str):
+    return symbol_locks[symbol.upper()]
 
-# Initialize cache from file
-CACHE = load_cache()
+DATA_DIR = "data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+CACHE_DURATION_SECONDS = 60 * 60  # 1 hour
 
 def fetch_stock_data(symbol: str):
-    global CACHE
-    now = time.time()
+    symbol = symbol.upper()
+    file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+    now = datetime.now()
     
-    # Check cache (thread-safe read)
-    with data_lock:
-        if symbol in CACHE:
-            data, timestamp = CACHE[symbol]
-            if now - timestamp < CACHE_DURATION_SECONDS:
-                return data.copy() # Return copy to avoid mutation issues
-
-    # Fetch 6 months of data to ensure enough for EMA50 + ADX + RSI
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=200)
-    
-    try:
-        # yfinance download is not fully thread-safe for some internal pandas operations
-        # Adding lock around fetch and calculation to be safe
-        with data_lock:
-             # Re-check cache inside lock in case another thread populated it
-            if symbol in CACHE:
-                data, timestamp = CACHE[symbol]
-                if now - timestamp < CACHE_DURATION_SECONDS:
-                    return data.copy()
-
-            df = yf.download(symbol, start=start_date, end=end_date, interval="1d", progress=False)
-            
-            if df.empty:
-                return None
-
-            # Fix MultiIndex columns if present (yfinance update)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-
-            # Calculate Indicators
-            # EMA
-            df['EMA20'] = ta.ema(df['Close'], length=20)
-            df['EMA50'] = ta.ema(df['Close'], length=50)
-            
-            # ADX (requires High, Low, Close)
-            adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-            if adx_df is not None and not adx_df.empty:
-                df = df.join(adx_df)
-                df['ADX'] = df['ADX_14']
-            else:
-                df['ADX'] = 0
-            
-            # Calculate multiple RSI periods
-            df['RSI_7'] = ta.rsi(df['Close'], length=7)
-            df['RSI_14'] = ta.rsi(df['Close'], length=14)
-            df['RSI_21'] = ta.rsi(df['Close'], length=21)
-            
-            # Default fallback
-            for period in [7, 14, 21]:
-                if f'RSI_{period}' not in df.columns or df[f'RSI_{period}'].isnull().all():
-                    df[f'RSI_{period}'] = 50
-            
-            # Update Cache and persist (inside lock)
-            CACHE[symbol] = (df, now)
-            save_cache(CACHE)
-            
-            return df.copy() # Return copy
+    # 使用 symbol-specific lock 确保只有一个线程计算指标
+    # 原因：这是由于 yfinance 库内部在进行大规模并发下载时，共享了底层的网络会话和状态
+    # 所以需要加锁来避免一个请求的结果被错误地返回给了另一个
+    with get_symbol_lock(symbol):
+        df_local = None
+        last_update = None
         
-    except Exception as e:
-        print(f"Error downloading {symbol}: {e}")
-        return None
+        # 1. Try to load local data
+        if os.path.exists(file_path):
+            try:
+                df_local = pd.read_parquet(file_path)
+                if not df_local.empty:
+                    if not isinstance(df_local.index, pd.DatetimeIndex):
+                        df_local.index = pd.to_datetime(df_local.index)
+                    # Strip timezone if present
+                    if df_local.index.tz is not None:
+                        df_local.index = df_local.index.tz_localize(None)
+                    last_update = df_local.index[-1]
+            except Exception as e:
+                print(f"Error reading parquet for {symbol}: {e}")
+                df_local = None
+
+        # 2. Check if we need to fetch new data
+        needs_fetch = True
+        if df_local is not None and last_update is not None:
+            file_mod_time = os.path.getmtime(file_path)
+            if time.time() - file_mod_time < CACHE_DURATION_SECONDS:
+                needs_fetch = False
+        
+        if needs_fetch:
+            try:
+                # yf.download is not thread-safe and can return mixed data for different tickers
+                # We use a global lock around the fetch and use Ticker.history for single symbols
+                with global_download_lock:
+                    ticker = yf.Ticker(symbol)
+                    
+                    if df_local is not None and last_update is not None:
+                        # Fetch from last_update
+                        # ticker.history handles dates gracefully
+                        new_df = ticker.history(start=last_update, end=now, interval="1d")
+                    else:
+                        fetch_start = now - timedelta(days=730)
+                        new_df = ticker.history(start=fetch_start, end=now, interval="1d")
+                
+                if not new_df.empty:
+                    # Strip timezone for consistency with now()
+                    if new_df.index.tz is not None:
+                        new_df.index = new_df.index.tz_localize(None)
+                        
+                    # history result has plain index, but let's be safe
+                    if isinstance(new_df.columns, pd.MultiIndex):
+                        new_df.columns = new_df.columns.get_level_values(0)
+                    
+                    # history returns adjusted prices by default
+                    if df_local is not None:
+                        df = pd.concat([df_local, new_df])
+                        df = df[~df.index.duplicated(keep='last')]
+                    else:
+                        df = new_df
+                    
+                    earliest_allowed = now - timedelta(days=730)
+                    df = df[df.index >= earliest_allowed]
+                    
+                    # Ensure basic columns are present (history uses Title Case)
+                    # Check if 'Close' exists, else error
+                    if 'Close' not in df.columns:
+                         # Sometimes it might be 'Close' but within a MultiIndex we didn't flatten?
+                         # Just in case, try to rename if they match
+                         pass
+
+                    df.to_parquet(file_path)
+                else:
+                    df = df_local
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+                df = df_local
+        else:
+            df = df_local
+
+        if df is None or df.empty:
+            return None
+
+        # 3. Calculate Indicators (Always recalculate to ensure freshness/correctness)
+        # Daily Indicators
+        df['EMA20'] = ta.ema(df['Close'], length=20)
+        df['EMA50'] = ta.ema(df['Close'], length=50)
+        
+        adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+        if adx_df is not None and not adx_df.empty:
+            df = df.join(adx_df)
+            df['ADX'] = df['ADX_14']
+        else:
+            df['ADX'] = 0
+            
+        df['RSI_7'] = ta.rsi(df['Close'], length=7)
+        df['RSI_14'] = ta.rsi(df['Close'], length=14)
+        df['RSI_21'] = ta.rsi(df['Close'], length=21)
+        
+        for p in [7, 14, 21]:
+            if f'RSI_{p}' not in df.columns or df[f'RSI_{p}'].isnull().all():
+                df[f'RSI_{p}'] = 50
+
+        # 4. Weekly Indicators
+        # Resample to weekly (W-FRI or just W)
+        df_weekly = df.resample('W').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        })
+        
+        df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
+        macd_w = ta.macd(df_weekly['Close'], fast=12, slow=26, signal=9)
+        if macd_w is not None and not macd_w.empty:
+            df_weekly = df_weekly.join(macd_w)
+            df_weekly['MACD_W'] = df_weekly['MACD_12_26_9']
+            df_weekly['MACD_Signal_W'] = df_weekly['MACDs_12_26_9']
+            df_weekly['MACD_Hist_W'] = df_weekly['MACDh_12_26_9']
+        else:
+            df_weekly['MACD_W'] = 0
+            df_weekly['MACD_Signal_W'] = 0
+            df_weekly['MACD_Hist_W'] = 0
+
+        return df.copy(), df_weekly.copy()
 
 def analyze_stock(symbol: str):
-    df = fetch_stock_data(symbol)
+    data = fetch_stock_data(symbol)
+    if data is None:
+        return None
+    
+    df, df_weekly = data
     if df is None or len(df) < 50:
         return None
         
@@ -116,9 +173,6 @@ def analyze_stock(symbol: str):
     adx = float(last_row['ADX']) if 'ADX' in last_row else 0
     
     # Dynamic RSI Selection Logic
-    # ADX > 30: Strong Trend -> RSI(21) to reduce noise
-    # ADX 20-30: Normal -> RSI(14)
-    # ADX < 20: Chop/Weak -> RSI(7) for sensitivity
     if adx > 30:
         rsi_period = 21
     elif adx < 20:
@@ -129,68 +183,64 @@ def analyze_stock(symbol: str):
     rsi_key = f'RSI_{rsi_period}'
     rsi = float(last_row[rsi_key]) if rsi_key in last_row else 50
     
-    # 第一层：趋势方向过滤（改进版）
+    # Trend Analysis
     trend = "震荡"
+    if ema20 > ema50 * 1.001:
+        if price > ema20: trend = "强势多头"
+        elif price > ema50: trend = "回调多头"
+        else: trend = "潜在转空"
+    elif ema20 < ema50 * 0.999:
+        if price < ema20: trend = "强势空头"
+        elif price < ema50: trend = "反弹空头"
+        else: trend = "潜在转多"
     
-    if ema20 > ema50 * 1.001:  # 加入小幅缓冲，多头环境
-        if price > ema20:  # 强势多头
-            trend = "强势多头"
-        elif price > ema50:  # 回调中多头
-            trend = "回调多头"
-        else:  # 价格跌破EMA50，潜在转空
-            trend = "潜在转空"
-            
-    elif ema20 < ema50 * 0.999:  # 空头环境
-        if price < ema20:  # 强势空头
-            trend = "强势空头"
-        elif price < ema50:  # 反弹中空头
-            trend = "反弹空头"
-        else:  # 价格突破EMA50，潜在转多
-            trend = "潜在转多"
-    else:
-        # EMA20和EMA50接近，震荡区间
-        trend = "震荡"
-    
-    # 第二层：ADX + 趋势强度过滤
+    # Signal Analysis
     signal = "WAIT"
     if adx > 25:
-        if trend in ["强势多头", "强势空头"]:
-            signal = "强烈信号"
-        elif trend in ["回调多头", "反弹空头"]:
-            signal = "谨慎信号"
-        else:
-            signal = "观望"
+        if trend in ["强势多头", "强势空头"]: signal = "强烈信号"
+        elif trend in ["回调多头", "反弹空头"]: signal = "谨慎信号"
+        else: signal = "观望"
     else:
         signal = "观望"
     
-    # 动态RSI阈值判断
+    # RSI Status
     is_uptrend = trend in ["强势多头", "回调多头"]
     is_downtrend = trend in ["强势空头", "反弹空头"]
-    
-    if adx > 25:  # 趋势强
-        if is_uptrend:
-            rsi_overbought = 75
-            rsi_oversold = 45
-        elif is_downtrend:
-            rsi_overbought = 60
-            rsi_oversold = 25
-        else:
-            rsi_overbought = 70
-            rsi_oversold = 30
-    else:  # 震荡市
-        rsi_overbought = 70
-        rsi_oversold = 30
-    
-    # 判断RSI状态
-    if rsi >= rsi_overbought:
-        rsi_status = "超买"
-    elif rsi <= rsi_oversold:
-        rsi_status = "超卖"
+    if adx > 25:
+        if is_uptrend: rsi_overbought, rsi_oversold = 75, 45
+        elif is_downtrend: rsi_overbought, rsi_oversold = 60, 25
+        else: rsi_overbought, rsi_oversold = 70, 30
     else:
-        rsi_status = "中性"
+        rsi_overbought, rsi_oversold = 70, 30
+    
+    if rsi >= rsi_overbought: rsi_status = "超买"
+    elif rsi <= rsi_oversold: rsi_status = "超卖"
+    else: rsi_status = "中性"
         
     change_percent = ((price - df.iloc[-2]['Close']) / df.iloc[-2]['Close']) * 100
     
+    # Weekly Analysis
+    weekly_status = {}
+    if df_weekly is not None and not df_weekly.empty:
+        last_w = df_weekly.iloc[-1]
+        w_macd = float(last_w['MACD_W'])
+        w_signal = float(last_w['MACD_Signal_W'])
+        w_ma5 = float(last_w['MA5_W'])
+        
+        if w_macd > w_signal:
+            weekly_macd_status = "周线牛市" if w_macd > 0 else "周线反弹"
+        else:
+            weekly_macd_status = "周线回调" if w_macd > 0 else "周线熊市"
+            
+        weekly_price_vs_ma5 = "线上" if price > w_ma5 else "线下"
+        
+        weekly_status = {
+            "weeklyMA5": w_ma5,
+            "weeklyMacdStatus": weekly_macd_status,
+            "weeklyPriceVsMA5": weekly_price_vs_ma5,
+            "weeklyMacdHist": float(last_w['MACD_Hist_W'])
+        }
+
     # Candle data for chart (Last 100 days)
     candles = []
     chart_df = df.tail(100)
@@ -213,10 +263,11 @@ def analyze_stock(symbol: str):
         "adx": adx,
         "rsi": rsi,
         "rsiPeriod": rsi_period,
-        "rsiStatus": rsi_status,  # 超买/超卖/中性
-        "rsiOverbought": rsi_overbought,  # 当前使用的超买阈值
-        "rsiOversold": rsi_oversold,  # 当前使用的超卖阈值
+        "rsiStatus": rsi_status,
+        "rsiOverbought": rsi_overbought,
+        "rsiOversold": rsi_oversold,
         "trend": trend,
         "signal": signal,
-        "candles": candles
+        "candles": candles,
+        **weekly_status
     }

@@ -88,7 +88,12 @@ class StockResponse(BaseModel):
     trend: str
     signal: str
     candles: List[dict]
-    alias: Optional[str] = ""  # Added alias capability
+    alias: Optional[str] = ""
+    # Weekly Indicators
+    weeklyMA5: Optional[float] = None
+    weeklyMacdStatus: Optional[str] = None
+    weeklyPriceVsMA5: Optional[str] = None
+    weeklyMacdHist: Optional[float] = None
 
 class Group(BaseModel):
     id: str

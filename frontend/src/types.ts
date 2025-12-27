@@ -24,6 +24,11 @@ export interface StockData {
   trend: '强势多头' | '回调多头' | '潜在转空' | '强势空头' | '反弹空头' | '潜在转多' | '震荡';
   signal: '强烈信号' | '谨慎信号' | '观望' | 'WAIT';
   alias?: string;
+  // Weekly Indicators
+  weeklyMA5?: number;
+  weeklyMacdStatus?: '周线牛市' | '周线反弹' | '周线回调' | '周线熊市';
+  weeklyPriceVsMA5?: '线上' | '线下';
+  weeklyMacdHist?: number;
 }
 
 export interface WatchlistItem {
