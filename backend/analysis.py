@@ -73,28 +73,31 @@ def fetch_stock_data(symbol: str):
             # Calculate Indicators
             # EMA
             df['EMA20'] = ta.ema(df['Close'], length=20)
-        df['EMA50'] = ta.ema(df['Close'], length=50)
-        
-        # ADX (requires High, Low, Close)
-        adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-        if adx_df is not None and not adx_df.empty:
-             df = df.join(adx_df)
-             df['ADX'] = df['ADX_14']
-        else:
-            df['ADX'] = 0
-        
-        # RSI(14)
-        rsi_series = ta.rsi(df['Close'], length=14)
-        if rsi_series is not None:
-            df['RSI'] = rsi_series
-        else:
-            df['RSI'] = 50  # Default neutral
+            df['EMA50'] = ta.ema(df['Close'], length=50)
             
-        # Update Cache and persist (inside lock)
-        CACHE[symbol] = (df, now)
-        save_cache(CACHE)
-        
-        return df.copy() # Return copy
+            # ADX (requires High, Low, Close)
+            adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+            if adx_df is not None and not adx_df.empty:
+                df = df.join(adx_df)
+                df['ADX'] = df['ADX_14']
+            else:
+                df['ADX'] = 0
+            
+            # Calculate multiple RSI periods
+            df['RSI_7'] = ta.rsi(df['Close'], length=7)
+            df['RSI_14'] = ta.rsi(df['Close'], length=14)
+            df['RSI_21'] = ta.rsi(df['Close'], length=21)
+            
+            # Default fallback
+            for period in [7, 14, 21]:
+                if f'RSI_{period}' not in df.columns or df[f'RSI_{period}'].isnull().all():
+                    df[f'RSI_{period}'] = 50
+            
+            # Update Cache and persist (inside lock)
+            CACHE[symbol] = (df, now)
+            save_cache(CACHE)
+            
+            return df.copy() # Return copy
         
     except Exception as e:
         print(f"Error downloading {symbol}: {e}")
@@ -111,7 +114,20 @@ def analyze_stock(symbol: str):
     ema20 = float(last_row['EMA20'])
     ema50 = float(last_row['EMA50'])
     adx = float(last_row['ADX']) if 'ADX' in last_row else 0
-    rsi = float(last_row['RSI']) if 'RSI' in last_row else 50
+    
+    # Dynamic RSI Selection Logic
+    # ADX > 30: Strong Trend -> RSI(21) to reduce noise
+    # ADX 20-30: Normal -> RSI(14)
+    # ADX < 20: Chop/Weak -> RSI(7) for sensitivity
+    if adx > 30:
+        rsi_period = 21
+    elif adx < 20:
+        rsi_period = 7
+    else:
+        rsi_period = 14
+        
+    rsi_key = f'RSI_{rsi_period}'
+    rsi = float(last_row[rsi_key]) if rsi_key in last_row else 50
     
     # 第一层：趋势方向过滤（改进版）
     trend = "震荡"
@@ -196,6 +212,7 @@ def analyze_stock(symbol: str):
         "ema50": ema50,
         "adx": adx,
         "rsi": rsi,
+        "rsiPeriod": rsi_period,
         "rsiStatus": rsi_status,  # 超买/超卖/中性
         "rsiOverbought": rsi_overbought,  # 当前使用的超买阈值
         "rsiOversold": rsi_oversold,  # 当前使用的超卖阈值

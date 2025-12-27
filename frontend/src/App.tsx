@@ -121,6 +121,7 @@ function SortableStockRow({
           title={`阈值: ${stock.rsiOversold || '?'}-${stock.rsiOverbought || '?'}`}
         >
           {stock.rsi?.toFixed(1) || 'N/A'}
+          <span className="ml-1 text-[10px] text-zinc-600">({stock.rsiPeriod || 14})</span>
           {stock.rsiStatus && stock.rsiStatus !== '中性' && (
             <span className="ml-1 text-xs opacity-75">{stock.rsiStatus}</span>
           )}

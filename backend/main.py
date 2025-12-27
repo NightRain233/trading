@@ -81,6 +81,10 @@ class StockResponse(BaseModel):
     ema50: float
     adx: float
     rsi: float
+    rsiPeriod: int
+    rsiStatus: str
+    rsiOverbought: float
+    rsiOversold: float
     trend: str
     signal: str
     candles: List[dict]

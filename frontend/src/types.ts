@@ -16,6 +16,7 @@ export interface StockData {
   ema50: number;
   adx: number;
   rsi: number;
+  rsiPeriod: number; // Dynamic period
   rsiStatus: '超买' | '超卖' | '中性';
   rsiOverbought: number;
   rsiOversold: number;
