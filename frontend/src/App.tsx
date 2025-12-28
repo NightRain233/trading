@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { fetchWatchlist, fetchStockData, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, WatchlistGroup } from './types';
 import { ChartModal } from './components/ChartModal';
@@ -54,46 +54,78 @@ function SortableStockRow({
     <div 
       ref={setNodeRef}
       style={style}
-      className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-zinc-800/50 transition-colors cursor-pointer group relative bg-zinc-900/30"
+      className="flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:gap-4 p-4 items-start sm:items-center hover:bg-zinc-800/50 transition-colors cursor-pointer group relative bg-zinc-900/30 border-b border-zinc-800/30 sm:border-none"
       onClick={() => onStockClick(stock)}
     >
-      {/* Drag Handle */}
+      {/* Drag Handle - Hidden on very small screens or repositioned */}
       <div 
-        className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab"
+        className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 sm:block hidden cursor-grab"
         {...attributes}
         {...listeners}
       >
         <GripVertical className="text-zinc-600" size={14} />
       </div>
 
-      <div className="col-span-4 sm:col-span-2 pl-4">
-        <div className="flex items-center gap-1 group/title">
-          <div className="font-bold text-white group-hover:text-emerald-400 transition-colors truncate">
-            {stock.alias || stock.symbol}
-            {stock.alias && <span className="ml-1 text-xs text-zinc-500 font-normal">({stock.symbol})</span>}
+      <div className="flex items-center justify-between w-full sm:col-span-2 sm:pl-4">
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-1 group/title">
+            <div className="font-bold text-white group-hover:text-emerald-400 transition-colors truncate">
+              {stock.alias || stock.symbol}
+              {stock.alias && <span className="ml-1 text-[10px] text-zinc-500 font-normal">({stock.symbol})</span>}
+            </div>
+            <button 
+              className="opacity-0 group-hover/title:opacity-100 p-0.5 text-zinc-600 hover:text-zinc-300 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditAlias(stock);
+              }}
+              title="Edit Alias"
+            >
+              <Pencil size={12} />
+            </button>
           </div>
-          <button 
-            className="opacity-0 group-hover/title:opacity-100 p-0.5 text-zinc-600 hover:text-zinc-300 transition-opacity"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditAlias(stock);
-            }}
-            title="Edit Alias"
-          >
-            <Pencil size={12} />
-          </button>
+          <div className="text-[10px] sm:text-xs text-zinc-500 truncate max-w-[120px] sm:max-w-none">{stock.name}</div>
         </div>
-        <div className="text-xs text-zinc-500 truncate">{stock.name}</div>
+
+        {/* Mobile Price Display */}
+        <div className="sm:hidden text-right leading-tight">
+          <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
+          <div className={clsx("text-[10px] font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+            {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+          </div>
+        </div>
       </div>
       
-      <div className="col-span-3 sm:col-span-2 text-right">
-        <div className="font-mono text-zinc-200">${stock.price.toFixed(2)}</div>
-        <div className={clsx("text-xs font-mono", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
-          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+      <div className="hidden sm:block sm:col-span-2 text-right">
+        <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
+        <div className={clsx("text-xs font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+          {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
         </div>
       </div>
 
-      <div className="col-span-3 sm:col-span-2 text-right flex justify-end">
+      {/* Badges/Status Row */}
+      <div className="flex items-center justify-between sm:justify-end w-full sm:col-span-2 gap-2">
+        <div className="sm:hidden flex items-center gap-2">
+          {stock.signal && stock.signal !== '观望' && (
+            <span className={clsx(
+              "px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
+              stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
+            )}>
+              {stock.signal}
+            </span>
+          )}
+          {stock.weeklyMacdStatus && (
+            <span className={clsx(
+              "text-[10px] font-bold whitespace-nowrap",
+              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" : 
+              stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
+              stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
+              "text-rose-400"
+            )}>
+              {stock.weeklyMacdStatus}
+            </span>
+          )}
+        </div>
         <StatusBadge trend={stock.trend} adx={stock.adx} />
       </div>
 
@@ -152,7 +184,7 @@ function SortableStockRow({
         )}
       </div>
 
-      {/* Delete Action */}
+      {/* Delete Action - Floating button on mobile */}
       <div className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center h-full top-0">
         <button 
           onClick={(e) => onRemoveStock(e, stock.symbol)}
@@ -257,6 +289,7 @@ function App() {
   const [aliasInput, setAliasInput] = useState('');
   
   // Sorting and Filtering State
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof StockData | 'weeklyStatus'; 
     direction: 'asc' | 'desc' | null 
@@ -468,48 +501,59 @@ function App() {
     }
   };
 
-  const filteredGroups = groups.map(g => {
-    let stocks = [...(g.stocks || [])];
-    
-    // 1. Text Search
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      stocks = stocks.filter(s => 
-        s.symbol.toLowerCase().includes(term) || 
-        s.name.toLowerCase().includes(term)
-      );
-    }
-    
-    // 2. Status Filters
-    if (activeFilters.length > 0) {
-      stocks = stocks.filter(s => 
-        s.weeklyMacdStatus && activeFilters.includes(s.weeklyMacdStatus)
-      );
-    }
-    
-    // 3. Sorting
-    if (sortConfig.direction && sortConfig.key) {
-      stocks.sort((a, b) => {
-        let valA: any = a[sortConfig.key as keyof StockData];
-        let valB: any = b[sortConfig.key as keyof StockData];
+  const filteredGroups = useMemo(() => {
+    return groups.map(g => {
+      let stocks = [...(g.stocks || [])];
+      
+      // 1. Text Search
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        stocks = stocks.filter(s => 
+          s.symbol.toLowerCase().includes(term) || 
+          s.name.toLowerCase().includes(term)
+        );
+      }
+      
+      // 2. Status Filters
+      if (activeFilters.length > 0) {
+        stocks = stocks.filter(s => 
+          s.weeklyMacdStatus && activeFilters.includes(s.weeklyMacdStatus)
+        );
+      }
+      
+      // 3. Sorting
+      if (sortConfig.direction && sortConfig.key) {
+        stocks.sort((a, b) => {
+          if (!a || !b) return 0;
+          
+          let valA: any = null;
+          let valB: any = null;
 
-        // Special handling for nested or derived keys
-        if (sortConfig.key === 'weeklyStatus') {
-          valA = a.weeklyMacdStatus || '';
-          valB = b.weeklyMacdStatus || '';
-        }
+          if (sortConfig.key === 'weeklyStatus') {
+            valA = a.weeklyMacdStatus || '';
+            valB = b.weeklyMacdStatus || '';
+          } else {
+            valA = (a as any)[sortConfig.key];
+            valB = (b as any)[sortConfig.key];
+          }
 
-        if (valA === undefined || valA === null) return 1;
-        if (valB === undefined || valB === null) return -1;
+          if (valA === undefined || valA === null) return 1;
+          if (valB === undefined || valB === null) return -1;
 
-        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
+          if (typeof valA === 'string' && typeof valB === 'string') {
+            const res = valA.localeCompare(valB);
+            return sortConfig.direction === 'asc' ? res : -res;
+          }
 
-    return { ...g, stocks };
-  });
+          if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
+        });
+      }
+
+      return { ...g, stocks };
+    });
+  }, [groups, searchTerm, activeFilters, sortConfig]);
 
   const toggleSort = (key: any) => {
     setSortConfig(prev => ({
@@ -530,55 +574,55 @@ function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
       {/* Header */}
       <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
-              <TrendingUp className="text-emerald-400" size={24} />
+        <div className="max-w-6xl mx-auto px-4 py-2 sm:h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="bg-emerald-500/10 p-1.5 sm:p-2 rounded-lg border border-emerald-500/20">
+              <TrendingUp className="text-emerald-400" size={20} />
             </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent hidden sm:block">
+            <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
               TrendMaster
             </h1>
           </div>
           
-          <div className="flex items-center gap-4">
-            <form onSubmit={handleAddStock} className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 justify-end sm:flex-none">
+            <form onSubmit={handleAddStock} className="flex items-center gap-1 sm:gap-2">
               <input 
                 type="text" 
                 placeholder="Add Symbol" 
                 value={newTicker}
                 onChange={e => setNewTicker(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm w-28 sm:w-36 focus:outline-none focus:border-emerald-500/50 uppercase"
+                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm w-20 sm:w-36 focus:outline-none focus:border-emerald-500/50 uppercase"
               />
-              <button type="submit" className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors">
+              <button type="submit" className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors">
                 <Plus size={16} />
               </button>
             </form>
 
             <button 
               onClick={() => setShowNewGroupInput(true)}
-              className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors hidden sm:block"
+              className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
               title="New Group"
             >
               <FolderPlus size={16} />
             </button>
 
-            <div className="w-px h-6 bg-zinc-800 mx-2 hidden sm:block"></div>
+            <div className="w-px h-6 bg-zinc-800 mx-1 hidden sm:block"></div>
 
-            <div className="relative hidden sm:block">
+            <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
               <input 
                 type="text" 
                 placeholder="Search..." 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded-full pl-10 pr-4 py-1.5 text-sm focus:outline-none focus:border-emerald-500/50 w-40"
+                className="bg-zinc-900 border border-zinc-700 rounded-full pl-10 pr-4 py-1.5 text-sm focus:outline-none focus:border-emerald-500/50 w-32 lg:w-40"
               />
             </div>
 
             <button 
               onClick={() => setShowFilters(!showFilters)}
               className={clsx(
-                "p-2 rounded-lg transition-colors border",
+                "p-1.5 sm:p-2 rounded-lg transition-colors border",
                 activeFilters.length > 0 ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white"
               )}
               title="Filter by Weekly Status"
@@ -589,12 +633,12 @@ function App() {
             <button 
               onClick={handleRefresh}
               className={clsx(
-                "p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors",
+                "p-1.5 sm:p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors",
                 loading && "animate-spin"
               )}
               title="Refresh Data"
             >
-              <RefreshCw size={20} />
+              <RefreshCw size={18} sm:size={20} />
             </button>
           </div>
         </div>
@@ -695,8 +739,37 @@ function App() {
           </div>
         )}
 
+        {/* Mobile Sort Tabs */}
+        <div className="flex sm:hidden overflow-x-auto gap-2 pb-4 mb-2 no-scrollbar items-center">
+          <span className="text-[10px] text-zinc-500 whitespace-nowrap mr-1">排序:</span>
+          {[
+            { label: '代码', key: 'symbol' },
+            { label: '价格', key: 'price' },
+            { label: '趋势', key: 'trend' },
+            { label: '信号', key: 'signal' },
+            { label: 'RSI', key: 'rsi' },
+            { label: '周线', key: 'weeklyStatus' },
+          ].map(item => (
+            <button
+              key={item.key}
+              onClick={() => toggleSort(item.key)}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-all flex items-center gap-1",
+                sortConfig.key === item.key 
+                  ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
+                  : "bg-zinc-900 border-zinc-800 text-zinc-500"
+              )}
+            >
+              {item.label}
+              {sortConfig.key === item.key && (
+                <span className="text-[10px] leading-none">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
         {/* Column Headers */}
-        <div className="grid grid-cols-12 gap-4 px-4 pb-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider select-none">
+        <div className="hidden sm:grid grid-cols-12 gap-4 px-4 pb-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider select-none">
           <div className="col-span-4 sm:col-span-2 pl-4 cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('symbol')}>
             Symbol {sortConfig.key === 'symbol' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
           </div>

@@ -26,7 +26,7 @@ export function ChartModal({ stock, onClose }: ChartModalProps) {
         horzLines: { color: '#27272a' },
       },
       width: chartContainerRef.current.clientWidth,
-      height: 400,
+      height: window.innerHeight < 600 ? 300 : 400,
       timeScale: {
         borderColor: '#3f3f46',
       },
@@ -95,34 +95,34 @@ export function ChartModal({ stock, onClose }: ChartModalProps) {
   if (!stock) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-zinc-900 w-full max-w-4xl rounded-xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-zinc-900 w-full max-w-4xl rounded-xl border border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
         {/* Header */}
-        <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
+        <div className="p-3 sm:p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
           <div>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
               {stock.symbol} 
-              <span className="text-zinc-500 text-sm font-normal">{stock.name}</span>
+              <span className="text-zinc-500 text-xs sm:text-sm font-normal truncate max-w-[100px] sm:max-w-none">{stock.name}</span>
             </h2>
-            <div className="flex gap-4 mt-1 text-sm text-zinc-400">
+            <div className="flex gap-4 mt-0.5 sm:mt-1 text-[10px] sm:text-sm text-zinc-400">
                <span className="flex items-center gap-1">
-                 <span className="w-3 h-3 rounded bg-[#06b6d4]"></span> EMA 20
+                 <span className="w-2 sm:w-3 h-2 sm:h-3 rounded bg-[#06b6d4]"></span> EMA 20
                </span>
                <span className="flex items-center gap-1">
-                 <span className="w-3 h-3 rounded bg-[#eab308]"></span> EMA 50
+                 <span className="w-2 sm:w-3 h-2 sm:h-3 rounded bg-[#eab308]"></span> EMA 50
                </span>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
+            className="p-1 sm:p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Chart */}
-        <div className="w-full h-[400px] relative" ref={chartContainerRef}>
+        <div className="w-full h-[300px] sm:h-[400px] relative" ref={chartContainerRef}>
         </div>
       </div>
     </div>
