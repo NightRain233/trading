@@ -88,6 +88,7 @@ class StockResponse(BaseModel):
     trend: str
     signal: str
     candles: List[dict]
+    weekly_candles: List[dict] = []
     alias: Optional[str] = ""
     # Weekly Indicators
     weeklyMA5: Optional[float] = None

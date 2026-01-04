@@ -35,6 +35,18 @@ MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
 
+# 布林线参数
+BOLL_PERIOD = 20
+BOLL_STD = 2
+
+# KDJ 参数
+KDJ_PERIOD = 9
+KDJ_SIGNAL_K = 3
+KDJ_SIGNAL_D = 3
+
+# ATR 参数
+ATR_PERIOD = 14
+
 # RSI 阈值配置 (超买, 超卖)
 RSI_THRESHOLDS = {
     "uptrend_strong": (75, 45),    # 上升趋势，ADX > 25
@@ -173,7 +185,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     计算日线技术指标
 
-    计算 EMA20、EMA50、ADX、RSI(7/14/21)
+    计算 EMA20、EMA50、ADX、RSI(7/14/21)、BOLL、KDJ、MACD、ATR
 
     Args:
         df: 日线数据
@@ -201,6 +213,38 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if col_name not in df.columns or df[col_name].isnull().all():
             df[col_name] = 50
 
+    # 布林线 (BOLL)
+    bbands = ta.bbands(df['Close'], length=BOLL_PERIOD, std=BOLL_STD)
+    if bbands is not None and not bbands.empty:
+        df['BOLL_Upper'] = bbands[f'BBU_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        df['BOLL_Mid'] = bbands[f'BBM_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        df['BOLL_Lower'] = bbands[f'BBL_{BOLL_PERIOD}_{float(BOLL_STD)}']
+    else:
+        df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
+
+    # KDJ 指标
+    stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
+    if stoch is not None and not stoch.empty:
+        df['K'] = stoch[f'STOCHk_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
+        df['D'] = stoch[f'STOCHd_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
+        df['J'] = 3 * df['K'] - 2 * df['D']  # J = 3K - 2D
+    else:
+        df['K'] = df['D'] = df['J'] = 50
+
+    # MACD 指标
+    macd_df = ta.macd(df['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
+    if macd_df is not None and not macd_df.empty:
+        df['MACD_DIF'] = macd_df[f'MACD_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
+        df['MACD_DEA'] = macd_df[f'MACDs_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
+        df['MACD_Hist'] = macd_df[f'MACDh_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
+    else:
+        df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
+
+    # ATR 指标
+    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=ATR_PERIOD)
+    if 'ATR' not in df.columns or df['ATR'].isnull().all():
+        df['ATR'] = 0
+
     return df
 
 
@@ -208,7 +252,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     计算周线技术指标
 
-    计算周线 MA5 和 MACD
+    计算周线 MA5, EMA, MACD, BOLL, KDJ, RSI, ATR
 
     Args:
         df: 日线数据
@@ -223,10 +267,14 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         'Low': 'min',
         'Close': 'last',
         'Volume': 'sum'
-    })
+    }).dropna(subset=['Open', 'High', 'Low', 'Close'])
 
     # 周线 5 日均线
     df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
+
+    # EMA 指标
+    df_weekly['EMA20'] = ta.ema(df_weekly['Close'], length=EMA_SHORT_PERIOD)
+    df_weekly['EMA50'] = ta.ema(df_weekly['Close'], length=EMA_LONG_PERIOD)
 
     # 周线 MACD
     macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
@@ -235,10 +283,42 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df_weekly['MACD_W'] = df_weekly[f'MACD_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
         df_weekly['MACD_Signal_W'] = df_weekly[f'MACDs_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
         df_weekly['MACD_Hist_W'] = df_weekly[f'MACDh_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
+        # 同时保存为通用名（供 _build_candles 使用）
+        df_weekly['MACD_DIF'] = df_weekly['MACD_W']
+        df_weekly['MACD_DEA'] = df_weekly['MACD_Signal_W']
+        df_weekly['MACD_Hist'] = df_weekly['MACD_Hist_W']
     else:
-        df_weekly['MACD_W'] = 0
-        df_weekly['MACD_Signal_W'] = 0
-        df_weekly['MACD_Hist_W'] = 0
+        df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
+        df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
+
+    # 布林线 (BOLL)
+    bbands = ta.bbands(df_weekly['Close'], length=BOLL_PERIOD, std=BOLL_STD)
+    if bbands is not None and not bbands.empty:
+        df_weekly['BOLL_Upper'] = bbands[f'BBU_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        df_weekly['BOLL_Mid'] = bbands[f'BBM_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        df_weekly['BOLL_Lower'] = bbands[f'BBL_{BOLL_PERIOD}_{float(BOLL_STD)}']
+    else:
+        df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
+
+    # KDJ 指标
+    stoch = ta.stoch(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], 
+                     k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
+    if stoch is not None and not stoch.empty:
+        df_weekly['K'] = stoch[f'STOCHk_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
+        df_weekly['D'] = stoch[f'STOCHd_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
+        df_weekly['J'] = 3 * df_weekly['K'] - 2 * df_weekly['D']
+    else:
+        df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
+
+    # RSI 指标（使用默认周期 14）
+    df_weekly['RSI_14'] = ta.rsi(df_weekly['Close'], length=14)
+    if df_weekly['RSI_14'].isnull().all():
+        df_weekly['RSI_14'] = 50
+
+    # ATR 指标
+    df_weekly['ATR'] = ta.atr(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], length=ATR_PERIOD)
+    if df_weekly['ATR'].isnull().all():
+        df_weekly['ATR'] = 0
 
     return df_weekly
 
@@ -467,26 +547,26 @@ def _get_weekly_status(price: float, df_weekly: pd.DataFrame) -> dict:
     }
 
 
-def _build_candles(df: pd.DataFrame, rsi_period: int) -> list:
+def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART_DAYS) -> list:
     """
     构建 K 线图数据，包含成交量和各项指标
 
     Args:
-        df: 日线数据
+        df: 数据（日线或周线）
         rsi_period: 选定的 RSI 周期
+        num_days: 显示的数据条数
 
     Returns:
         详情数据列表
     """
-    chart_df = df.tail(CHART_DAYS).copy()
+    chart_df = df.tail(num_days).copy()
     chart_df = chart_df.reset_index()
 
     # 获取日期列名
     date_col = chart_df.columns[0]
     chart_df['time'] = pd.to_datetime(chart_df[date_col]).dt.strftime('%Y-%m-%d')
 
-    # 准备列映射
-    rsi_col = f'RSI_{rsi_period}'
+    # 基础列映射
     cols = {
         'time': 'time',
         'Open': 'open',
@@ -498,12 +578,30 @@ def _build_candles(df: pd.DataFrame, rsi_period: int) -> list:
         'EMA50': 'ema50',
     }
     
-    # 确保 RSI 存在
-    if rsi_col in chart_df.columns:
-        cols[rsi_col] = 'rsi'
+    # 添加可选列（存在则映射）
+    optional_cols = {
+        f'RSI_{rsi_period}': 'rsi',
+        'BOLL_Upper': 'boll_upper',
+        'BOLL_Mid': 'boll_mid',
+        'BOLL_Lower': 'boll_lower',
+        'K': 'k',
+        'D': 'd',
+        'J': 'j',
+        'MACD_DIF': 'macd_dif',
+        'MACD_DEA': 'macd_dea',
+        'MACD_Hist': 'macd_hist',
+        'ATR': 'atr',
+    }
     
-    result_df = chart_df[list(cols.keys())].rename(columns=cols)
+    for src, dst in optional_cols.items():
+        if src in chart_df.columns:
+            cols[src] = dst
+    
+    # 过滤存在的列
+    existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
+    result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
     return result_df.to_dict('records')
+
 
 
 # ============================================
@@ -551,8 +649,9 @@ def analyze_stock(symbol: str) -> Optional[dict]:
     # 周线分析
     weekly_status = _get_weekly_status(price, df_weekly)
 
-    # K线数据
+    # K线数据 (日线和周线)
     candles = _build_candles(df, rsi_period)
+    weekly_candles = _build_candles(df_weekly, rsi_period=14)
 
     return {
         "symbol": symbol,
@@ -570,5 +669,6 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "trend": trend,
         "signal": signal,
         "candles": candles,
+        "weekly_candles": weekly_candles,
         **weekly_status
     }
