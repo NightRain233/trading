@@ -467,29 +467,42 @@ def _get_weekly_status(price: float, df_weekly: pd.DataFrame) -> dict:
     }
 
 
-def _build_candles(df: pd.DataFrame) -> list:
+def _build_candles(df: pd.DataFrame, rsi_period: int) -> list:
     """
-    构建 K 线图数据
-
-    使用向量化操作替代 iterrows() 提升性能。
+    构建 K 线图数据，包含成交量和各项指标
 
     Args:
         df: 日线数据
+        rsi_period: 选定的 RSI 周期
 
     Returns:
-        K线数据列表
+        详情数据列表
     """
     chart_df = df.tail(CHART_DAYS).copy()
     chart_df = chart_df.reset_index()
 
-    # 获取日期列名（可能是 'Date' 或索引名）
+    # 获取日期列名
     date_col = chart_df.columns[0]
     chart_df['time'] = pd.to_datetime(chart_df[date_col]).dt.strftime('%Y-%m-%d')
 
-    # 重命名列并转换为字典列表
-    candle_cols = {'time': 'time', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'}
-    result_df = chart_df[list(candle_cols.keys())].rename(columns=candle_cols)
-
+    # 准备列映射
+    rsi_col = f'RSI_{rsi_period}'
+    cols = {
+        'time': 'time',
+        'Open': 'open',
+        'High': 'high',
+        'Low': 'low',
+        'Close': 'close',
+        'Volume': 'volume',
+        'EMA20': 'ema20',
+        'EMA50': 'ema50',
+    }
+    
+    # 确保 RSI 存在
+    if rsi_col in chart_df.columns:
+        cols[rsi_col] = 'rsi'
+    
+    result_df = chart_df[list(cols.keys())].rename(columns=cols)
     return result_df.to_dict('records')
 
 
@@ -539,7 +552,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
     weekly_status = _get_weekly_status(price, df_weekly)
 
     # K线数据
-    candles = _build_candles(df)
+    candles = _build_candles(df, rsi_period)
 
     return {
         "symbol": symbol,

@@ -1,6 +1,6 @@
 import type { StockData, WatchlistGroup, WatchlistItem } from './types';
 
-const API_BASE_URL = 'http://192.168.10.94:8000/api';
+const API_BASE_URL = 'http://192.168.0.114:8000/api';
 
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
   try {

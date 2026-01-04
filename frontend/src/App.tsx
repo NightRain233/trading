@@ -126,7 +126,7 @@ function SortableStockRow({
             </span>
           )}
         </div>
-        <StatusBadge trend={stock.trend} adx={stock.adx} />
+        <StatusBadge status={stock.trend} type="trend" />
       </div>
 
       <div className="col-span-2 hidden sm:block text-right">
