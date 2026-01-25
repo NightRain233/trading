@@ -1,4 +1,30 @@
-backend/__pycache__/analysis.cpython-312.pyc
-backend/cache.pkl
-backend/data/
+# --- Frontend (pnpm) ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/pnpm-debug.log*
+
+# --- Backend (uv/Python) ---
+backend/.venv/
 backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.python-version
+backend/data/
+backend/cache.pkl
+*.log
+
+# --- IDE & System ---
+.vscode/
+.idea/
+.DS_Store
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# --- Docker ---
+.docker/

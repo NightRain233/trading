@@ -13,7 +13,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
 import {
   arrayMove,
   SortableContext,
@@ -22,6 +22,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+
+const SortableContextAny = SortableContext as any;
 
 // Sortable Stock Row Component
 function SortableStockRow({ 
@@ -255,7 +257,7 @@ function SortableGroup({
               拖拽股票到此分组
             </div>
           ) : (
-            <SortableContext items={group.stocks?.map(s => s.symbol) || []} strategy={verticalListSortingStrategy}>
+            <SortableContextAny items={(group.stocks || []).map(s => s.symbol)} strategy={verticalListSortingStrategy}>
               <div className="divide-y divide-zinc-800/50">
                 {group.stocks?.map(stock => (
                   <SortableStockRow 
@@ -267,7 +269,7 @@ function SortableGroup({
                   />
                 ))}
               </div>
-            </SortableContext>
+            </SortableContextAny>
           )}
         </div>
       )}
@@ -289,7 +291,6 @@ function App() {
   const [aliasInput, setAliasInput] = useState('');
   
   // Sorting and Filtering State
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof StockData | 'weeklyStatus'; 
     direction: 'asc' | 'desc' | null 
@@ -403,7 +404,7 @@ function App() {
     await updateWatchlist(updatedGroups.map(g => ({
       id: g.id,
       name: g.name,
-      symbols: g.stocks.map(s => s.symbol),
+      symbols: (g.stocks || []).map(s => ({ symbol: s.symbol, alias: s.alias })),
       collapsed: g.collapsed
     })));
   };
@@ -420,13 +421,8 @@ function App() {
     loadData();
   };
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    setActiveId(null);
 
     if (!over || active.id === over.id) return;
 
@@ -445,7 +441,7 @@ function App() {
         await updateWatchlist(newGroups.map(g => ({
           id: g.id,
           name: g.name,
-          symbols: g.stocks.map(s => ({ symbol: s.symbol, alias: s.alias })),
+          symbols: (g.stocks || []).map(s => ({ symbol: s.symbol, alias: s.alias })),
           collapsed: g.collapsed
         })));
       }
@@ -458,7 +454,7 @@ function App() {
 
       // Find source
       groups.forEach((g, gi) => {
-        const si = g.stocks.findIndex(s => s.symbol === active.id);
+        const si = (g.stocks || []).findIndex(s => s.symbol === active.id);
         if (si !== -1) {
           sourceGroupIdx = gi;
           sourceStockIdx = si;
@@ -467,7 +463,7 @@ function App() {
 
       // Find target
       groups.forEach((g, gi) => {
-        const si = g.stocks.findIndex(s => s.symbol === over.id);
+        const si = (g.stocks || []).findIndex(s => s.symbol === over.id);
         if (si !== -1) {
           targetGroupIdx = gi;
           targetStockIdx = si;
@@ -477,16 +473,22 @@ function App() {
       if (sourceGroupIdx === -1) return;
 
       const newGroups = [...groups];
-      const [movedStock] = newGroups[sourceGroupIdx].stocks.splice(sourceStockIdx, 1);
+      const sourceStocks = newGroups[sourceGroupIdx].stocks || [];
+      const [movedStock] = sourceStocks.splice(sourceStockIdx, 1);
+      newGroups[sourceGroupIdx].stocks = sourceStocks;
 
       if (targetGroupIdx !== -1) {
         // Move to specific position
-        newGroups[targetGroupIdx].stocks.splice(targetStockIdx, 0, movedStock);
+        const targetStocks = newGroups[targetGroupIdx].stocks || [];
+        targetStocks.splice(targetStockIdx, 0, movedStock);
+        newGroups[targetGroupIdx].stocks = targetStocks;
       } else {
         // Check if dropping on a group
         const targetGroup = newGroups.find(g => g.id === over.id);
         if (targetGroup) {
-          targetGroup.stocks.push(movedStock);
+          const targetStocks = targetGroup.stocks || [];
+          targetStocks.push(movedStock);
+          targetGroup.stocks = targetStocks;
         }
       }
 
@@ -495,7 +497,7 @@ function App() {
       await updateWatchlist(newGroups.map(g => ({
         id: g.id,
         name: g.name,
-        symbols: g.stocks.map(s => ({ symbol: s.symbol, alias: s.alias })),
+        symbols: (g.stocks || []).map(s => ({ symbol: s.symbol, alias: s.alias })),
         collapsed: g.collapsed
       })));
     }
@@ -638,7 +640,7 @@ function App() {
               )}
               title="Refresh Data"
             >
-              <RefreshCw size={18} sm:size={20} />
+              <RefreshCw size={18} className="sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
@@ -794,10 +796,9 @@ function App() {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <SortableContext items={filteredGroups.map(g => g.id)} strategy={verticalListSortingStrategy}>
+          <SortableContextAny items={filteredGroups.map(g => g.id)} strategy={verticalListSortingStrategy}>
             {filteredGroups.map(group => (
               <SortableGroup
                 key={group.id}
@@ -808,7 +809,7 @@ function App() {
                 onEditAlias={openAliasModal}
               />
             ))}
-          </SortableContext>
+          </SortableContextAny>
         </DndContext>
 
         {filteredGroups.length === 0 && (

@@ -1,6 +1,10 @@
 import type { StockData, WatchlistGroup, WatchlistItem } from './types';
 
-const API_BASE_URL = 'http://192.168.0.114:8000/api';
+// 自动根据环境判断 API 地址
+// 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
+const API_BASE_URL = import.meta.env.PROD 
+  ? '/api' 
+  : 'http://localhost:8000/api';
 
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
   try {
