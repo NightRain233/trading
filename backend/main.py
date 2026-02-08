@@ -1,11 +1,31 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary, _build_mini_candles
+from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary, _build_mini_candles, DATA_DIR
 import json
 import os
 import uuid
+import time
+import logging
+import asyncio
+from contextlib import contextmanager
+
+# 获取日志记录器，用于在控制台输出信息
+logger = logging.getLogger(__name__)
+
+@contextmanager
+def timer(name: str):
+    """
+    一个简单的计时器工具（上下文管理器）。
+    用法:
+    with timer("步骤名称"):
+        做一些事情...
+    """
+    start_time = time.perf_counter()
+    yield
+    end_time = time.perf_counter()
+    logger.info(f"==> [耗时统计] {name}: {end_time - start_time:.4f} 秒")
 
 app = FastAPI()
 
@@ -132,12 +152,33 @@ def get_batch_quotes(request: BatchQuoteRequest):
     """批量获取股票摘要数据（列表页使用，不含 K 线数据）"""
     if not request.symbols:
         return {}
-    results = batch_fetch_and_update(request.symbols)
+    
+    # 记录总耗时
+    start_total = time.perf_counter()
+    
+    # 步骤 1：获取和更新数据（可能涉及网络下载）
+    with timer(f"批量获取与更新数据 ({len(request.symbols)} 只股票)"):
+        results = batch_fetch_and_update(request.symbols)
+    
+    # 步骤 2：获取股票摘要数据
     response = {}
-    for symbol, (df, df_weekly) in results.items():
-        summary = analyze_stock_summary(symbol, df, df_weekly)
-        if summary:
-            response[symbol] = summary
+    with timer("提取预缓存指标摘要"):
+        for symbol, result_tuple in results.items():
+            # 现在返回的是 (df, df_weekly, summary)
+            if len(result_tuple) >= 3:
+                summary = result_tuple[2]
+                if summary:
+                    response[symbol] = summary
+            else:
+                # 兼容性处理（如果有些旧逻辑没返回 summary）
+                df, df_weekly = result_tuple[0], result_tuple[1]
+                summary = analyze_stock_summary(symbol, df, df_weekly)
+                if summary:
+                    response[symbol] = summary
+                
+    end_total = time.perf_counter()
+    logger.info(f"==> [总耗时] 批量获取接口完成: {end_total - start_total:.4f} 秒")
+    
     return response
 
 @app.post("/api/quotes/batch/charts")
@@ -147,7 +188,8 @@ def get_batch_charts(request: BatchQuoteRequest):
         return {}
     results = batch_fetch_and_update(request.symbols)
     response = {}
-    for symbol, (df, df_weekly) in results.items():
+    for symbol, result_tuple in results.items():
+        df = result_tuple[0]
         if df is not None and not df.empty:
             response[symbol] = _build_mini_candles(df)
     return response
@@ -254,6 +296,33 @@ def update_watchlist(request: UpdateWatchlistRequest):
     save_watchlist(groups)
     return {"message": "Watchlist updated"}
 
+def refresh_watchlist_background():
+    """后台任务：每隔 20 分钟自动刷新一次观察列表，保持缓存新鲜"""
+    while True:
+        try:
+            logger.info("==> [后台管家] 开始例行维护观察列表数据...")
+            groups = load_watchlist()
+            all_symbols = []
+            for g in groups:
+                for s in g["symbols"]:
+                    all_symbols.append(s["symbol"])
+            
+            if all_symbols:
+                # 传入 force_refresh=True 或特定标志，确保后台会去更新
+                batch_fetch_and_update(all_symbols)
+                logger.info(f"==> [后台管家] 维护完成，已新鲜化 {len(all_symbols)} 只股票数据。")
+        except Exception as e:
+            logger.error(f"==> [后台管家] 维护作业出错: {e}")
+        
+        # 每 20 分钟跑一次
+        time.sleep(1200)
+
 if __name__ == "__main__":
     import uvicorn
+    import threading
+    
+    # 启动后台刷新线程，不阻塞主进程
+    bg_thread = threading.Thread(target=refresh_watchlist_background, daemon=True)
+    bg_thread.start()
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -10,7 +10,8 @@ import time
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import pandas_ta as ta
@@ -70,10 +71,19 @@ MINI_CHART_DAYS = 30
 symbol_locks = defaultdict(threading.Lock)
 # 全局锁：用于 yfinance 下载，避免共享会话导致的线程安全问题
 global_download_lock = threading.Lock()
+# 全局锁：用于技术指标计算，防止 pandas_ta 调用 numba 时产生并发冲突 (Assertion failed in _Numba_hashtable_set)
+ta_calculation_lock = threading.Lock()
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ============================================
+# 内存缓存管理 (一级缓存)
+# ============================================
+# 结构: { symbol: { "df": df, "df_weekly": df_weekly, "summary": dict, "timestamp": unix_time } }
+_memory_cache = {}
+_memory_cache_lock = threading.Lock()
 
 # 确保数据目录存在
 if not os.path.exists(DATA_DIR):
@@ -198,87 +208,88 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         添加了指标的 DataFrame
     """
-    # EMA 指标
-    df['EMA5'] = ta.ema(df['Close'], length=EMA_FAST_5)
-    df['EMA10'] = ta.ema(df['Close'], length=EMA_FAST_10)
-    df['EMA20'] = ta.ema(df['Close'], length=EMA_SHORT_PERIOD)
-    df['EMA50'] = ta.ema(df['Close'], length=EMA_LONG_PERIOD)
+    with ta_calculation_lock:
+        # EMA 指标
+        df['EMA5'] = ta.ema(df['Close'], length=EMA_FAST_5)
+        df['EMA10'] = ta.ema(df['Close'], length=EMA_FAST_10)
+        df['EMA20'] = ta.ema(df['Close'], length=EMA_SHORT_PERIOD)
+        df['EMA50'] = ta.ema(df['Close'], length=EMA_LONG_PERIOD)
 
-    # ADX 指标
-    adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=ADX_PERIOD)
-    if adx_df is not None and not adx_df.empty:
-        # 使用前缀搜索 ADX 列
-        adx_col = next((c for c in adx_df.columns if c.startswith('ADX_')), None)
-        if adx_col:
-            df['ADX'] = adx_df[adx_col]
+        # ADX 指标
+        adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=ADX_PERIOD)
+        if adx_df is not None and not adx_df.empty:
+            # 使用前缀搜索 ADX 列
+            adx_col = next((c for c in adx_df.columns if c.startswith('ADX_')), None)
+            if adx_col:
+                df['ADX'] = adx_df[adx_col]
+            else:
+                df['ADX'] = 0
         else:
             df['ADX'] = 0
-    else:
-        df['ADX'] = 0
 
-    # RSI 指标（多周期）
-    for period in RSI_PERIODS:
-        col_name = f'RSI_{period}'
-        df[col_name] = ta.rsi(df['Close'], length=period)
-        # 如果 RSI 计算失败，设置默认值
-        if col_name not in df.columns or df[col_name].isnull().all():
-            df[col_name] = 50
+        # RSI 指标（多周期）
+        for period in RSI_PERIODS:
+            col_name = f'RSI_{period}'
+            df[col_name] = ta.rsi(df['Close'], length=period)
+            # 如果 RSI 计算失败，设置默认值
+            if col_name not in df.columns or df[col_name].isnull().all():
+                df[col_name] = 50
 
-    # 布林线 (BOLL)
-    bbands = ta.bbands(df['Close'], length=BOLL_PERIOD, std=BOLL_STD)
-    if bbands is not None and not bbands.empty:
-        # 使用列名前缀搜索，提高鲁棒性（不同版本的 pandas-ta 可能使用不同的小数格式）
-        upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
-        mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
-        lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
-        
-        if upper_col and mid_col and lower_col:
-            df['BOLL_Upper'] = bbands[upper_col]
-            df['BOLL_Mid'] = bbands[mid_col]
-            df['BOLL_Lower'] = bbands[lower_col]
+        # 布林线 (BOLL)
+        bbands = ta.bbands(df['Close'], length=BOLL_PERIOD, std=BOLL_STD)
+        if bbands is not None and not bbands.empty:
+            # 使用列名前缀搜索，提高鲁棒性（不同版本的 pandas-ta 可能使用不同的小数格式）
+            upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
+            mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
+            lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+            
+            if upper_col and mid_col and lower_col:
+                df['BOLL_Upper'] = bbands[upper_col]
+                df['BOLL_Mid'] = bbands[mid_col]
+                df['BOLL_Lower'] = bbands[lower_col]
+            else:
+                df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
         else:
             df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
-    else:
-        df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
 
-    # KDJ 指标
-    stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
-    if stoch is not None and not stoch.empty:
-        # 寻找 STOCHk 和 STOCHd 列
-        k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
-        d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
-        if k_col and d_col:
-            df['K'] = stoch[k_col]
-            df['D'] = stoch[d_col]
-            df['J'] = 3 * df['K'] - 2 * df['D']
+        # KDJ 指标
+        stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
+        if stoch is not None and not stoch.empty:
+            # 寻找 STOCHk 和 STOCHd 列
+            k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
+            d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+            if k_col and d_col:
+                df['K'] = stoch[k_col]
+                df['D'] = stoch[d_col]
+                df['J'] = 3 * df['K'] - 2 * df['D']
+            else:
+                df['K'] = df['D'] = df['J'] = 50
         else:
             df['K'] = df['D'] = df['J'] = 50
-    else:
-        df['K'] = df['D'] = df['J'] = 50
 
-    # MACD 指标
-    macd_df = ta.macd(df['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
-    if macd_df is not None and not macd_df.empty:
-        # 寻找 MACD 主线、信号线和柱状图列
-        dif_col = next((c for c in macd_df.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
-        dea_col = next((c for c in macd_df.columns if c.startswith('MACDs_')), None)
-        hist_col = next((c for c in macd_df.columns if c.startswith('MACDh_')), None)
-        
-        if dif_col and dea_col and hist_col:
-            df['MACD_DIF'] = macd_df[dif_col]
-            df['MACD_DEA'] = macd_df[dea_col]
-            df['MACD_Hist'] = macd_df[hist_col]
+        # MACD 指标
+        macd_df = ta.macd(df['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
+        if macd_df is not None and not macd_df.empty:
+            # 寻找 MACD 主线、信号线和柱状图列
+            dif_col = next((c for c in macd_df.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
+            dea_col = next((c for c in macd_df.columns if c.startswith('MACDs_')), None)
+            hist_col = next((c for c in macd_df.columns if c.startswith('MACDh_')), None)
+            
+            if dif_col and dea_col and hist_col:
+                df['MACD_DIF'] = macd_df[dif_col]
+                df['MACD_DEA'] = macd_df[dea_col]
+                df['MACD_Hist'] = macd_df[hist_col]
+            else:
+                df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
         else:
             df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
-    else:
-        df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
 
-    # ATR 指标
-    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=ATR_PERIOD)
-    if 'ATR' not in df.columns or df['ATR'].isnull().all():
-        df['ATR'] = 0
+        # ATR 指标
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=ATR_PERIOD)
+        if 'ATR' not in df.columns or df['ATR'].isnull().all():
+            df['ATR'] = 0
 
-    return df
+        return df
 
 
 def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -293,86 +304,87 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         周线 DataFrame（包含指标）
     """
-    # 重采样为周线
-    df_weekly = df.resample('W').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum'
-    }).dropna(subset=['Open', 'High', 'Low', 'Close'])
+    with ta_calculation_lock:
+        # 重采样为周线
+        df_weekly = df.resample('W').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna(subset=['Open', 'High', 'Low', 'Close'])
 
-    # 周线 5 日均线
-    df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
+        # 周线 5 日均线
+        df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
 
-    # EMA 指标
-    df_weekly['EMA20'] = ta.ema(df_weekly['Close'], length=EMA_SHORT_PERIOD)
-    df_weekly['EMA50'] = ta.ema(df_weekly['Close'], length=EMA_LONG_PERIOD)
+        # EMA 指标
+        df_weekly['EMA20'] = ta.ema(df_weekly['Close'], length=EMA_SHORT_PERIOD)
+        df_weekly['EMA50'] = ta.ema(df_weekly['Close'], length=EMA_LONG_PERIOD)
 
-    # 周线 MACD
-    macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
-    if macd_w is not None and not macd_w.empty:
-        dif_col = next((c for c in macd_w.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
-        dea_col = next((c for c in macd_w.columns if c.startswith('MACDs_')), None)
-        hist_col = next((c for c in macd_w.columns if c.startswith('MACDh_')), None)
-        
-        if dif_col and dea_col and hist_col:
-            df_weekly['MACD_W'] = macd_w[dif_col]
-            df_weekly['MACD_Signal_W'] = macd_w[dea_col]
-            df_weekly['MACD_Hist_W'] = macd_w[hist_col]
-            # 同时保存为通用名
-            df_weekly['MACD_DIF'] = df_weekly['MACD_W']
-            df_weekly['MACD_DEA'] = df_weekly['MACD_Signal_W']
-            df_weekly['MACD_Hist'] = df_weekly['MACD_Hist_W']
+        # 周线 MACD
+        macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
+        if macd_w is not None and not macd_w.empty:
+            dif_col = next((c for c in macd_w.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
+            dea_col = next((c for c in macd_w.columns if c.startswith('MACDs_')), None)
+            hist_col = next((c for c in macd_w.columns if c.startswith('MACDh_')), None)
+            
+            if dif_col and dea_col and hist_col:
+                df_weekly['MACD_W'] = macd_w[dif_col]
+                df_weekly['MACD_Signal_W'] = macd_w[dea_col]
+                df_weekly['MACD_Hist_W'] = macd_w[hist_col]
+                # 同时保存为通用名
+                df_weekly['MACD_DIF'] = df_weekly['MACD_W']
+                df_weekly['MACD_DEA'] = df_weekly['MACD_Signal_W']
+                df_weekly['MACD_Hist'] = df_weekly['MACD_Hist_W']
+            else:
+                df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
+                df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
         else:
             df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
             df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
-    else:
-        df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
-        df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
 
-    # 布林线 (BOLL)
-    bbands = ta.bbands(df_weekly['Close'], length=BOLL_PERIOD, std=BOLL_STD)
-    if bbands is not None and not bbands.empty:
-        upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
-        mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
-        lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
-        
-        if upper_col and mid_col and lower_col:
-            df_weekly['BOLL_Upper'] = bbands[upper_col]
-            df_weekly['BOLL_Mid'] = bbands[mid_col]
-            df_weekly['BOLL_Lower'] = bbands[lower_col]
+        # 布林线 (BOLL)
+        bbands = ta.bbands(df_weekly['Close'], length=BOLL_PERIOD, std=BOLL_STD)
+        if bbands is not None and not bbands.empty:
+            upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
+            mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
+            lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+            
+            if upper_col and mid_col and lower_col:
+                df_weekly['BOLL_Upper'] = bbands[upper_col]
+                df_weekly['BOLL_Mid'] = bbands[mid_col]
+                df_weekly['BOLL_Lower'] = bbands[lower_col]
+            else:
+                df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
         else:
             df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
-    else:
-        df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
 
-    # KDJ 指标
-    stoch = ta.stoch(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], 
-                     k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
-    if stoch is not None and not stoch.empty:
-        k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
-        d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
-        if k_col and d_col:
-            df_weekly['K'] = stoch[k_col]
-            df_weekly['D'] = stoch[d_col]
-            df_weekly['J'] = 3 * df_weekly['K'] - 2 * df_weekly['D']
+        # KDJ 指标
+        stoch = ta.stoch(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], 
+                         k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
+        if stoch is not None and not stoch.empty:
+            k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
+            d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+            if k_col and d_col:
+                df_weekly['K'] = stoch[k_col]
+                df_weekly['D'] = stoch[d_col]
+                df_weekly['J'] = 3 * df_weekly['K'] - 2 * df_weekly['D']
+            else:
+                df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
         else:
             df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
-    else:
-        df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
 
-    # RSI 指标（使用默认周期 14）
-    df_weekly['RSI_14'] = ta.rsi(df_weekly['Close'], length=14)
-    if df_weekly['RSI_14'].isnull().all():
-        df_weekly['RSI_14'] = 50
+        # RSI 指标（使用默认周期 14）
+        df_weekly['RSI_14'] = ta.rsi(df_weekly['Close'], length=14)
+        if df_weekly['RSI_14'].isnull().all():
+            df_weekly['RSI_14'] = 50
 
-    # ATR 指标
-    df_weekly['ATR'] = ta.atr(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], length=ATR_PERIOD)
-    if df_weekly['ATR'].isnull().all():
-        df_weekly['ATR'] = 0
+        # ATR 指标
+        df_weekly['ATR'] = ta.atr(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], length=ATR_PERIOD)
+        if df_weekly['ATR'].isnull().all():
+            df_weekly['ATR'] = 0
 
-    return df_weekly
+        return df_weekly
 
 
 def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
@@ -803,24 +815,101 @@ def batch_fetch_and_update(symbols: list) -> dict:
     results = {}
     symbols_to_fetch = []
 
-    # 1. 筛选：哪些需要下载，哪些可以直接用缓存
-    for symbol in symbols:
-        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
-        df_local, last_update = _load_local_data(file_path, symbol)
+    # 1. 筛选与处理缓存命中的股票 (优先检查一级内存缓存，再检查二级硬盘缓存)
+    process_start_wall = time.time()
+    count_mem_hit = 0
+    count_disk_hit = 0
+    count_to_fetch = 0
+    
+    # 定义判定逻辑：过期多少秒以内依然允许先看“旧数据”
+    ALLOW_STALE_SECONDS = 3600 * 24 # 只要数据在 24 小时内，都允许作为旧数据先返回
+    
+    def process_symbol_initial(symbol):
+        # 1.1 检查一级缓存：内存
+        with _memory_cache_lock:
+            if symbol in _memory_cache:
+                entry = _memory_cache[symbol]
+                elapsed = time.time() - entry["timestamp"]
+                # 如果内存数据足够新，直接返回
+                if elapsed < CACHE_DURATION_SECONDS:
+                    return symbol, (entry["df"], entry["df_weekly"], entry.get("summary")), 0, True, "mem_hit"
+                # 如果内存数据虽然旧但可用
+                if elapsed < ALLOW_STALE_SECONDS:
+                    logger.info(f"==> [内存缓存命中但过期] {symbol}: 已过 {elapsed:.0f}s, 阈值 {CACHE_DURATION_SECONDS}s")
+                    return symbol, (entry["df"], entry["df_weekly"], entry.get("summary")), 0, False, "mem_stale"
 
-        cache_valid = False
+        # 1.2 检查二级缓存：硬盘
+        t0 = time.time()
+        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        weekly_file_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+        
+        df_local, last_update = _load_local_data(file_path, symbol)
+        load_time = time.time() - t0
+
         if df_local is not None and last_update is not None:
             if os.path.exists(file_path):
                 file_mod_time = os.path.getmtime(file_path)
-                if time.time() - file_mod_time < CACHE_DURATION_SECONDS:
-                    cache_valid = True
-
-        if cache_valid and df_local is not None and 'EMA20' in df_local.columns and 'EMA5' in df_local.columns:
-            # 缓存有效且含指标，直接使用
-            df_weekly = _calculate_weekly_indicators(df_local)
-            results[symbol] = (df_local, df_weekly)
+                elapsed = time.time() - file_mod_time
+                
+                is_fresh = elapsed < CACHE_DURATION_SECONDS
+                is_stale_but_usable = elapsed < ALLOW_STALE_SECONDS
+                has_indicators = 'EMA20' in df_local.columns and 'EMA5' in df_local.columns
+                
+                if has_indicators:
+                    df_weekly, _ = _load_local_data(weekly_file_path, symbol)
+                    has_weekly = df_weekly is not None and 'MACD_W' in df_weekly.columns
+                    
+                    res_data = (df_local, df_weekly)
+                    # 只要用了硬盘数据，就同步更新到内存
+                    if has_weekly:
+                        # 尝试预生成摘要以存入缓存
+                        summary = analyze_stock_summary(symbol, df_local, df_weekly)
+                        with _memory_cache_lock:
+                            _memory_cache[symbol] = {
+                                "df": df_local, 
+                                "df_weekly": df_weekly, 
+                                "summary": summary,
+                                "timestamp": file_mod_time
+                            }
+                        
+                        res_data = (df_local, df_weekly, summary)
+                        if is_fresh:
+                            return symbol, res_data, load_time, True, "disk_hit"
+                        if is_stale_but_usable:
+                            logger.info(f"==> [硬盘缓存命中但过期] {symbol}: 已过 {elapsed:.0f}s, 阈值 {CACHE_DURATION_SECONDS}s")
+                            return symbol, res_data, load_time, False, "disk_stale"
+                    else:
+                        logger.info(f"==> [硬盘缓存无效] {symbol}: 缺少周线指标")
+                else:
+                    logger.info(f"==> [硬盘缓存无效] {symbol}: 缺少日线指标 (EMA20/EMA5)")
         else:
-            symbols_to_fetch.append((symbol, df_local, last_update))
+            logger.info(f"==> [无本地数据] {symbol}: 开始全量下载")
+        
+        return symbol, None, load_time, False, "miss"
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(process_symbol_initial, s) for s in symbols]
+        for future in futures:
+            sym, res, lt, is_fresh, hit_type = future.result()
+            if res:
+                results[sym] = res
+                if "mem" in hit_type: count_mem_hit += 1
+                else: count_disk_hit += 1
+                
+                if not is_fresh:
+                    # 虽然有旧数据，但因为过期了，还是偷偷加进待更新列表
+                    file_path = os.path.join(DATA_DIR, f"{sym}.parquet")
+                    df_l, last_u = _load_local_data(file_path, sym)
+                    symbols_to_fetch.append((sym, df_l, last_u))
+                    count_to_fetch += 1
+            else:
+                file_path = os.path.join(DATA_DIR, f"{sym}.parquet")
+                df_l, last_u = _load_local_data(file_path, sym)
+                symbols_to_fetch.append((sym, df_l, last_u))
+                count_to_fetch += 1
+
+    wall_time = time.time() - process_start_wall
+    logger.info(f"==> [二级缓存] 内存命中: {count_mem_hit}, 硬盘命中: {count_disk_hit}, 需要更新: {count_to_fetch}, 响应耗时: {wall_time:.4f}s")
 
     if not symbols_to_fetch:
         return results
@@ -874,36 +963,64 @@ def batch_fetch_and_update(symbols: list) -> dict:
         except Exception as e:
             logger.error(f"批量下载失败: {e}")
 
-    # 3. 逐个合并、计算指标、保存
-    for symbol, df_local, last_update in symbols_to_fetch:
-        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
-        df = df_local
+    # 3. 逐个合并、计算指标、保存（同样采用并行化处理）
+    if symbols_to_fetch:
+        process_start = time.time()
+        
+        def process_new_symbol(item):
+            symbol, df_local, last_update = item
+            file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+            weekly_file_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+            df = df_local
 
-        if symbol in downloaded_data:
-            new_df = downloaded_data[symbol]
-            # 移除时区信息
-            if hasattr(new_df.index, 'tz') and new_df.index.tz is not None:
-                new_df.index = new_df.index.tz_localize(None)
-            # 处理 MultiIndex 列
-            if isinstance(new_df.columns, pd.MultiIndex):
-                new_df.columns = new_df.columns.get_level_values(0)
+            if symbol in downloaded_data:
+                new_df = downloaded_data[symbol]
+                if hasattr(new_df.index, 'tz') and new_df.index.tz is not None:
+                    new_df.index = new_df.index.tz_localize(None)
+                if isinstance(new_df.columns, pd.MultiIndex):
+                    new_df.columns = new_df.columns.get_level_values(0)
 
-            # 合并前去掉旧的指标列
-            if df is not None:
-                ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
-                df = df[ohlcv_cols]
-            df = _merge_and_clean_data(df, new_df, now)
+                if df is not None:
+                    ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
+                    df = df[ohlcv_cols]
+                df = _merge_and_clean_data(df, new_df, now)
 
-        if df is None or df.empty:
-            continue
+            if df is None or df.empty:
+                return None
 
-        df = _calculate_daily_indicators(df)
+            # 计算日线指标
+            df = _calculate_daily_indicators(df)
+            
+            # 保存数据
+            with get_symbol_lock(symbol):
+                df.to_parquet(file_path)
 
-        with get_symbol_lock(symbol):
-            df.to_parquet(file_path)
+            # 计算并保存周线指标
+            df_weekly = _calculate_weekly_indicators(df)
+            df_weekly.to_parquet(weekly_file_path)
+            
+            # 预生成摘要
+            summary = analyze_stock_summary(symbol, df, df_weekly)
+            
+            # 同步更新内存缓存
+            with _memory_cache_lock:
+                _memory_cache[symbol] = {
+                    "df": df, 
+                    "df_weekly": df_weekly, 
+                    "summary": summary,
+                    "timestamp": time.time()
+                }
+            
+            return symbol, (df, df_weekly, summary)
 
-        df_weekly = _calculate_weekly_indicators(df)
-        results[symbol] = (df, df_weekly)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            task_results = list(executor.map(process_new_symbol, symbols_to_fetch))
+            for tr in task_results:
+                if tr:
+                    sym, res = tr
+                    results[sym] = res
+            
+        logger.info(f"==> [全量更新耗时] 完成 {len(symbols_to_fetch)} 只股票分析与缓存: {time.time() - process_start:.4f} 秒")
 
     return results
 
