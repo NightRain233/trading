@@ -1,4 +1,4 @@
-import type { StockData, WatchlistGroup, WatchlistItem } from './types';
+import type { Candle, StockData, WatchlistGroup, WatchlistItem } from './types';
 
 // 自动根据环境判断 API 地址
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
@@ -28,6 +28,21 @@ export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string
     return await response.json();
   } catch (error) {
     console.error('Error fetching batch quotes:', error);
+    return {};
+  }
+}
+
+export async function fetchBatchCharts(symbols: string[]): Promise<Record<string, Candle[]>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/quotes/batch/charts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols })
+    });
+    if (!response.ok) return {};
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching batch charts:', error);
     return {};
   }
 }

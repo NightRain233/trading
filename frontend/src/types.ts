@@ -5,6 +5,8 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  ema5?: number;
+  ema10?: number;
   ema20?: number;
   ema50?: number;
   rsi?: number;

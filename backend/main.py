@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary
+from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary, _build_mini_candles
 import json
 import os
 import uuid
@@ -138,6 +138,18 @@ def get_batch_quotes(request: BatchQuoteRequest):
         summary = analyze_stock_summary(symbol, df, df_weekly)
         if summary:
             response[symbol] = summary
+    return response
+
+@app.post("/api/quotes/batch/charts")
+def get_batch_charts(request: BatchQuoteRequest):
+    """批量获取迷你 K 线图数据（列表页缩略图使用）"""
+    if not request.symbols:
+        return {}
+    results = batch_fetch_and_update(request.symbols)
+    response = {}
+    for symbol, (df, df_weekly) in results.items():
+        if df is not None and not df.empty:
+            response[symbol] = _build_mini_candles(df)
     return response
 
 @app.get("/api/watchlist")

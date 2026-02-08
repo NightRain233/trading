@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, CrosshairMode } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, CrosshairMode, LineStyle } from 'lightweight-charts';
 import type { Time, IChartApi, LineWidth } from 'lightweight-charts';
 import type { StockData, Candle } from '../types';
-import { X, Activity, Calendar } from 'lucide-react';
+import { X, Activity, Calendar, LayoutGrid, Info } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import { fetchStockData } from '../utils';
 
@@ -28,14 +28,12 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   const macdRef = useRef<HTMLDivElement>(null);
   const atrRef = useRef<HTMLDivElement>(null);
 
-  // Update mobile status on resize
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 640);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Fetch fresh data when modal opens
   useEffect(() => {
     if (!initialStock) return;
     let isMounted = true;
@@ -49,35 +47,46 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     if (!stock || !priceRef.current || !rsiRef.current || !kdjRef.current || !macdRef.current || !atrRef.current) return;
 
     const containers = [priceRef.current, rsiRef.current, kdjRef.current, macdRef.current, atrRef.current];
+    
+    // CRITICAL FIX: Clear the containers explicitly before creating new charts
+    // This prevents double rendering when useEffect triggers multiple times
+    containers.forEach(container => {
+        if (container) container.innerHTML = '';
+    });
+
     const charts: IChartApi[] = [];
 
     const commonOptions = {
       layout: {
-        background: { type: ColorType.Solid, color: '#18181b' },
-        textColor: '#d4d4d8',
-        fontSize: isMobile ? 10 : 12,
+        background: { type: ColorType.Solid, color: '#09090b' },
+        textColor: '#a1a1aa',
+        fontSize: isMobile ? 10 : 11,
+        fontFamily: 'Inter, system-ui, sans-serif',
       },
       grid: {
-        vertLines: { color: '#27272a' },
-        horzLines: { color: '#27272a' },
+        vertLines: { color: '#18181b', style: LineStyle.Dashed },
+        horzLines: { color: '#18181b', style: LineStyle.Dashed },
       },
       timeScale: {
-        borderColor: '#3f3f46',
+        borderColor: '#27272a',
         visible: false,
       },
       rightPriceScale: {
-        borderColor: '#3f3f46',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
+        borderColor: '#27272a',
+        scaleMargins: { top: 0.1, bottom: 0.15 },
+        autoScale: true,
       },
       crosshair: {
-        mode: isMobile ? CrosshairMode.Magnet : CrosshairMode.Normal,
+        mode: CrosshairMode.Magnet,
+        vertLine: { color: '#52525b', width: 1 as LineWidth, style: LineStyle.LargeDashed },
+        horzLine: { color: '#52525b', width: 1 as LineWidth, style: LineStyle.LargeDashed },
       },
       handleScroll: { vertTouchDrag: false },
     };
 
     // Responsive Heights
-    const pHeight = isMobile ? 240 : 320;
-    const sHeight = isMobile ? 100 : 140;
+    const pHeight = isMobile ? 280 : 400; 
+    const sHeight = isMobile ? 100 : 130;
 
     charts[0] = createChart(priceRef.current, { ...commonOptions, height: pHeight });
     charts[1] = createChart(rsiRef.current, { ...commonOptions, height: sHeight });
@@ -85,11 +94,13 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     charts[3] = createChart(macdRef.current, { ...commonOptions, height: sHeight });
     charts[4] = createChart(atrRef.current, { ...commonOptions, height: sHeight, timeScale: { ...commonOptions.timeScale, visible: true } });
 
-    // Data Source
     const candles = timeframe === 'D' ? stock.candles : (stock.weekly_candles || []);
     if (!candles || candles.length === 0) return;
 
-    // Price
+    // Filter valid data to avoid 0-scaling artifacts
+    const validCandles = candles.filter(c => c.open != null && c.high != null && c.low != null && c.close != null && c.close > 0);
+
+    // 1. Price
     const candleSeries = charts[0].addSeries(CandlestickSeries, { 
        upColor: '#10b981', 
        downColor: '#f43f5e', 
@@ -97,64 +108,71 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
        wickUpColor: '#10b981', 
        wickDownColor: '#f43f5e' 
     });
-    const validCandles = candles.filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
     candleSeries.setData(validCandles.map((c: Candle) => ({ 
       time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close 
     })));
 
-    // Volume
+    // 2. Volume
     const volumeSeries = charts[0].addSeries(HistogramSeries, { 
-      color: '#3f3f46', priceFormat: { type: 'volume' }, priceScaleId: 'volume' 
+      color: '#3f3f46', 
+      priceFormat: { type: 'volume' }, 
+      priceScaleId: 'volume',
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
-    charts[0].priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    charts[0].priceScale('volume').applyOptions({ 
+        scaleMargins: { top: 0.8, bottom: 0 } 
+    });
     volumeSeries.setData(validCandles.map((c: Candle) => ({ 
-      time: c.time as Time, value: c.volume ?? 0, color: c.close >= c.open ? '#10b98133' : '#f43f5e33' 
+      time: c.time as Time, 
+      value: c.volume ?? 0, 
+      color: c.close >= c.open ? '#10b98122' : '#f43f5e22' 
     })));
 
-    // Main Inds
+    // 3. Technical Indicators
     if (mainInd === 'EMA') {
-      const e20 = charts[0].addSeries(LineSeries, { color: '#06b6d4', lineWidth: 1 as LineWidth });
-      const e50 = charts[0].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth });
-      e20.setData(candles.filter(c => c.ema20 != null).map((c: Candle) => ({ time: c.time as Time, value: c.ema20! })));
-      e50.setData(candles.filter(c => c.ema50 != null).map((c: Candle) => ({ time: c.time as Time, value: c.ema50! })));
+      const e20 = charts[0].addSeries(LineSeries, { color: '#0ea5e9', lineWidth: 1 as LineWidth, priceLineVisible: false });
+      const e50 = charts[0].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth, priceLineVisible: false });
+      e20.setData(validCandles.filter(c => c.ema20 != null && c.ema20 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema20! })));
+      e50.setData(validCandles.filter(c => c.ema50 != null && c.ema50 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema50! })));
     } else {
-      const bup = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
-      const bmid = charts[0].addSeries(LineSeries, { color: '#71717a', lineWidth: 1 as LineWidth, lineStyle: 2 });
-      const blow = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
-      bup.setData(candles.filter(c => c.boll_upper != null).map((c: Candle) => ({ time: c.time as Time, value: c.boll_upper! })));
-      bmid.setData(candles.filter(c => c.boll_mid != null).map((c: Candle) => ({ time: c.time as Time, value: c.boll_mid! })));
-      blow.setData(candles.filter(c => c.boll_lower != null).map((c: Candle) => ({ time: c.time as Time, value: c.boll_lower! })));
+      const bup = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
+      const bmid = charts[0].addSeries(LineSeries, { color: '#71717a', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false });
+      const blow = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
+      bup.setData(validCandles.filter(c => c.boll_upper != null && c.boll_upper > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_upper! })));
+      bmid.setData(validCandles.filter(c => c.boll_mid != null && c.boll_mid > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_mid! })));
+      blow.setData(validCandles.filter(c => c.boll_lower != null && c.boll_lower > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_lower! })));
     }
 
     // RSI
-    const rsiLine = charts[1].addSeries(LineSeries, { color: '#a855f7', lineWidth: 2 as LineWidth });
-    rsiLine.setData(candles.filter(c => c.rsi != null).map((c: Candle) => ({ time: c.time as Time, value: c.rsi! })));
-    const ob = charts[1].addSeries(LineSeries, { color: '#f43f5e', lineWidth: 1 as LineWidth, lineStyle: 2, lastValueVisible: false, priceLineVisible: false });
-    const os = charts[1].addSeries(LineSeries, { color: '#10b981', lineWidth: 1 as LineWidth, lineStyle: 2, lastValueVisible: false, priceLineVisible: false });
-    ob.setData(candles.map((c: Candle) => ({ time: c.time as Time, value: stock.rsiOverbought || 70 })));
-    os.setData(candles.map((c: Candle) => ({ time: c.time as Time, value: stock.rsiOversold || 30 })));
+    const rsiLine = charts[1].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
+    rsiLine.setData(validCandles.filter(c => c.rsi != null && c.rsi > 0).map((c: Candle) => ({ time: c.time as Time, value: c.rsi! })));
+    const ob = charts[1].addSeries(LineSeries, { color: '#f43f5e', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+    const os = charts[1].addSeries(LineSeries, { color: '#10b981', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+    ob.setData(validCandles.map((c: Candle) => ({ time: c.time as Time, value: stock.rsiOverbought || 70 })));
+    os.setData(validCandles.map((c: Candle) => ({ time: c.time as Time, value: stock.rsiOversold || 30 })));
 
     // KDJ
-    const kLine = charts[2].addSeries(LineSeries, { color: '#ffffff', lineWidth: 1 as LineWidth, title: 'K' });
-    const dLine = charts[2].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth, title: 'D' });
-    const jLine = charts[2].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, title: 'J' });
-    kLine.setData(candles.filter(c => c.k != null).map((c: Candle) => ({ time: c.time as Time, value: c.k! })));
-    dLine.setData(candles.filter(c => c.d != null).map((c: Candle) => ({ time: c.time as Time, value: c.d! })));
-    jLine.setData(candles.filter(c => c.j != null).map((c: Candle) => ({ time: c.time as Time, value: c.j! })));
+    const kLine = charts[2].addSeries(LineSeries, { color: '#ffffff', lineWidth: 1 as LineWidth });
+    const dLine = charts[2].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth });
+    const jLine = charts[2].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
+    kLine.setData(validCandles.filter(c => c.k != null && c.k > 0).map((c: Candle) => ({ time: c.time as Time, value: c.k! })));
+    dLine.setData(validCandles.filter(c => c.d != null && c.d > 0).map((c: Candle) => ({ time: c.time as Time, value: c.d! })));
+    jLine.setData(validCandles.filter(c => c.j != null && c.j > 0).map((c: Candle) => ({ time: c.time as Time, value: c.j! })));
 
     // MACD
-    const macdHist = charts[3].addSeries(HistogramSeries, { title: 'Hist' });
-    const macdDif = charts[3].addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1 as LineWidth, title: 'DIF' });
-    const macdDea = charts[3].addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 as LineWidth, title: 'DEA' });
-    macdHist.setData(candles.filter(c => c.macd_hist != null).map((c: Candle) => ({ 
-      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98188' : '#f43f5e88' 
+    const macdHist = charts[3].addSeries(HistogramSeries, { lastValueVisible: false });
+    const macdDif = charts[3].addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1 as LineWidth });
+    const macdDea = charts[3].addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 as LineWidth });
+    macdHist.setData(validCandles.filter(c => c.macd_hist != null).map((c: Candle) => ({ 
+      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98166' : '#f43f5e66' 
     })));
-    macdDif.setData(candles.filter(c => c.macd_dif != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
-    macdDea.setData(candles.filter(c => c.macd_dea != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));
+    macdDif.setData(validCandles.filter(c => c.macd_dif != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
+    macdDea.setData(validCandles.filter(c => c.macd_dea != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));
 
     // ATR
     const atrLine = charts[4].addSeries(LineSeries, { color: '#fb923c', lineWidth: 1 as LineWidth });
-    atrLine.setData(candles.filter(c => c.atr != null).map((c: Candle) => ({ time: c.time as Time, value: c.atr! })));
+    atrLine.setData(validCandles.filter(c => c.atr != null && c.atr > 0).map((c: Candle) => ({ time: c.time as Time, value: c.atr! })));
 
     // Sync
     let isBroadcasting = false;
@@ -194,7 +212,9 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      charts.forEach(c => c.remove());
+      charts.forEach(c => {
+          try { c.remove(); } catch(e) {}
+      });
     };
   }, [stock, timeframe, mainInd, isMobile]);
 
@@ -203,8 +223,8 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   const TabButton = ({ active, onClick, children }: { active: boolean, onClick: () => void, children: React.ReactNode }) => (
     <button 
       onClick={onClick}
-      className={`px-3 py-1 rounded-md text-[10px] sm:text-xs font-medium transition-all ${
-        active ? 'bg-zinc-100 text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+      className={`px-3 py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all ${
+        active ? 'bg-zinc-100 text-zinc-950 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
       }`}
     >
       {children}
@@ -212,77 +232,97 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-zinc-900 w-full sm:max-w-5xl sm:rounded-xl border-x sm:border border-zinc-800 shadow-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[98vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-zinc-950 w-full sm:max-w-6xl sm:rounded-2xl border-x sm:border border-zinc-800/50 shadow-2xl overflow-hidden flex flex-col h-full sm:h-[95vh]">
         
-        {/* Header */}
-        <div className="p-3 sm:p-4 border-b border-zinc-800 bg-zinc-900/50">
-          <div className="flex justify-between items-start mb-3 sm:mb-4">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <h2 className="text-lg sm:text-2xl font-bold text-white uppercase truncate">{stock.symbol}</h2>
-                <span className={`text-base sm:text-lg font-mono ${stock.changePercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {stock.price.toFixed(2)} ({stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%)
-                </span>
-              </div>
-              
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
+        {/* Compact Header */}
+        <div className="px-4 py-3 border-b border-zinc-800/50 bg-zinc-900/20 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">{stock.symbol}</h2>
+                    <div className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400 font-mono tracking-wider">{stock.name}</div>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`text-lg sm:text-xl font-mono font-bold ${stock.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {stock.price.toFixed(2)}
+                    </span>
+                    <span className={`text-xs font-mono font-medium ${stock.changePercent >= 0 ? 'text-emerald-500/80' : 'text-rose-500/80'}`}>
+                        {stock.changePercent >= 0 ? '▲' : '▼'} {Math.abs(stock.changePercent).toFixed(2)}%
+                    </span>
+                </div>
+            </div>
+
+            <div className="hidden sm:flex h-8 w-px bg-zinc-800/50 mx-2"></div>
+
+            <div className="flex flex-wrap gap-2">
                 <StatusBadge status={stock.trend} type="trend" />
                 <StatusBadge status={stock.signal} type="signal" />
                 {hoverDate && (
-                   <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono">
-                      <Calendar size={10} /> {hoverDate}
-                   </div>
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono shadow-inner">
+                        <Calendar size={12} className="opacity-70" /> {hoverDate}
+                    </div>
                 )}
-              </div>
             </div>
-
-            <button onClick={onClose} className="p-2 -mr-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors">
-              <X size={24} />
-            </button>
           </div>
 
-          <div className="flex items-center gap-3 bg-zinc-950/50 p-1 rounded-lg border border-zinc-800/50 self-start">
-             <div className="flex p-0.5 bg-zinc-900 rounded-md border border-zinc-800">
-                <TabButton onClick={() => setTimeframe('D')} active={timeframe === 'D'}>日线</TabButton>
-                <TabButton onClick={() => setTimeframe('W')} active={timeframe === 'W'}>周线</TabButton>
+          <div className="flex items-center gap-4">
+             <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800/50">
+                <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
+                    <TabButton onClick={() => setTimeframe('D')} active={timeframe === 'D'}>D</TabButton>
+                    <TabButton onClick={() => setTimeframe('W')} active={timeframe === 'W'}>W</TabButton>
+                </div>
+                <div className="w-px h-4 bg-zinc-800/50"></div>
+                <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
+                    <TabButton onClick={() => setMainInd('EMA')} active={mainInd === 'EMA'}>EMA</TabButton>
+                    <TabButton onClick={() => setMainInd('BOLL')} active={mainInd === 'BOLL'}>BOLL</TabButton>
+                </div>
              </div>
-             <div className="w-px h-3 bg-zinc-800"></div>
-             <div className="flex p-0.5 bg-zinc-900 rounded-md border border-zinc-800">
-                <TabButton onClick={() => setMainInd('EMA')} active={mainInd === 'EMA'}>EMA</TabButton>
-                <TabButton onClick={() => setMainInd('BOLL')} active={mainInd === 'BOLL'}>BOLL</TabButton>
-             </div>
+             
+             <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-white transition-all">
+                <X size={24} />
+             </button>
           </div>
         </div>
 
         {/* Charts - Stacking */}
-        <div className="flex-1 overflow-y-auto bg-zinc-900 custom-scrollbar pb-8">
-           <div className="relative border-b border-zinc-800">
-             <div className="absolute top-2 left-4 z-10 text-[10px] text-zinc-500 pointer-events-none flex gap-2">
-               <Activity size={12} /> PRICE & VOL ({mainInd})
+        <div className="flex-1 overflow-y-auto bg-zinc-950 custom-scrollbar">
+           <div className="relative border-b border-zinc-900">
+             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+               <Activity size={12} className="text-emerald-500/50" /> Price & Volume
              </div>
              <div className="w-full" ref={priceRef} />
            </div>
 
-           <div className="relative border-b border-zinc-800">
-             <div className="absolute top-2 left-4 z-10 text-[10px] text-zinc-500 pointer-events-none">RSI({timeframe === 'D' ? stock.rsiPeriod : 14})</div>
+           <div className="relative border-b border-zinc-900">
+             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+               <LayoutGrid size={12} className="text-purple-500/50" /> RSI
+             </div>
              <div className="w-full" ref={rsiRef} />
            </div>
 
-           <div className="relative border-b border-zinc-800">
-             <div className="absolute top-2 left-4 z-10 text-[10px] text-zinc-500 pointer-events-none">KDJ</div>
+           <div className="relative border-b border-zinc-900">
+             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+               <LayoutGrid size={12} className="text-amber-500/50" /> KDJ
+             </div>
              <div className="w-full" ref={kdjRef} />
            </div>
 
-           <div className="relative border-b border-zinc-800">
-             <div className="absolute top-2 left-4 z-10 text-[10px] text-zinc-500 pointer-events-none">MACD</div>
+           <div className="relative border-b border-zinc-900">
+             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+               <LayoutGrid size={12} className="text-blue-500/50" /> MACD
+             </div>
              <div className="w-full" ref={macdRef} />
            </div>
 
-           <div className="relative border-b border-zinc-800">
-             <div className="absolute top-2 left-4 z-10 text-[10px] text-zinc-500 pointer-events-none">ATR</div>
+           <div className="relative">
+             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+               <Info size={12} className="text-orange-500/50" /> ATR
+             </div>
              <div className="w-full" ref={atrRef} />
            </div>
+
+           <div className="h-10 invisible" />
         </div>
       </div>
     </div>

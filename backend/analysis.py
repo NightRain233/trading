@@ -25,6 +25,8 @@ CACHE_DURATION_SECONDS = 60 * 60  # 缓存有效期：1小时
 DATA_RETENTION_DAYS = 730         # 数据保留天数：2年
 
 # 技术指标参数
+EMA_FAST_5 = 5
+EMA_FAST_10 = 10
 EMA_SHORT_PERIOD = 20
 EMA_LONG_PERIOD = 50
 ADX_PERIOD = 14
@@ -56,6 +58,9 @@ RSI_THRESHOLDS = {
 
 # K线图显示天数
 CHART_DAYS = 100
+
+# 迷你 K 线图显示天数
+MINI_CHART_DAYS = 30
 
 # ============================================
 # 线程锁管理
@@ -194,6 +199,8 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         添加了指标的 DataFrame
     """
     # EMA 指标
+    df['EMA5'] = ta.ema(df['Close'], length=EMA_FAST_5)
+    df['EMA10'] = ta.ema(df['Close'], length=EMA_FAST_10)
     df['EMA20'] = ta.ema(df['Close'], length=EMA_SHORT_PERIOD)
     df['EMA50'] = ta.ema(df['Close'], length=EMA_LONG_PERIOD)
 
@@ -400,7 +407,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
                 needs_fetch = False
 
         # 3. 缓存有效且已含指标列 → 直接返回，跳过指标计算
-        if not needs_fetch and df_local is not None and 'EMA20' in df_local.columns:
+        if not needs_fetch and df_local is not None and 'EMA20' in df_local.columns and 'EMA5' in df_local.columns:
             df = df_local.copy()
             df_weekly = _calculate_weekly_indicators(df)
             return df, df_weekly
@@ -408,6 +415,8 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
         # 4. 获取并合并新数据
         df = df_local
         if needs_fetch:
+            start_time = datetime.now()
+            logger.info(f"开始获取 {symbol} 新数据")
             try:
                 new_df = _fetch_new_data(symbol, last_update, now)
                 if new_df is not None:
@@ -416,6 +425,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
                         ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
                         df = df[ohlcv_cols]
                     df = _merge_and_clean_data(df, new_df, now)
+                    logger.info(f"获取 {symbol} 新数据成功, {new_df.shape[0]} 条新数据, {df.shape[0]} 条总数据，耗时 {(datetime.now() - start_time).total_seconds():.2f}s")
             except Exception as e:
                 logger.error(f"获取 {symbol} 数据失败: {e}")
 
@@ -660,6 +670,47 @@ def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART
 
 
 
+def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> list:
+    """
+    构建迷你 K 线图数据（精简字段，用于列表页缩略图）
+
+    Args:
+        df: 含指标的日线 DataFrame
+        num_days: 显示天数
+
+    Returns:
+        精简 K 线数据列表
+    """
+    chart_df = df.tail(num_days).copy()
+    chart_df = chart_df.reset_index()
+
+    date_col = chart_df.columns[0]
+    chart_df['time'] = pd.to_datetime(chart_df[date_col]).dt.strftime('%Y-%m-%d')
+
+    cols = {
+        'time': 'time',
+        'Open': 'open',
+        'High': 'high',
+        'Low': 'low',
+        'Close': 'close',
+    }
+
+    optional_cols = {
+        'EMA5': 'ema5',
+        'EMA10': 'ema10',
+        'EMA20': 'ema20',
+        'EMA50': 'ema50',
+    }
+
+    for src, dst in optional_cols.items():
+        if src in chart_df.columns:
+            cols[src] = dst
+
+    existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
+    result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
+    return result_df.to_dict('records')
+
+
 # ============================================
 # 主分析函数
 # ============================================
@@ -764,7 +815,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 if time.time() - file_mod_time < CACHE_DURATION_SECONDS:
                     cache_valid = True
 
-        if cache_valid and df_local is not None and 'EMA20' in df_local.columns:
+        if cache_valid and df_local is not None and 'EMA20' in df_local.columns and 'EMA5' in df_local.columns:
             # 缓存有效且含指标，直接使用
             df_weekly = _calculate_weekly_indicators(df_local)
             results[symbol] = (df_local, df_weekly)
@@ -797,6 +848,8 @@ def batch_fetch_and_update(symbols: list) -> dict:
     downloaded_data = {}
     with global_download_lock:
         try:
+            start_time = time.time()
+            logger.info(f"开始下载 {len(fetch_symbols)} 只股票: {fetch_symbols}")
             raw = yf.download(
                 fetch_symbols,
                 start=fetch_start,
@@ -805,6 +858,8 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 group_by="ticker",
                 threads=True,
             )
+            end_time = time.time()
+            logger.info(f"下载完成，耗时: {end_time - start_time:.2f} 秒")
             if raw is not None and not raw.empty:
                 if len(fetch_symbols) == 1:
                     downloaded_data[fetch_symbols[0]] = raw

@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { fetchWatchlist, fetchStockData, fetchBatchQuotes, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
-import type { StockData, WatchlistGroup } from './types';
+import { fetchWatchlist, fetchBatchQuotes, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
+import type { StockData, Candle, WatchlistGroup } from './types';
 import { ChartModal } from './components/ChartModal';
+import { MiniChart } from './components/MiniChart';
 import { StatusBadge } from './components/StatusBadge';
-import { RefreshCw, TrendingUp, Search, Plus, Trash2, FolderPlus, GripVertical, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
+import { RefreshCw, TrendingUp, Search, Plus, Trash2, FolderPlus, GripVertical, ChevronDown, ChevronRight, Pencil, LineChart } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
   DndContext,
@@ -26,16 +27,22 @@ import { CSS } from '@dnd-kit/utilities';
 const SortableContextAny = SortableContext as any;
 
 // Sortable Stock Row Component
-function SortableStockRow({ 
-  stock, 
-  onStockClick, 
+function SortableStockRow({
+  stock,
+  onStockClick,
   onRemoveStock,
-  onEditAlias
-}: { 
-  stock: StockData; 
+  onEditAlias,
+  miniCandles,
+  emaMode,
+  showCharts
+}: {
+  stock: StockData;
   onStockClick: (stock: StockData) => void;
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
   onEditAlias: (stock: StockData) => void;
+  miniCandles?: Candle[];
+  emaMode: 'long' | 'short';
+  showCharts: boolean;
 }) {
   const {
     attributes,
@@ -53,9 +60,8 @@ function SortableStockRow({
   };
 
   return (
-    <div 
-      ref={setNodeRef}
-      style={style}
+    <div ref={setNodeRef} style={style}>
+    <div
       className="flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:gap-4 p-4 items-start sm:items-center hover:bg-zinc-800/50 transition-colors cursor-pointer group relative bg-zinc-900/30 border-b border-zinc-800/30 sm:border-none"
       onClick={() => onStockClick(stock)}
     >
@@ -226,6 +232,12 @@ function SortableStockRow({
         </button>
       </div>
     </div>
+      {showCharts && miniCandles && miniCandles.length > 0 && (
+        <div className="px-4 pb-4" onClick={() => onStockClick(stock)}>
+          <MiniChart candles={miniCandles} emaMode={emaMode} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -235,13 +247,19 @@ function SortableGroup({
   onToggleCollapse,
   onStockClick,
   onRemoveStock,
-  onEditAlias
+  onEditAlias,
+  chartData,
+  emaMode,
+  showCharts
 }: {
   group: WatchlistGroup;
   onToggleCollapse: (groupId: string) => void;
   onStockClick: (stock: StockData) => void;
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
   onEditAlias: (stock: StockData) => void;
+  chartData: Record<string, Candle[]>;
+  emaMode: 'long' | 'short';
+  showCharts: boolean;
 }) {
   const {
     attributes,
@@ -289,13 +307,16 @@ function SortableGroup({
             <SortableContextAny items={(group.stocks || []).map(s => s.symbol)} strategy={verticalListSortingStrategy}>
               <div className="divide-y divide-zinc-800/50">
                 {group.stocks?.map(stock => (
-                  <SortableStockRow 
-                    key={stock.symbol} 
-                    stock={stock} 
+                  <SortableStockRow
+                    key={stock.symbol}
+                    stock={stock}
                     onStockClick={onStockClick}
                     onRemoveStock={onRemoveStock}
                     onEditAlias={onEditAlias}
-                  />
+                     miniCandles={chartData[stock.symbol]}
+                     emaMode={emaMode}
+                     showCharts={showCharts}
+                   />
                 ))}
               </div>
             </SortableContextAny>
@@ -326,6 +347,11 @@ function App() {
   }>({ key: 'price', direction: null });
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+
+  // 迷你图状态
+  const [chartData, setChartData] = useState<Record<string, Candle[]>>({});
+  const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
+  const [showCharts, setShowCharts] = useState(false);
 
   const handleEditAlias = async () => {
     if (!editingAliasStock) return;
@@ -414,6 +440,11 @@ function App() {
       }));
 
       setGroups(populatedGroups);
+
+      // 3. 静默加载迷你图数据（不阻塞列表展示）
+      fetchBatchCharts(uniqueSymbols).then(charts => {
+        setChartData(charts);
+      });
     } catch (error) {
       console.error("Failed to load watchlist:", error);
     } finally {
@@ -668,7 +699,7 @@ function App() {
               />
             </div>
 
-            <button 
+            <button
               onClick={() => setShowFilters(!showFilters)}
               className={clsx(
                 "p-1.5 sm:p-2 rounded-lg transition-colors border",
@@ -678,6 +709,26 @@ function App() {
             >
               <Search size={16} className={clsx(showFilters && "rotate-90")} style={{ transition: 'transform 0.2s' }} />
             </button>
+
+            <button
+               onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : 'long')}
+               className="px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono rounded-lg border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
+               title="切换 EMA 均线"
+             >
+               {emaMode === 'long' ? 'EMA 20/50' : 'EMA 5/10'}
+             </button>
+
+             <button
+               onClick={() => setShowCharts(!showCharts)}
+               className={clsx(
+                 "px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono rounded-lg border transition-colors flex items-center gap-1.5",
+                 showCharts ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white"
+               )}
+               title="显示/隐藏 10日趋势图"
+             >
+               <LineChart size={14} />
+               30日图
+             </button>
 
             <button 
               onClick={handleRefresh}
@@ -854,7 +905,10 @@ function App() {
                 onStockClick={setSelectedStock}
                 onRemoveStock={handleRemoveStock}
                 onEditAlias={openAliasModal}
-              />
+                   chartData={chartData}
+                   emaMode={emaMode}
+                   showCharts={showCharts}
+                 />
             ))}
           </SortableContextAny>
         </DndContext>
