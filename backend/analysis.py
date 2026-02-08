@@ -373,7 +373,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     获取股票数据并计算技术指标
 
     优先使用本地缓存，缓存过期则增量获取新数据。
-    锁的范围仅限于数据 I/O 操作，指标计算在锁外进行以提高并发性能。
+    指标计算结果会保存到 Parquet，缓存有效且含指标时跳过重算。
 
     Args:
         symbol: 股票代码
@@ -388,7 +388,6 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     # ========================================
     # 第一阶段：数据 I/O（需要锁保护）
     # ========================================
-    # 使用股票专属锁确保文件读写的线程安全
     with get_symbol_lock(symbol):
         # 1. 加载本地数据
         df_local, last_update = _load_local_data(file_path, symbol)
@@ -400,27 +399,39 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
             if time.time() - file_mod_time < CACHE_DURATION_SECONDS:
                 needs_fetch = False
 
-        # 3. 获取并合并新数据
+        # 3. 缓存有效且已含指标列 → 直接返回，跳过指标计算
+        if not needs_fetch and df_local is not None and 'EMA20' in df_local.columns:
+            df = df_local.copy()
+            df_weekly = _calculate_weekly_indicators(df)
+            return df, df_weekly
+
+        # 4. 获取并合并新数据
         df = df_local
         if needs_fetch:
             try:
                 new_df = _fetch_new_data(symbol, last_update, now)
                 if new_df is not None:
-                    df = _merge_and_clean_data(df_local, new_df, now)
-                    df.to_parquet(file_path)
+                    # 合并前去掉旧的指标列，只保留 OHLCV
+                    if df is not None:
+                        ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
+                        df = df[ohlcv_cols]
+                    df = _merge_and_clean_data(df, new_df, now)
             except Exception as e:
                 logger.error(f"获取 {symbol} 数据失败: {e}")
 
-        # 锁内返回数据副本，避免后续操作影响缓存
         if df is None or df.empty:
             return None
         df = df.copy()
 
     # ========================================
-    # 第二阶段：指标计算（无需锁，可并行）
+    # 第二阶段：指标计算 + 保存（无需锁，可并行）
     # ========================================
-    # 指标计算是 CPU 密集型操作，不涉及共享资源，无需锁保护
     df = _calculate_daily_indicators(df)
+
+    # 将含指标的完整 DataFrame 保存回 Parquet
+    with get_symbol_lock(symbol):
+        df.to_parquet(file_path)
+
     df_weekly = _calculate_weekly_indicators(df)
 
     return df, df_weekly
@@ -715,5 +726,181 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "signal": signal,
         "candles": candles,
         "weekly_candles": weekly_candles,
+        **weekly_status
+    }
+
+
+# ============================================
+# 批量获取与摘要分析
+# ============================================
+
+def batch_fetch_and_update(symbols: list) -> dict:
+    """
+    批量获取股票数据并计算指标
+
+    对缓存过期的 symbols 使用 yf.download 一次性下载，
+    缓存有效且含指标的直接从 Parquet 读取。
+
+    Args:
+        symbols: 股票代码列表
+
+    Returns:
+        {symbol: (df, df_weekly)} 字典
+    """
+    symbols = [s.upper() for s in symbols]
+    now = datetime.now()
+    results = {}
+    symbols_to_fetch = []
+
+    # 1. 筛选：哪些需要下载，哪些可以直接用缓存
+    for symbol in symbols:
+        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        df_local, last_update = _load_local_data(file_path, symbol)
+
+        cache_valid = False
+        if df_local is not None and last_update is not None:
+            if os.path.exists(file_path):
+                file_mod_time = os.path.getmtime(file_path)
+                if time.time() - file_mod_time < CACHE_DURATION_SECONDS:
+                    cache_valid = True
+
+        if cache_valid and df_local is not None and 'EMA20' in df_local.columns:
+            # 缓存有效且含指标，直接使用
+            df_weekly = _calculate_weekly_indicators(df_local)
+            results[symbol] = (df_local, df_weekly)
+        else:
+            symbols_to_fetch.append((symbol, df_local, last_update))
+
+    if not symbols_to_fetch:
+        return results
+
+    # 2. 确定批量下载的起始日期（增量拉取）
+    #    有本地数据的用最早的 last_update 做增量；全新 symbol 才拉全量
+    fetch_symbols = [s for s, _, _ in symbols_to_fetch]
+    logger.info(f"批量下载 {len(fetch_symbols)} 只股票: {fetch_symbols}")
+
+    earliest_update = None
+    has_new_symbol = False
+    for _, df_local, last_update in symbols_to_fetch:
+        if df_local is None or last_update is None:
+            has_new_symbol = True
+            break
+        if earliest_update is None or last_update < earliest_update:
+            earliest_update = last_update
+
+    if has_new_symbol or earliest_update is None:
+        fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
+    else:
+        fetch_start = earliest_update
+        logger.info(f"增量下载，起始日期: {fetch_start.strftime('%Y-%m-%d')}")
+
+    downloaded_data = {}
+    with global_download_lock:
+        try:
+            raw = yf.download(
+                fetch_symbols,
+                start=fetch_start,
+                end=now,
+                interval="1d",
+                group_by="ticker",
+                threads=True,
+            )
+            if raw is not None and not raw.empty:
+                if len(fetch_symbols) == 1:
+                    downloaded_data[fetch_symbols[0]] = raw
+                else:
+                    for sym in fetch_symbols:
+                        try:
+                            sym_df = raw[sym].dropna(how='all')
+                            if not sym_df.empty:
+                                downloaded_data[sym] = sym_df
+                        except (KeyError, Exception):
+                            pass
+        except Exception as e:
+            logger.error(f"批量下载失败: {e}")
+
+    # 3. 逐个合并、计算指标、保存
+    for symbol, df_local, last_update in symbols_to_fetch:
+        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        df = df_local
+
+        if symbol in downloaded_data:
+            new_df = downloaded_data[symbol]
+            # 移除时区信息
+            if hasattr(new_df.index, 'tz') and new_df.index.tz is not None:
+                new_df.index = new_df.index.tz_localize(None)
+            # 处理 MultiIndex 列
+            if isinstance(new_df.columns, pd.MultiIndex):
+                new_df.columns = new_df.columns.get_level_values(0)
+
+            # 合并前去掉旧的指标列
+            if df is not None:
+                ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
+                df = df[ohlcv_cols]
+            df = _merge_and_clean_data(df, new_df, now)
+
+        if df is None or df.empty:
+            continue
+
+        df = _calculate_daily_indicators(df)
+
+        with get_symbol_lock(symbol):
+            df.to_parquet(file_path)
+
+        df_weekly = _calculate_weekly_indicators(df)
+        results[symbol] = (df, df_weekly)
+
+    return results
+
+
+def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) -> Optional[dict]:
+    """
+    生成列表页所需的股票摘要数据（不含 candles）
+
+    Args:
+        symbol: 股票代码
+        df: 含指标的日线 DataFrame
+        df_weekly: 含指标的周线 DataFrame
+
+    Returns:
+        摘要字典，或 None
+    """
+    if df is None or len(df) < EMA_LONG_PERIOD:
+        return None
+
+    last_row = df.iloc[-1]
+
+    price = float(last_row['Close'])
+    ema20 = float(last_row['EMA20'])
+    ema50 = float(last_row['EMA50'])
+    adx = float(last_row['ADX']) if 'ADX' in last_row else 0
+
+    rsi_period, rsi = _get_dynamic_rsi(adx, last_row)
+    trend = _analyze_trend(price, ema20, ema50)
+    signal = _get_signal(adx, trend)
+    rsi_status, rsi_overbought, rsi_oversold = _get_rsi_status(rsi, adx, trend)
+
+    prev_close = float(df.iloc[-2]['Close'])
+    change_percent = ((price - prev_close) / prev_close) * 100
+
+    weekly_status = _get_weekly_status(price, df_weekly)
+
+    return {
+        "symbol": symbol,
+        "name": symbol,
+        "price": price,
+        "changePercent": change_percent,
+        "ema20": ema20,
+        "ema50": ema50,
+        "adx": adx,
+        "rsi": rsi,
+        "rsiPeriod": rsi_period,
+        "rsiStatus": rsi_status,
+        "rsiOverbought": rsi_overbought,
+        "rsiOversold": rsi_oversold,
+        "trend": trend,
+        "signal": signal,
+        "candles": [],
+        "weekly_candles": [],
         **weekly_status
     }

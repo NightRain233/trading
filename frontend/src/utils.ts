@@ -17,6 +17,21 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
   }
 }
 
+export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string, StockData>> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/quotes/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols })
+    });
+    if (!response.ok) return {};
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching batch quotes:', error);
+    return {};
+  }
+}
+
 export async function fetchWatchlist(): Promise<WatchlistGroup[]> {
   try {
     const response = await fetch(`${API_BASE_URL}/watchlist`);

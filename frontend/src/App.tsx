@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { fetchWatchlist, fetchStockData, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
+import { fetchWatchlist, fetchStockData, fetchBatchQuotes, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, WatchlistGroup } from './types';
 import { ChartModal } from './components/ChartModal';
 import { StatusBadge } from './components/StatusBadge';
@@ -91,48 +91,68 @@ function SortableStockRow({
 
         {/* Mobile Price Display */}
         <div className="sm:hidden text-right leading-tight">
-          <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
-          <div className={clsx("text-[10px] font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-            {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
-          </div>
+          {stock._loading ? (
+            <div className="space-y-1">
+              <div className="h-4 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+              <div className="h-3 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+            </div>
+          ) : (<>
+            <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
+            <div className={clsx("text-[10px] font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+              {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+            </div>
+          </>)}
         </div>
       </div>
       
       <div className="hidden sm:block sm:col-span-2 text-right">
-        <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
-        <div className={clsx("text-xs font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-          {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
-        </div>
+        {stock._loading ? (
+          <div className="space-y-1">
+            <div className="h-4 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+            <div className="h-3 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+          </div>
+        ) : (<>
+          <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
+          <div className={clsx("text-xs font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+            {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+          </div>
+        </>)}
       </div>
 
       {/* Badges/Status Row */}
       <div className="flex items-center justify-between sm:justify-end w-full sm:col-span-2 gap-2">
-        <div className="sm:hidden flex items-center gap-2">
-          {stock.signal && stock.signal !== '观望' && (
-            <span className={clsx(
-              "px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
-              stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
-            )}>
-              {stock.signal}
-            </span>
-          )}
-          {stock.weeklyMacdStatus && (
-            <span className={clsx(
-              "text-[10px] font-bold whitespace-nowrap",
-              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" : 
-              stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
-              stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
-              "text-rose-400"
-            )}>
-              {stock.weeklyMacdStatus}
-            </span>
-          )}
-        </div>
-        <StatusBadge status={stock.trend} type="trend" />
+        {stock._loading ? (
+          <div className="h-5 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+        ) : (<>
+          <div className="sm:hidden flex items-center gap-2">
+            {stock.signal && stock.signal !== '观望' && (
+              <span className={clsx(
+                "px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
+                stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
+              )}>
+                {stock.signal}
+              </span>
+            )}
+            {stock.weeklyMacdStatus && (
+              <span className={clsx(
+                "text-[10px] font-bold whitespace-nowrap",
+                stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" :
+                stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
+                stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
+                "text-rose-400"
+              )}>
+                {stock.weeklyMacdStatus}
+              </span>
+            )}
+          </div>
+          <StatusBadge status={stock.trend} type="trend" />
+        </>)}
       </div>
 
       <div className="col-span-2 hidden sm:block text-right">
-        {stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
+        {stock._loading ? (
+          <div className="h-5 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+        ) : stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
           <span className={clsx(
             "px-2 py-1 rounded text-xs font-bold",
             stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
@@ -145,29 +165,38 @@ function SortableStockRow({
       </div>
 
       <div className="col-span-2 hidden sm:block text-right">
-        <span 
-          className={clsx(
-            "font-mono text-sm px-2 py-0.5 rounded",
-            stock.rsiStatus === '超买' ? "text-rose-400 bg-rose-500/10" : 
-            stock.rsiStatus === '超卖' ? "text-emerald-400 bg-emerald-500/10" : 
-            "text-zinc-400"
-          )}
-          title={`阈值: ${stock.rsiOversold || '?'}-${stock.rsiOverbought || '?'}`}
-        >
-          {stock.rsi?.toFixed(1) || 'N/A'}
-          <span className="ml-1 text-[10px] text-zinc-600">({stock.rsiPeriod || 14})</span>
-          {stock.rsiStatus && stock.rsiStatus !== '中性' && (
-            <span className="ml-1 text-xs opacity-75">{stock.rsiStatus}</span>
-          )}
-        </span>
+        {stock._loading ? (
+          <div className="h-5 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+        ) : (
+          <span
+            className={clsx(
+              "font-mono text-sm px-2 py-0.5 rounded",
+              stock.rsiStatus === '超买' ? "text-rose-400 bg-rose-500/10" :
+              stock.rsiStatus === '超卖' ? "text-emerald-400 bg-emerald-500/10" :
+              "text-zinc-400"
+            )}
+            title={`阈值: ${stock.rsiOversold || '?'}-${stock.rsiOverbought || '?'}`}
+          >
+            {stock.rsi?.toFixed(1) || 'N/A'}
+            <span className="ml-1 text-[10px] text-zinc-600">({stock.rsiPeriod || 14})</span>
+            {stock.rsiStatus && stock.rsiStatus !== '中性' && (
+              <span className="ml-1 text-xs opacity-75">{stock.rsiStatus}</span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className="col-span-2 hidden sm:block text-right">
-        {stock.weeklyMacdStatus ? (
+        {stock._loading ? (
+          <div className="space-y-1">
+            <div className="h-4 w-14 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+            <div className="h-3 w-10 bg-zinc-700/50 rounded animate-pulse ml-auto" />
+          </div>
+        ) : stock.weeklyMacdStatus ? (
           <div className="flex flex-col items-end leading-tight">
             <span className={clsx(
               "text-xs font-bold",
-              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" : 
+              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" :
               stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
               stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
               "text-rose-400"
@@ -327,42 +356,60 @@ function App() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch group structure (lightweight)
+      // 1. Fetch group structure (lightweight) → 立即渲染骨架
       const groupsData = await fetchWatchlist();
-      
-      // 2. Collect unique symbols
-      const uniqueSymbols = new Set<string>();
-      const aliasMap = new Map<string, string>(); // symbol -> alias
-      
+
+      const aliasMap = new Map<string, string>();
+      const uniqueSymbols: string[] = [];
       groupsData.forEach(g => {
         g.symbols.forEach(s => {
-          uniqueSymbols.add(s.symbol);
+          if (!uniqueSymbols.includes(s.symbol)) {
+            uniqueSymbols.push(s.symbol);
+          }
           if (s.alias) {
             aliasMap.set(s.symbol, s.alias);
           }
         });
       });
 
-      // 3. Fetch stock details in parallel
-      const stockMap = new Map<string, StockData>();
-      const promises = Array.from(uniqueSymbols).map(async (symbol) => {
-        const data = await fetchStockData(symbol);
-        if (data) {
-          // Merge alias if exists
-          if (aliasMap.has(symbol)) {
-            data.alias = aliasMap.get(symbol);
-          }
-          stockMap.set(symbol, data);
+      // 先用 watchlist 信息渲染股票名称占位行
+      setGroups(groupsData.map(g => ({
+        ...g,
+        stocks: g.symbols.map(s => ({
+          symbol: s.symbol,
+          name: s.symbol,
+          alias: s.alias,
+          price: 0,
+          changePercent: 0,
+          candles: [],
+          ema20: 0,
+          ema50: 0,
+          adx: 0,
+          rsi: 0,
+          rsiPeriod: 14,
+          rsiStatus: '中性' as const,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          trend: '震荡' as const,
+          signal: '观望' as const,
+          _loading: true,
+        }))
+      })));
+      setLoading(false);
+
+      // 2. 异步拉取批量数据，回来后填充
+      const stockMap = await fetchBatchQuotes(uniqueSymbols);
+
+      for (const [symbol, alias] of aliasMap) {
+        if (stockMap[symbol]) {
+          stockMap[symbol].alias = alias;
         }
-      });
+      }
 
-      await Promise.all(promises);
-
-      // 4. Populate groups with stock data
       const populatedGroups = groupsData.map(g => ({
         ...g,
         stocks: g.symbols
-          .map(symObj => stockMap.get(symObj.symbol))
+          .map(symObj => stockMap[symObj.symbol])
           .filter((s): s is StockData => s !== undefined)
       }));
 

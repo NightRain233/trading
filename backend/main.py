@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from analysis import analyze_stock
+from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary
 import json
 import os
 import uuid
@@ -113,6 +113,9 @@ class CreateGroupRequest(BaseModel):
 class UpdateWatchlistRequest(BaseModel):
     groups: List[Group]
 
+class BatchQuoteRequest(BaseModel):
+    symbols: List[str]
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Trading Backend is running"}
@@ -123,6 +126,19 @@ def get_quote(symbol: str):
     if not data:
         raise HTTPException(status_code=404, detail="Stock not found or insufficient data")
     return data
+
+@app.post("/api/quotes/batch")
+def get_batch_quotes(request: BatchQuoteRequest):
+    """批量获取股票摘要数据（列表页使用，不含 K 线数据）"""
+    if not request.symbols:
+        return {}
+    results = batch_fetch_and_update(request.symbols)
+    response = {}
+    for symbol, (df, df_weekly) in results.items():
+        summary = analyze_stock_summary(symbol, df, df_weekly)
+        if summary:
+            response[symbol] = summary
+    return response
 
 @app.get("/api/watchlist")
 def get_watchlist():
