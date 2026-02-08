@@ -200,8 +200,12 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # ADX 指标
     adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=ADX_PERIOD)
     if adx_df is not None and not adx_df.empty:
-        df = df.join(adx_df)
-        df['ADX'] = df[f'ADX_{ADX_PERIOD}']
+        # 使用前缀搜索 ADX 列
+        adx_col = next((c for c in adx_df.columns if c.startswith('ADX_')), None)
+        if adx_col:
+            df['ADX'] = adx_df[adx_col]
+        else:
+            df['ADX'] = 0
     else:
         df['ADX'] = 0
 
@@ -216,27 +220,49 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 布林线 (BOLL)
     bbands = ta.bbands(df['Close'], length=BOLL_PERIOD, std=BOLL_STD)
     if bbands is not None and not bbands.empty:
-        df['BOLL_Upper'] = bbands[f'BBU_{BOLL_PERIOD}_{float(BOLL_STD)}']
-        df['BOLL_Mid'] = bbands[f'BBM_{BOLL_PERIOD}_{float(BOLL_STD)}']
-        df['BOLL_Lower'] = bbands[f'BBL_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        # 使用列名前缀搜索，提高鲁棒性（不同版本的 pandas-ta 可能使用不同的小数格式）
+        upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
+        mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
+        lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+        
+        if upper_col and mid_col and lower_col:
+            df['BOLL_Upper'] = bbands[upper_col]
+            df['BOLL_Mid'] = bbands[mid_col]
+            df['BOLL_Lower'] = bbands[lower_col]
+        else:
+            df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
     else:
         df['BOLL_Upper'] = df['BOLL_Mid'] = df['BOLL_Lower'] = None
 
     # KDJ 指标
     stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
     if stoch is not None and not stoch.empty:
-        df['K'] = stoch[f'STOCHk_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
-        df['D'] = stoch[f'STOCHd_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
-        df['J'] = 3 * df['K'] - 2 * df['D']  # J = 3K - 2D
+        # 寻找 STOCHk 和 STOCHd 列
+        k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
+        d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+        if k_col and d_col:
+            df['K'] = stoch[k_col]
+            df['D'] = stoch[d_col]
+            df['J'] = 3 * df['K'] - 2 * df['D']
+        else:
+            df['K'] = df['D'] = df['J'] = 50
     else:
         df['K'] = df['D'] = df['J'] = 50
 
     # MACD 指标
     macd_df = ta.macd(df['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
     if macd_df is not None and not macd_df.empty:
-        df['MACD_DIF'] = macd_df[f'MACD_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
-        df['MACD_DEA'] = macd_df[f'MACDs_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
-        df['MACD_Hist'] = macd_df[f'MACDh_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
+        # 寻找 MACD 主线、信号线和柱状图列
+        dif_col = next((c for c in macd_df.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
+        dea_col = next((c for c in macd_df.columns if c.startswith('MACDs_')), None)
+        hist_col = next((c for c in macd_df.columns if c.startswith('MACDh_')), None)
+        
+        if dif_col and dea_col and hist_col:
+            df['MACD_DIF'] = macd_df[dif_col]
+            df['MACD_DEA'] = macd_df[dea_col]
+            df['MACD_Hist'] = macd_df[hist_col]
+        else:
+            df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
     else:
         df['MACD_DIF'] = df['MACD_DEA'] = df['MACD_Hist'] = 0
 
@@ -279,14 +305,21 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 周线 MACD
     macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
     if macd_w is not None and not macd_w.empty:
-        df_weekly = df_weekly.join(macd_w)
-        df_weekly['MACD_W'] = df_weekly[f'MACD_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
-        df_weekly['MACD_Signal_W'] = df_weekly[f'MACDs_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
-        df_weekly['MACD_Hist_W'] = df_weekly[f'MACDh_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}']
-        # 同时保存为通用名（供 _build_candles 使用）
-        df_weekly['MACD_DIF'] = df_weekly['MACD_W']
-        df_weekly['MACD_DEA'] = df_weekly['MACD_Signal_W']
-        df_weekly['MACD_Hist'] = df_weekly['MACD_Hist_W']
+        dif_col = next((c for c in macd_w.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
+        dea_col = next((c for c in macd_w.columns if c.startswith('MACDs_')), None)
+        hist_col = next((c for c in macd_w.columns if c.startswith('MACDh_')), None)
+        
+        if dif_col and dea_col and hist_col:
+            df_weekly['MACD_W'] = macd_w[dif_col]
+            df_weekly['MACD_Signal_W'] = macd_w[dea_col]
+            df_weekly['MACD_Hist_W'] = macd_w[hist_col]
+            # 同时保存为通用名
+            df_weekly['MACD_DIF'] = df_weekly['MACD_W']
+            df_weekly['MACD_DEA'] = df_weekly['MACD_Signal_W']
+            df_weekly['MACD_Hist'] = df_weekly['MACD_Hist_W']
+        else:
+            df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
+            df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
     else:
         df_weekly['MACD_W'] = df_weekly['MACD_Signal_W'] = df_weekly['MACD_Hist_W'] = 0
         df_weekly['MACD_DIF'] = df_weekly['MACD_DEA'] = df_weekly['MACD_Hist'] = 0
@@ -294,9 +327,16 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 布林线 (BOLL)
     bbands = ta.bbands(df_weekly['Close'], length=BOLL_PERIOD, std=BOLL_STD)
     if bbands is not None and not bbands.empty:
-        df_weekly['BOLL_Upper'] = bbands[f'BBU_{BOLL_PERIOD}_{float(BOLL_STD)}']
-        df_weekly['BOLL_Mid'] = bbands[f'BBM_{BOLL_PERIOD}_{float(BOLL_STD)}']
-        df_weekly['BOLL_Lower'] = bbands[f'BBL_{BOLL_PERIOD}_{float(BOLL_STD)}']
+        upper_col = next((c for c in bbands.columns if c.startswith('BBU_')), None)
+        mid_col = next((c for c in bbands.columns if c.startswith('BBM_')), None)
+        lower_col = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+        
+        if upper_col and mid_col and lower_col:
+            df_weekly['BOLL_Upper'] = bbands[upper_col]
+            df_weekly['BOLL_Mid'] = bbands[mid_col]
+            df_weekly['BOLL_Lower'] = bbands[lower_col]
+        else:
+            df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
     else:
         df_weekly['BOLL_Upper'] = df_weekly['BOLL_Mid'] = df_weekly['BOLL_Lower'] = None
 
@@ -304,9 +344,14 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
     stoch = ta.stoch(df_weekly['High'], df_weekly['Low'], df_weekly['Close'], 
                      k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
     if stoch is not None and not stoch.empty:
-        df_weekly['K'] = stoch[f'STOCHk_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
-        df_weekly['D'] = stoch[f'STOCHd_{KDJ_PERIOD}_{KDJ_SIGNAL_K}_{KDJ_SIGNAL_D}']
-        df_weekly['J'] = 3 * df_weekly['K'] - 2 * df_weekly['D']
+        k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
+        d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+        if k_col and d_col:
+            df_weekly['K'] = stoch[k_col]
+            df_weekly['D'] = stoch[d_col]
+            df_weekly['J'] = 3 * df_weekly['K'] - 2 * df_weekly['D']
+        else:
+            df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
     else:
         df_weekly['K'] = df_weekly['D'] = df_weekly['J'] = 50
 

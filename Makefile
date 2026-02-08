@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-logs clean
+.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-logs clean deploy
 
 
 # 初始化项目: make install
@@ -16,6 +16,10 @@
 
 # Default shell
 SHELL := /bin/bash
+
+# Deployment config (Update these)
+DEPLOY_HOST := root@8.153.71.148
+DEPLOY_PATH := /home/zsd/trading
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -50,16 +54,21 @@ build: build-fe ## Build all (frontend only for now, backend is interpreted)
 docker-build: ## Build docker images using docker compose
 	docker compose build
 
-docker-up: ## Start docker containers in background
+up: ## Start docker containers in background
 	docker compose up -d
 
-docker-down: ## Stop and remove docker containers
+down: ## Stop and remove docker containers
 	docker compose down
 
-docker-logs: ## View docker container logs
+logs: ## View docker container logs
 	docker compose logs -f
 
-docker-restart: docker-down docker-up ## Restart docker containers
+restart: down up ## Restart docker containers
+
+# --- Deployment ---
+
+deploy: ## Sync project to remote server using rsync
+	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH) --delete
 
 # --- Cleanup ---
 

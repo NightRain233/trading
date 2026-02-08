@@ -1,18 +1,19 @@
 version: '3.8'
 
 services:
-  # backend:
-  #   build: ./backend
-  #   restart: always
-  #   volumes:
-  #     - ./backend/data:/app/data
-  #   ports:
-  #     - "8000:8000"
+  backend:
+    build: ./backend
+    restart: always
+    network_mode: "host"  # 关键点：直接使用宿主机网络
+    environment:
+      - HTTP_PROXY=http://127.0.0.1:7890
+      - HTTPS_PROXY=http://127.0.0.1:7890
+    volumes:
+      - ./backend/data:/app/data
 
   frontend:
     build: ./frontend
     restart: always
-    ports:
-      - "80:80"
-    # depends_on:
-    #   - backend
+    network_mode: "host"
+    depends_on:
+      - backend
