@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -10,7 +11,7 @@ interface StatusBadgeProps {
   type?: 'trend' | 'signal' | 'rsi';
 }
 
-export function StatusBadge({ status, type = 'trend' }: StatusBadgeProps) {
+export const StatusBadge = memo(function StatusBadge({ status, type = 'trend' }: StatusBadgeProps) {
   // 趋势派色
   const trendColors: Record<string, string> = {
     '强势多头': 'bg-emerald-600/20 text-emerald-300 font-bold border-emerald-500/30',
@@ -50,4 +51,4 @@ export function StatusBadge({ status, type = 'trend' }: StatusBadgeProps) {
       {status}
     </span>
   );
-}
+});

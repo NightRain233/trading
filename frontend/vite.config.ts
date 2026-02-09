@@ -39,4 +39,42 @@ export default defineConfig({
       }
     })
   ],
+  optimizeDeps: {
+    include: [
+      'lightweight-charts',
+      '@dnd-kit/core',
+      '@dnd-kit/sortable',
+      '@dnd-kit/utilities',
+      'framer-motion',
+      'lucide-react',
+      'clsx',
+    ],
+  },
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        timeout: 60000,
+        proxyTimeout: 60000,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('Vite Proxy Error:', err);
+          });
+        },
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'lightweight-charts': ['lightweight-charts'],
+          'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+        },
+      },
+    },
+  },
 })

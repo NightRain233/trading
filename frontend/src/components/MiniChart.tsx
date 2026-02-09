@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, memo } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries, CrosshairMode } from 'lightweight-charts';
 import type { IChartApi, Time, MouseEventParams } from 'lightweight-charts';
 import type { Candle } from '../types';
@@ -11,13 +11,13 @@ interface MiniChartProps {
   height?: number;
 }
 
-export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: MiniChartProps) {
+export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: MiniChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  
+
   // Local state for EMA mode to allow per-stock overrides
   const [internalEmaMode, setInternalEmaMode] = useState(propsEmaMode);
-  
+
   const [hoverData, setHoverData] = useState<{
     date: string;
     price: number;
@@ -36,22 +36,21 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
   }, [propsEmaMode]);
 
   // Memoize data to prevent unnecessary recalculations
-  const { 
-    candleData, 
-    ema1Data, 
-    ema2Data, 
-    periodChange, 
-    firstDate, 
-    lastDate, 
-    maxPrice, 
+  const {
+    candleData,
+    ema1Data,
+    ema2Data,
+    firstDate,
+    lastDate,
+    maxPrice,
     minPrice,
-    changePercent 
+    changePercent
   } = useMemo(() => {
     const validCandles = candles.filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
-    
+
     if (validCandles.length === 0) {
-      return { 
-        candleData: [], ema1Data: [], ema2Data: [], 
+      return {
+        candleData: [], ema1Data: [], ema2Data: [],
         periodChange: 0, firstDate: '', lastDate: '',
         maxPrice: 0, minPrice: 0, changePercent: 0
       };
@@ -81,22 +80,22 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
     const last = validCandles[validCandles.length - 1];
     const change = last.close - first.open;
     const changePct = (change / first.open) * 100;
-    
+
     // Format dates
     const formatDate = (d: string) => {
-        try {
-            const date = new Date(d);
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        } catch (e) {
-            return d;
-        }
+      try {
+        const date = new Date(d);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } catch (e) {
+        return d;
+      }
     };
 
     const prices = validCandles.flatMap(c => [c.high, c.low]);
-    
-    return { 
-      candleData: cData, 
-      ema1Data: e1Data, 
+
+    return {
+      candleData: cData,
+      ema1Data: e1Data,
       ema2Data: e2Data,
       periodChange: change,
       changePercent: changePct,
@@ -138,8 +137,8 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
         visible: false,
         borderVisible: false,
         scaleMargins: {
-            top: 0.2, // increased margin for labels
-            bottom: 0.2,
+          top: 0.2, // increased margin for labels
+          bottom: 0.2,
         }
       },
       crosshair: {
@@ -176,12 +175,12 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
     // EMA Lines
     const ema1Color = internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8'; // amber-500 : sky-400
     const ema2Color = internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c'; // violet-500 : orange-400
-    
+
     let line1: any = null;
     if (ema1Data.length > 0) {
       line1 = chart.addSeries(LineSeries, {
         color: ema1Color,
-        lineWidth: 2, 
+        lineWidth: 2,
         crosshairMarkerVisible: false,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -207,9 +206,9 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
     const handleCrosshairMove = (param: MouseEventParams) => {
       const container = containerRef.current;
       if (
-        !param.time || 
-        param.point === undefined || 
-        !param.point.x || 
+        !param.time ||
+        param.point === undefined ||
+        !param.point.x ||
         !param.point.y ||
         !container
       ) {
@@ -244,9 +243,9 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
 
     // Resize Observer to handle container resizing
     const resizeObserver = new ResizeObserver(entries => {
-        if (entries.length === 0 || !entries[0].contentRect || !chartRef.current) return;
-        const { width } = entries[0].contentRect;
-        chartRef.current.applyOptions({ width });
+      if (entries.length === 0 || !entries[0].contentRect || !chartRef.current) return;
+      const { width } = entries[0].contentRect;
+      chartRef.current.applyOptions({ width });
     });
     resizeObserver.observe(containerRef.current);
 
@@ -262,9 +261,9 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
 
   if (candles.length === 0) {
     return (
-        <div className="h-[120px] flex items-center justify-center text-zinc-600 text-xs bg-zinc-900/30 rounded-lg border border-zinc-800/50">
-            No Data
-        </div>
+      <div className="h-[120px] flex items-center justify-center text-zinc-600 text-xs bg-zinc-900/30 rounded-lg border border-zinc-800/50">
+        No Data
+      </div>
     );
   }
 
@@ -276,124 +275,124 @@ export function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: Mini
       <div className="flex justify-between items-center mb-2 px-1">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-zinc-400 font-medium bg-zinc-800/50 px-2 py-0.5 rounded-md border border-zinc-700/30">
-             <Calendar size={12} className="text-zinc-500" />
-             <span>{firstDate} - {lastDate}</span>
-             <span className="text-zinc-600 mx-1">|</span>
-             <span className="text-zinc-500">{candles.length}D</span>
+            <Calendar size={12} className="text-zinc-500" />
+            <span>{firstDate} - {lastDate}</span>
+            <span className="text-zinc-600 mx-1">|</span>
+            <span className="text-zinc-500">{candles.length}D</span>
           </div>
 
           <button
             onClick={(e) => {
-                e.stopPropagation();
-                setInternalEmaMode(prev => prev === 'long' ? 'short' : 'long');
+              e.stopPropagation();
+              setInternalEmaMode(prev => prev === 'long' ? 'short' : 'long');
             }}
             className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-zinc-700/50 bg-zinc-800/20 text-[10px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 hover:bg-zinc-800/50 transition-all group/ema"
             title="点击切换当前股票均线模式"
           >
-             <Activity size={10} className="text-zinc-600 group-hover/ema:text-emerald-500 transition-colors" />
-             <span className="font-mono tracking-tighter">{internalEmaMode === 'long' ? '20/50' : '5/10'}</span>
+            <Activity size={10} className="text-zinc-600 group-hover/ema:text-emerald-500 transition-colors" />
+            <span className="font-mono tracking-tighter">{internalEmaMode === 'long' ? '20/50' : '5/10'}</span>
           </button>
         </div>
 
         <div className={clsx(
-            "flex items-center gap-1 text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-md border transition-colors",
-            isPositive 
-                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+          "flex items-center gap-1 text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-md border transition-colors",
+          isPositive
+            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+            : "bg-rose-500/10 text-rose-400 border-rose-500/20"
         )}>
-            {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-            {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+          {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+          {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
         </div>
       </div>
 
       {/* Chart Container */}
       <div className="relative">
-          <div ref={containerRef} className="w-full relative z-10 box-border" style={{ height }} />
-          
-          {/* Min/Max Price Labels (Background) - Positioned inside chart area */}
-          <div className="absolute top-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
-             H: {maxPrice.toFixed(2)}
-          </div>
-          <div className="absolute bottom-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
-             L: {minPrice.toFixed(2)}
-          </div>
+        <div ref={containerRef} className="w-full relative z-10 box-border" style={{ height }} />
 
-          {/* Improved Tooltip */}
-          {hoverData && (() => {
-             const tooltipWidth = 140; // Approximate width
-             const chartWidth = containerRef.current?.offsetWidth || 0;
-             
-             // Calculate tooltip position
-             const leftPos = Math.max(0, Math.min(chartWidth - tooltipWidth, hoverData.x - (tooltipWidth / 2)));
-             
-             // Calculate arrow position relative to tooltip
-             const arrowPos = Math.max(10, Math.min(tooltipWidth - 14, hoverData.x - leftPos));
+        {/* Min/Max Price Labels (Background) - Positioned inside chart area */}
+        <div className="absolute top-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
+          H: {maxPrice.toFixed(2)}
+        </div>
+        <div className="absolute bottom-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
+          L: {minPrice.toFixed(2)}
+        </div>
 
-             return (
-                <div 
-                  className="absolute z-50 pointer-events-none flex flex-col items-start transition-all duration-75 ease-out"
-                  style={{
-                    top: -10, 
-                    transform: 'translateY(-100%)',
-                    left: leftPos,
-                    width: tooltipWidth
-                  }}
-                >
-                  <div className="w-full bg-zinc-950/90 border border-zinc-700/80 rounded-lg shadow-xl shadow-black/60 p-2 text-[10px] backdrop-blur-md animate-in fade-in zoom-in-95 leading-tight">
-                    <div className="flex justify-between items-center mb-1 pb-1 border-b border-zinc-800">
-                        <span className="text-zinc-400 font-medium whitespace-nowrap">{hoverData.date}</span>
-                        <span className={clsx("font-bold ml-2", 
-                            hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400"
-                        )}>
-                            {((hoverData.price - hoverData.open) / hoverData.open * 100).toFixed(2)}%
-                        </span>
-                    </div>
+        {/* Improved Tooltip */}
+        {hoverData && (() => {
+          const tooltipWidth = 140; // Approximate width
+          const chartWidth = containerRef.current?.offsetWidth || 0;
 
-                    <div className="space-y-0.5">
-                        <div className="flex justify-between items-center">
-                            <span className="text-zinc-500">Close</span>
-                            <span className={clsx("font-mono font-medium", hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400")}>
-                                {hoverData.price.toFixed(2)}
-                            </span>
-                        </div>
+          // Calculate tooltip position
+          const leftPos = Math.max(0, Math.min(chartWidth - tooltipWidth, hoverData.x - (tooltipWidth / 2)));
 
-                        {hoverData.ema1 && (
-                            <div className="flex justify-between items-center">
-                                <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8' }}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                                    {internalEmaMode === 'long' ? 'EMA20' : 'EMA5'}
-                                </span>
-                                <span className="font-mono text-zinc-300">
-                                    {hoverData.ema1.toFixed(2)}
-                                </span>
-                            </div>
-                        )}
+          // Calculate arrow position relative to tooltip
+          const arrowPos = Math.max(10, Math.min(tooltipWidth - 14, hoverData.x - leftPos));
 
-                        {hoverData.ema2 && (
-                            <div className="flex justify-between items-center">
-                                <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c' }}>
-                                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                                    {internalEmaMode === 'long' ? 'EMA50' : 'EMA10'}
-                                </span>
-                                <span className="font-mono text-zinc-300">
-                                    {hoverData.ema2.toFixed(2)}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                  </div>
-                  
-                  {/* Tooltip Arrow */}
-                  <div 
-                    className="w-2 h-2 bg-zinc-950 border-r border-b border-zinc-700/80 rotate-45 -mt-1 z-50 relative"
-                    style={{ 
-                        left: arrowPos
-                    }} 
-                  />
+          return (
+            <div
+              className="absolute z-50 pointer-events-none flex flex-col items-start transition-all duration-75 ease-out"
+              style={{
+                top: -10,
+                transform: 'translateY(-100%)',
+                left: leftPos,
+                width: tooltipWidth
+              }}
+            >
+              <div className="w-full bg-zinc-950/90 border border-zinc-700/80 rounded-lg shadow-xl shadow-black/60 p-2 text-[10px] backdrop-blur-md animate-in fade-in zoom-in-95 leading-tight">
+                <div className="flex justify-between items-center mb-1 pb-1 border-b border-zinc-800">
+                  <span className="text-zinc-400 font-medium whitespace-nowrap">{hoverData.date}</span>
+                  <span className={clsx("font-bold ml-2",
+                    hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400"
+                  )}>
+                    {((hoverData.price - hoverData.open) / hoverData.open * 100).toFixed(2)}%
+                  </span>
                 </div>
-             );
-          })()}
+
+                <div className="space-y-0.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-zinc-500">Close</span>
+                    <span className={clsx("font-mono font-medium", hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400")}>
+                      {hoverData.price.toFixed(2)}
+                    </span>
+                  </div>
+
+                  {hoverData.ema1 && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8' }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {internalEmaMode === 'long' ? 'EMA20' : 'EMA5'}
+                      </span>
+                      <span className="font-mono text-zinc-300">
+                        {hoverData.ema1.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {hoverData.ema2 && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c' }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {internalEmaMode === 'long' ? 'EMA50' : 'EMA10'}
+                      </span>
+                      <span className="font-mono text-zinc-300">
+                        {hoverData.ema2.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tooltip Arrow */}
+              <div
+                className="w-2 h-2 bg-zinc-950 border-r border-b border-zinc-700/80 rotate-45 -mt-1 z-50 relative"
+                style={{
+                  left: arrowPos
+                }}
+              />
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
-}
+});

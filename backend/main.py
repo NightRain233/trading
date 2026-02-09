@@ -9,6 +9,7 @@ import uuid
 import time
 import logging
 import asyncio
+import threading
 from contextlib import contextmanager
 
 # 获取日志记录器，用于在控制台输出信息
@@ -317,12 +318,13 @@ def refresh_watchlist_background():
         # 每 20 分钟跑一次
         time.sleep(1200)
 
-if __name__ == "__main__":
-    import uvicorn
-    import threading
-    
-    # 启动后台刷新线程，不阻塞主进程
+@app.on_event("startup")
+async def startup_event():
+    """系统启动时，启动后台维护线程"""
+    logger.info("==> [系统启动] 正在启动后台数据管家...")
     bg_thread = threading.Thread(target=refresh_watchlist_background, daemon=True)
     bg_thread.start()
-    
+
+if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -2,9 +2,7 @@ import type { Candle, StockData, WatchlistGroup, WatchlistItem } from './types';
 
 // 自动根据环境判断 API 地址
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
-const API_BASE_URL = import.meta.env.PROD 
-  ? '/api' 
-  : 'http://localhost:8000/api';
+const API_BASE_URL = '/api';
 
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
   try {
@@ -19,6 +17,14 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
 
 export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string, StockData>> {
   try {
+    // 优先使用 index.html 中预抓取的 Promise
+    const prefetchPromise = (window as any).__BATCH_PROMISE__;
+    if (prefetchPromise) {
+      const data = await prefetchPromise;
+      (window as any).__BATCH_PROMISE__ = null;
+      if (data) return data;
+    }
+
     const response = await fetch(`${API_BASE_URL}/quotes/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,6 +55,15 @@ export async function fetchBatchCharts(symbols: string[]): Promise<Record<string
 
 export async function fetchWatchlist(): Promise<WatchlistGroup[]> {
   try {
+    // 优先使用 index.html 中预抓取的 Promise
+    const prefetchPromise = (window as any).__WATCHLIST_PROMISE__;
+    if (prefetchPromise) {
+      const data = await prefetchPromise;
+      // 使用完后清除，防止后续刷新又用了旧的（或者由 loadData 自行决定）
+      (window as any).__WATCHLIST_PROMISE__ = null;
+      if (data) return data;
+    }
+
     const response = await fetch(`${API_BASE_URL}/watchlist`);
     if (!response.ok) return [];
     return await response.json();

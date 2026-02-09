@@ -2,15 +2,83 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="preconnect" href="http://127.0.0.1:8000" />
+    <link rel="dns-prefetch" href="http://127.0.0.1:8000" />
+    <!-- Data Pre-fetch: 使用相对路径，带有自动重试机制，应对后端重启时的连接超时 -->
+    <script>
+      (function() {
+        const BASE = '/api';
+        const fetchWithRetry = (url, options, retries = 5, delay = 1000) => {
+          return fetch(url, options).catch(err => {
+            if (retries > 0) {
+              return new Promise(resolve => setTimeout(resolve, delay))
+                .then(() => fetchWithRetry(url, options, retries - 1, delay));
+            }
+            throw err;
+          });
+        };
+
+        window.__WATCHLIST_PROMISE__ = fetchWithRetry(`${BASE}/watchlist`, { priority: 'high' })
+          .then(r => r && r.ok ? r.json() : null)
+          .then(data => {
+            if (data && Array.isArray(data)) {
+              const symbols = [];
+              data.forEach(g => g.symbols.forEach(s => {
+                if (!symbols.includes(s.symbol)) symbols.push(s.symbol);
+              }));
+              if (symbols.length > 0) {
+                window.__BATCH_PROMISE__ = fetchWithRetry(`${BASE}/quotes/batch`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ symbols }),
+                  priority: 'high'
+                }).then(r => r && r.ok ? r.json() : null).catch(() => null);
+              }
+            }
+            return data;
+          })
+          .catch(() => null);
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#09090b" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>TrendMaster</title>
+    <!-- Critical CSS for Skeleton -->
+    <style>
+      :root { --zinc-950: #09090b; --zinc-900: #18181b; --zinc-800: #27272a; --zinc-700: #3f3f46; --emerald-500: #10b981; }
+      body { background-color: var(--zinc-950); margin: 0; font-family: sans-serif; overflow-x: hidden; }
+      #root:empty { display: block; }
+      .skeleton-header { height: 64px; background: var(--zinc-900); border-bottom: 1px solid var(--zinc-800); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+      .skeleton-logo { width: 150px; height: 24px; background: var(--zinc-800); border-radius: 4px; }
+      .skeleton-nav { display: flex; gap: 8px; }
+      .skeleton-btn { width: 32px; height: 32px; background: var(--zinc-800); border-radius: 8px; }
+      .skeleton-main { max-width: 1152px; margin: 32px auto; padding: 0 16px; }
+      .skeleton-row { height: 60px; background: var(--zinc-900); border: 1px solid var(--zinc-800); border-radius: 12px; margin-bottom: 12px; position: relative; overflow: hidden; }
+      .skeleton-row::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent); animation: shimmer 1.5s infinite; }
+      @keyframes shimmer { 100% { transform: translateX(100%); } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="skeleton-header">
+        <div class="skeleton-logo"></div>
+        <div class="skeleton-nav">
+          <div class="skeleton-btn"></div>
+          <div class="skeleton-btn"></div>
+          <div class="skeleton-btn"></div>
+        </div>
+      </div>
+      <div class="skeleton-main">
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

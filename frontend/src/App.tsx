@@ -1,11 +1,13 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { fetchWatchlist, fetchBatchQuotes, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, Candle, WatchlistGroup } from './types';
-import { ChartModal } from './components/ChartModal';
-import { MiniChart } from './components/MiniChart';
-import { StatusBadge } from './components/StatusBadge';
-import { RefreshCw, TrendingUp, Search, Plus, Trash2, FolderPlus, GripVertical, ChevronDown, ChevronRight, Pencil, LineChart } from 'lucide-react';
-import { clsx } from 'clsx';
+const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
+import { SortableGroup } from './components/SortableGroup';
+import { Header } from './components/Header';
+import { FilterBar } from './components/FilterBar';
+import { NewGroupModal, AliasEditModal } from './components/Modals';
+import { ColumnHeaders } from './components/ColumnHeaders';
+
 import {
   DndContext,
   closestCenter,
@@ -16,316 +18,32 @@ import {
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
-  useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
 const SortableContextAny = SortableContext as any;
 
-// Sortable Stock Row Component
-function SortableStockRow({
-  stock,
-  onStockClick,
-  onRemoveStock,
-  onEditAlias,
-  miniCandles,
-  emaMode,
-  showCharts
-}: {
-  stock: StockData;
-  onStockClick: (stock: StockData) => void;
-  onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
-  onEditAlias: (stock: StockData) => void;
-  miniCandles?: Candle[];
-  emaMode: 'long' | 'short';
-  showCharts: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: stock.symbol });
+const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
+  const symbols = new Set<string>();
+  const aliasMap = new Map<string, string>();
+  groupsData.forEach(g => {
+    g.symbols.forEach(s => {
+      symbols.add(s.symbol);
+      if (s.alias) aliasMap.set(s.symbol, s.alias);
+    });
+  });
+  return { symbols: Array.from(symbols), aliasMap };
+};
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style}>
-    <div
-      className="flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:gap-4 p-4 items-start sm:items-center hover:bg-zinc-800/50 transition-colors cursor-pointer group relative bg-zinc-900/30 border-b border-zinc-800/30 sm:border-none"
-      onClick={() => onStockClick(stock)}
-    >
-      {/* Drag Handle - Hidden on very small screens or repositioned */}
-      <div 
-        className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 sm:block hidden cursor-grab"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="text-zinc-600" size={14} />
-      </div>
-
-      <div className="flex items-center justify-between w-full sm:col-span-2 sm:pl-4">
-        <div className="flex flex-col min-w-0">
-          <div className="flex items-center gap-1 group/title">
-            <div className="font-bold text-white group-hover:text-emerald-400 transition-colors truncate">
-              {stock.alias || stock.symbol}
-              {stock.alias && <span className="ml-1 text-[10px] text-zinc-500 font-normal">({stock.symbol})</span>}
-            </div>
-            <button 
-              className="opacity-0 group-hover/title:opacity-100 p-0.5 text-zinc-600 hover:text-zinc-300 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditAlias(stock);
-              }}
-              title="Edit Alias"
-            >
-              <Pencil size={12} />
-            </button>
-          </div>
-          <div className="text-[10px] sm:text-xs text-zinc-500 truncate max-w-[120px] sm:max-w-none">{stock.name}</div>
-        </div>
-
-        {/* Mobile Price Display */}
-        <div className="sm:hidden text-right leading-tight">
-          {stock._loading ? (
-            <div className="space-y-1">
-              <div className="h-4 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-              <div className="h-3 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-            </div>
-          ) : (<>
-            <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
-            <div className={clsx("text-[10px] font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-              {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
-            </div>
-          </>)}
-        </div>
-      </div>
-      
-      <div className="hidden sm:block sm:col-span-2 text-right">
-        {stock._loading ? (
-          <div className="space-y-1">
-            <div className="h-4 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-            <div className="h-3 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-          </div>
-        ) : (<>
-          <div className="font-mono text-zinc-200">${(stock.price || 0).toFixed(2)}</div>
-          <div className={clsx("text-xs font-mono", (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-            {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
-          </div>
-        </>)}
-      </div>
-
-      {/* Badges/Status Row */}
-      <div className="flex items-center justify-between sm:justify-end w-full sm:col-span-2 gap-2">
-        {stock._loading ? (
-          <div className="h-5 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-        ) : (<>
-          <div className="sm:hidden flex items-center gap-2">
-            {stock.signal && stock.signal !== '观望' && (
-              <span className={clsx(
-                "px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
-                stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
-              )}>
-                {stock.signal}
-              </span>
-            )}
-            {stock.weeklyMacdStatus && (
-              <span className={clsx(
-                "text-[10px] font-bold whitespace-nowrap",
-                stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" :
-                stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
-                stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
-                "text-rose-400"
-              )}>
-                {stock.weeklyMacdStatus}
-              </span>
-            )}
-          </div>
-          <StatusBadge status={stock.trend} type="trend" />
-        </>)}
-      </div>
-
-      <div className="col-span-2 hidden sm:block text-right">
-        {stock._loading ? (
-          <div className="h-5 w-12 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-        ) : stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
-          <span className={clsx(
-            "px-2 py-1 rounded text-xs font-bold",
-            stock.signal === '强烈信号' ? "bg-emerald-500 text-white" : "bg-yellow-500 text-zinc-900"
-          )}>
-            {stock.signal}
-          </span>
-        ) : (
-          <span className="text-zinc-600 text-xs">观望</span>
-        )}
-      </div>
-
-      <div className="col-span-2 hidden sm:block text-right">
-        {stock._loading ? (
-          <div className="h-5 w-16 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-        ) : (
-          <span
-            className={clsx(
-              "font-mono text-sm px-2 py-0.5 rounded",
-              stock.rsiStatus === '超买' ? "text-rose-400 bg-rose-500/10" :
-              stock.rsiStatus === '超卖' ? "text-emerald-400 bg-emerald-500/10" :
-              "text-zinc-400"
-            )}
-            title={`阈值: ${stock.rsiOversold || '?'}-${stock.rsiOverbought || '?'}`}
-          >
-            {stock.rsi?.toFixed(1) || 'N/A'}
-            <span className="ml-1 text-[10px] text-zinc-600">({stock.rsiPeriod || 14})</span>
-            {stock.rsiStatus && stock.rsiStatus !== '中性' && (
-              <span className="ml-1 text-xs opacity-75">{stock.rsiStatus}</span>
-            )}
-          </span>
-        )}
-      </div>
-
-      <div className="col-span-2 hidden sm:block text-right">
-        {stock._loading ? (
-          <div className="space-y-1">
-            <div className="h-4 w-14 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-            <div className="h-3 w-10 bg-zinc-700/50 rounded animate-pulse ml-auto" />
-          </div>
-        ) : stock.weeklyMacdStatus ? (
-          <div className="flex flex-col items-end leading-tight">
-            <span className={clsx(
-              "text-xs font-bold",
-              stock.weeklyMacdStatus === '周线牛市' ? "text-emerald-400" :
-              stock.weeklyMacdStatus === '周线反弹' ? "text-emerald-500/60" :
-              stock.weeklyMacdStatus === '周线回调' ? "text-yellow-500" :
-              "text-rose-400"
-            )}>
-              {stock.weeklyMacdStatus}
-            </span>
-            <span className={clsx(
-              "text-[10px]",
-              stock.weeklyPriceVsMA5 === '线上' ? "text-emerald-500/80" : "text-rose-500/80"
-            )}>
-              5W{stock.weeklyPriceVsMA5}
-            </span>
-          </div>
-        ) : (
-          <span className="text-zinc-600 text-xs">-</span>
-        )}
-      </div>
-
-      {/* Delete Action - Floating button on mobile */}
-      <div className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center h-full top-0">
-        <button 
-          onClick={(e) => onRemoveStock(e, stock.symbol)}
-          className="p-2 bg-zinc-800 hover:bg-rose-500/20 hover:text-rose-400 text-zinc-500 rounded-lg shadow-lg border border-zinc-700"
-          title="Remove from Watchlist"
-        >
-          <Trash2 size={16} />
-        </button>
-      </div>
-    </div>
-      {showCharts && miniCandles && miniCandles.length > 0 && (
-        <div className="px-4 pb-4" onClick={() => onStockClick(stock)}>
-          <MiniChart candles={miniCandles} emaMode={emaMode} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Sortable Group Component
-function SortableGroup({
-  group,
-  onToggleCollapse,
-  onStockClick,
-  onRemoveStock,
-  onEditAlias,
-  chartData,
-  emaMode,
-  showCharts
-}: {
-  group: WatchlistGroup;
-  onToggleCollapse: (groupId: string) => void;
-  onStockClick: (stock: StockData) => void;
-  onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
-  onEditAlias: (stock: StockData) => void;
-  chartData: Record<string, Candle[]>;
-  emaMode: 'long' | 'short';
-  showCharts: boolean;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: group.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style} className="mb-4">
-      {/* Group Header */}
-      <div 
-        className="flex items-center gap-2 p-3 bg-zinc-800/50 rounded-t-lg cursor-pointer hover:bg-zinc-800 transition-colors border border-zinc-700/50"
-      >
-        <div {...attributes} {...listeners} className="cursor-grab">
-          <GripVertical className="text-zinc-600" size={16} />
-        </div>
-        <div onClick={() => onToggleCollapse(group.id)} className="flex items-center gap-2 flex-1">
-          {group.collapsed ? (
-            <ChevronRight className="text-zinc-400" size={18} />
-          ) : (
-            <ChevronDown className="text-zinc-400" size={18} />
-          )}
-          <span className="font-medium text-zinc-200">{group.name}</span>
-          <span className="text-xs text-zinc-500 ml-2">({group.stocks?.length || 0})</span>
-        </div>
-      </div>
-      
-      {/* Stocks List */}
-      {!group.collapsed && (
-        <div className="border border-t-0 border-zinc-700/50 rounded-b-lg overflow-hidden">
-          {group.stocks?.length === 0 ? (
-            <div className="p-4 text-center text-zinc-600 text-sm">
-              拖拽股票到此分组
-            </div>
-          ) : (
-            <SortableContextAny items={(group.stocks || []).map(s => s.symbol)} strategy={verticalListSortingStrategy}>
-              <div className="divide-y divide-zinc-800/50">
-                {group.stocks?.map(stock => (
-                  <SortableStockRow
-                    key={stock.symbol}
-                    stock={stock}
-                    onStockClick={onStockClick}
-                    onRemoveStock={onRemoveStock}
-                    onEditAlias={onEditAlias}
-                     miniCandles={chartData[stock.symbol]}
-                     emaMode={emaMode}
-                     showCharts={showCharts}
-                   />
-                ))}
-              </div>
-            </SortableContextAny>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+const scheduleIdle = (cb: () => void) => {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    (window as any).requestIdleCallback(cb, { timeout: 1500 });
+    return;
+  }
+  setTimeout(cb, 0);
+};
 
 function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
@@ -353,50 +71,13 @@ function App() {
   const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
   const [showCharts, setShowCharts] = useState(false);
 
-  const handleEditAlias = async () => {
-    if (!editingAliasStock) return;
-    const success = await updateAlias(editingAliasStock.symbol, aliasInput);
-    if (success) {
-      setAliasModalOpen(false);
-      loadData(); // Refresh to show new alias
-    } else {
-      alert('Failed to update alias');
-    }
-  };
-
-  const openAliasModal = (stock: StockData) => {
-    setEditingAliasStock(stock);
-    setAliasInput(stock.alias || '');
-    setAliasModalOpen(true);
-  };
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       // 1. Fetch group structure (lightweight) → 立即渲染骨架
       const groupsData = await fetchWatchlist();
 
-      const aliasMap = new Map<string, string>();
-      const uniqueSymbols: string[] = [];
-      groupsData.forEach(g => {
-        g.symbols.forEach(s => {
-          if (!uniqueSymbols.includes(s.symbol)) {
-            uniqueSymbols.push(s.symbol);
-          }
-          if (s.alias) {
-            aliasMap.set(s.symbol, s.alias);
-          }
-        });
-      });
+      const { symbols: uniqueSymbols, aliasMap } = getUniqueSymbols(groupsData);
 
       // 先用 watchlist 信息渲染股票名称占位行
       setGroups(groupsData.map(g => ({
@@ -421,8 +102,6 @@ function App() {
           _loading: true,
         }))
       })));
-      setLoading(false);
-
       // 2. 异步拉取批量数据，回来后填充
       const stockMap = await fetchBatchQuotes(uniqueSymbols);
 
@@ -440,17 +119,63 @@ function App() {
       }));
 
       setGroups(populatedGroups);
-
-      // 3. 静默加载迷你图数据（不阻塞列表展示）
-      fetchBatchCharts(uniqueSymbols).then(charts => {
-        setChartData(charts);
-      });
     } catch (error) {
       console.error("Failed to load watchlist:", error);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const allSymbols = useMemo(() => {
+    const symbolSet = new Set<string>();
+    groups.forEach(g => {
+      (g.stocks || []).forEach(s => symbolSet.add(s.symbol));
+    });
+    return Array.from(symbolSet);
+  }, [groups]);
+
+  const loadCharts = useCallback(async (symbols: string[]) => {
+    if (symbols.length === 0) return;
+    const charts = await fetchBatchCharts(symbols);
+    if (charts && Object.keys(charts).length > 0) {
+      setChartData(prev => ({ ...prev, ...charts }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showCharts) return;
+    const missingSymbols = allSymbols.filter(s => !chartData[s]);
+    if (missingSymbols.length === 0) return;
+    scheduleIdle(() => {
+      loadCharts(missingSymbols);
+    });
+  }, [showCharts, allSymbols, chartData, loadCharts]);
+
+  const handleEditAlias = async () => {
+    if (!editingAliasStock) return;
+    const success = await updateAlias(editingAliasStock.symbol, aliasInput);
+    if (success) {
+      setAliasModalOpen(false);
+      loadData(); // Refresh to show new alias
+    } else {
+      alert('Failed to update alias');
+    }
   };
+
+  const openAliasModal = useCallback((stock: StockData) => {
+    setEditingAliasStock(stock);
+    setAliasInput(stock.alias || '');
+    setAliasModalOpen(true);
+  }, []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -465,27 +190,31 @@ function App() {
     }
   };
 
-  const handleRemoveStock = async (e: React.MouseEvent, symbol: string) => {
+  const handleRemoveStock = useCallback(async (e: React.MouseEvent, symbol: string) => {
     e.stopPropagation();
     if (confirm(`Remove ${symbol}?`)) {
        await removeTicker(symbol);
        loadData();
     }
-  };
+  }, [loadData]);
 
-  const handleToggleCollapse = async (groupId: string) => {
-    const updatedGroups = groups.map(g => 
-      g.id === groupId ? { ...g, collapsed: !g.collapsed } : g
-    );
-    setGroups(updatedGroups);
-    
+  const handleToggleCollapse = useCallback(async (groupId: string) => {
+    let updatedGroups: WatchlistGroup[] = [];
+    setGroups(prev => {
+      updatedGroups = prev.map(g =>
+        g.id === groupId ? { ...g, collapsed: !g.collapsed } : g
+      );
+      return updatedGroups;
+    });
+
+    // 需要等 setState 完成后再发请求，用 updatedGroups 闭包
     await updateWatchlist(updatedGroups.map(g => ({
       id: g.id,
       name: g.name,
       symbols: (g.stocks || []).map(s => ({ symbol: s.symbol, alias: s.alias })),
       collapsed: g.collapsed
     })));
-  };
+  }, []);
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
@@ -495,11 +224,7 @@ function App() {
     loadData();
   };
 
-  const handleRefresh = () => {
-    loadData();
-  };
-
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (!over || active.id === over.id) return;
@@ -513,10 +238,13 @@ function App() {
       const newIndex = groups.findIndex(g => g.id === over.id);
       
       if (oldIndex !== -1 && newIndex !== -1) {
-        const newGroups = arrayMove(groups, oldIndex, newIndex);
-        setGroups(newGroups);
+        const newGroups = [...groups];
+        const movedGroups = Array.from(newGroups);
+        const [removed] = movedGroups.splice(oldIndex, 1);
+        movedGroups.splice(newIndex, 0, removed);
+        setGroups(movedGroups);
         
-        await updateWatchlist(newGroups.map(g => ({
+        await updateWatchlist(movedGroups.map(g => ({
           id: g.id,
           name: g.name,
           symbols: (g.stocks || []).map(s => ({ symbol: s.symbol, alias: s.alias })),
@@ -551,20 +279,20 @@ function App() {
       if (sourceGroupIdx === -1) return;
 
       const newGroups = [...groups];
-      const sourceStocks = newGroups[sourceGroupIdx].stocks || [];
+      const sourceStocks = [...(newGroups[sourceGroupIdx].stocks || [])];
       const [movedStock] = sourceStocks.splice(sourceStockIdx, 1);
       newGroups[sourceGroupIdx].stocks = sourceStocks;
 
       if (targetGroupIdx !== -1) {
         // Move to specific position
-        const targetStocks = newGroups[targetGroupIdx].stocks || [];
+        const targetStocks = [...(newGroups[targetGroupIdx].stocks || [])];
         targetStocks.splice(targetStockIdx, 0, movedStock);
         newGroups[targetGroupIdx].stocks = targetStocks;
       } else {
         // Check if dropping on a group
         const targetGroup = newGroups.find(g => g.id === over.id);
         if (targetGroup) {
-          const targetStocks = targetGroup.stocks || [];
+          const targetStocks = [...(targetGroup.stocks || [])];
           targetStocks.push(movedStock);
           targetGroup.stocks = targetStocks;
         }
@@ -579,9 +307,11 @@ function App() {
         collapsed: g.collapsed
       })));
     }
-  };
+  }, [groups]);
 
   const filteredGroups = useMemo(() => {
+    const needsFilter = searchTerm.length > 0 || activeFilters.length > 0 || !!sortConfig.direction;
+    if (!needsFilter) return groups;
     return groups.map(g => {
       let stocks = [...(g.stocks || [])];
       
@@ -635,260 +365,73 @@ function App() {
     });
   }, [groups, searchTerm, activeFilters, sortConfig]);
 
-  const toggleSort = (key: any) => {
+  const toggleSort = useCallback((key: any) => {
     setSortConfig(prev => ({
       key,
-      direction: prev.key === key 
+      direction: prev.key === key
         ? (prev.direction === 'asc' ? 'desc' : prev.direction === 'desc' ? null : 'asc')
         : 'asc'
     }));
-  };
+  }, []);
 
-  const toggleFilter = (filter: string) => {
-    setActiveFilters(prev => 
+  const toggleFilter = useCallback((filter: string) => {
+    setActiveFilters(prev =>
       prev.includes(filter) ? prev.filter(f => f !== filter) : [...prev, filter]
     );
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
-      {/* Header */}
-      <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-2 sm:h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="bg-emerald-500/10 p-1.5 sm:p-2 rounded-lg border border-emerald-500/20">
-              <TrendingUp className="text-emerald-400" size={20} />
-            </div>
-            <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
-              TrendMaster
-            </h1>
-          </div>
-          
-          <div className="flex items-center gap-2 flex-1 justify-end sm:flex-none">
-            <form onSubmit={handleAddStock} className="flex items-center gap-1 sm:gap-2">
-              <input 
-                type="text" 
-                placeholder="Add Symbol" 
-                value={newTicker}
-                onChange={e => setNewTicker(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm w-20 sm:w-36 focus:outline-none focus:border-emerald-500/50 uppercase"
-              />
-              <button type="submit" className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors">
-                <Plus size={16} />
-              </button>
-            </form>
+      <Header 
+        newTicker={newTicker}
+        setNewTicker={setNewTicker}
+        handleAddStock={handleAddStock}
+        setShowNewGroupInput={setShowNewGroupInput}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        showFilters={showFilters}
+        setShowFilters={setShowFilters}
+        activeFilters={activeFilters}
+        emaMode={emaMode}
+        setEmaMode={setEmaMode}
+        showCharts={showCharts}
+        setShowCharts={setShowCharts}
+        loading={loading}
+        handleRefresh={loadData}
+      />
 
-            <button 
-              onClick={() => setShowNewGroupInput(true)}
-              className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
-              title="New Group"
-            >
-              <FolderPlus size={16} />
-            </button>
-
-            <div className="w-px h-6 bg-zinc-800 mx-1 hidden sm:block"></div>
-
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search..." 
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded-full pl-10 pr-4 py-1.5 text-sm focus:outline-none focus:border-emerald-500/50 w-32 lg:w-40"
-              />
-            </div>
-
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={clsx(
-                "p-1.5 sm:p-2 rounded-lg transition-colors border",
-                activeFilters.length > 0 ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white"
-              )}
-              title="Filter by Weekly Status"
-            >
-              <Search size={16} className={clsx(showFilters && "rotate-90")} style={{ transition: 'transform 0.2s' }} />
-            </button>
-
-            <button
-               onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : 'long')}
-               className="px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono rounded-lg border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 transition-colors"
-               title="切换 EMA 均线"
-             >
-               {emaMode === 'long' ? 'EMA 20/50' : 'EMA 5/10'}
-             </button>
-
-             <button
-               onClick={() => setShowCharts(!showCharts)}
-               className={clsx(
-                 "px-2 py-1 sm:py-1.5 text-[10px] sm:text-xs font-mono rounded-lg border transition-colors flex items-center gap-1.5",
-                 showCharts ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white"
-               )}
-               title="显示/隐藏 10日趋势图"
-             >
-               <LineChart size={14} />
-               30日图
-             </button>
-
-            <button 
-              onClick={handleRefresh}
-              className={clsx(
-                "p-1.5 sm:p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors",
-                loading && "animate-spin"
-              )}
-              title="Refresh Data"
-            >
-              <RefreshCw size={18} className="sm:w-5 sm:h-5" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* New Group Modal */}
       {showNewGroupInput && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-80">
-            <h3 className="text-lg font-bold mb-4">创建新分组</h3>
-            <input 
-              type="text" 
-              placeholder="分组名称..." 
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:border-emerald-500/50"
-              autoFocus
-            />
-            <div className="flex gap-2 justify-end">
-              <button 
-                onClick={() => setShowNewGroupInput(false)}
-                className="px-4 py-2 text-sm text-zinc-400 hover:text-white"
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleCreateGroup}
-                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg"
-              >
-                创建
-              </button>
-            </div>
-          </div>
-        </div>
+        <NewGroupModal 
+          newGroupName={newGroupName}
+          setNewGroupName={setNewGroupName}
+          handleCreateGroup={handleCreateGroup}
+          setShowNewGroupInput={setShowNewGroupInput}
+        />
       )}
       
-      {/* Alias Edit Modal */}
       {aliasModalOpen && editingAliasStock && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-80">
-            <h3 className="text-lg font-bold mb-4">Edit Alias ({editingAliasStock.symbol})</h3>
-            <input 
-              type="text" 
-              placeholder="Enter alias..." 
-              value={aliasInput}
-              onChange={e => setAliasInput(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:border-emerald-500/50"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && handleEditAlias()}
-            />
-            <div className="flex gap-2 justify-end">
-              <button 
-                onClick={() => setAliasModalOpen(false)}
-                className="px-4 py-2 text-sm text-zinc-400 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleEditAlias}
-                className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <AliasEditModal 
+          symbol={editingAliasStock.symbol}
+          aliasInput={aliasInput}
+          setAliasInput={setAliasInput}
+          handleEditAlias={handleEditAlias}
+          setAliasModalOpen={setAliasModalOpen}
+        />
       )}
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
         
-        {/* Filter Toolbar */}
-        {showFilters && (
-          <div className="mb-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2">
-            <span className="text-xs text-zinc-500 w-full mb-1">筛选周线状态:</span>
-            {['周线牛市', '周线反弹', '周线回调', '周线熊市'].map(f => (
-              <button
-                key={f}
-                onClick={() => toggleFilter(f)}
-                className={clsx(
-                  "px-3 py-1 rounded-full text-xs font-medium transition-all",
-                  activeFilters.includes(f) 
-                    ? "bg-emerald-500 text-white" 
-                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-                )}
-              >
-                {f}
-              </button>
-            ))}
-            {activeFilters.length > 0 && (
-              <button 
-                onClick={() => setActiveFilters([])}
-                className="px-3 py-1 text-xs text-rose-400 hover:text-rose-300"
-              >
-                清除全部
-              </button>
-            )}
-          </div>
-        )}
+        <FilterBar 
+          showFilters={showFilters}
+          activeFilters={activeFilters}
+          toggleFilter={toggleFilter}
+          setActiveFilters={setActiveFilters}
+          sortConfig={sortConfig}
+          toggleSort={toggleSort}
+        />
 
-        {/* Mobile Sort Tabs */}
-        <div className="flex sm:hidden overflow-x-auto gap-2 pb-4 mb-2 no-scrollbar items-center">
-          <span className="text-[10px] text-zinc-500 whitespace-nowrap mr-1">排序:</span>
-          {[
-            { label: '代码', key: 'symbol' },
-            { label: '价格', key: 'price' },
-            { label: '趋势', key: 'trend' },
-            { label: '信号', key: 'signal' },
-            { label: 'RSI', key: 'rsi' },
-            { label: '周线', key: 'weeklyStatus' },
-          ].map(item => (
-            <button
-              key={item.key}
-              onClick={() => toggleSort(item.key)}
-              className={clsx(
-                "px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-all flex items-center gap-1",
-                sortConfig.key === item.key 
-                  ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                  : "bg-zinc-900 border-zinc-800 text-zinc-500"
-              )}
-            >
-              {item.label}
-              {sortConfig.key === item.key && (
-                <span className="text-[10px] leading-none">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Column Headers */}
-        <div className="hidden sm:grid grid-cols-12 gap-4 px-4 pb-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider select-none">
-          <div className="col-span-4 sm:col-span-2 pl-4 cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('symbol')}>
-            Symbol {sortConfig.key === 'symbol' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-          <div className="col-span-3 sm:col-span-2 text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('price')}>
-            Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-          <div className="col-span-3 sm:col-span-2 text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('trend')}>
-            Trend {sortConfig.key === 'trend' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('signal')}>
-            Signal {sortConfig.key === 'signal' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('rsi')}>
-            RSI {sortConfig.key === 'rsi' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-          <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('weeklyStatus')}>
-            Weekly {sortConfig.key === 'weeklyStatus' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-          </div>
-        </div>
+        <ColumnHeaders sortConfig={sortConfig} toggleSort={toggleSort} />
 
         {/* Groups with Drag and Drop */}
         <DndContext
@@ -905,10 +448,10 @@ function App() {
                 onStockClick={setSelectedStock}
                 onRemoveStock={handleRemoveStock}
                 onEditAlias={openAliasModal}
-                   chartData={chartData}
-                   emaMode={emaMode}
-                   showCharts={showCharts}
-                 />
+                chartData={chartData}
+                emaMode={emaMode}
+                showCharts={showCharts}
+              />
             ))}
           </SortableContextAny>
         </DndContext>
@@ -920,9 +463,15 @@ function App() {
         )}
       </main>
 
-      {/* Modal */}
+      {/* Detail Modal */}
       {selectedStock && (
-        <ChartModal stock={selectedStock} onClose={() => setSelectedStock(null)} />
+        <Suspense fallback={
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md">
+            <div className="text-zinc-400 text-sm">Loading chart...</div>
+          </div>
+        }>
+          <ChartModal stock={selectedStock} onClose={() => setSelectedStock(null)} />
+        </Suspense>
       )}
     </div>
   );
