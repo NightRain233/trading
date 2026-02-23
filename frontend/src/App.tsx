@@ -66,6 +66,9 @@ function App() {
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
 
+  const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '周线熊市'];
+  const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
+
   // 迷你图状态
   const [chartData, setChartData] = useState<Record<string, Candle[]>>({});
   const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
@@ -326,9 +329,20 @@ function App() {
       
       // 2. Status Filters
       if (activeFilters.length > 0) {
-        stocks = stocks.filter(s => 
-          s.weeklyMacdStatus && activeFilters.includes(s.weeklyMacdStatus)
-        );
+        const activeWeekly = activeFilters.filter(f => weeklyFilterOptions.includes(f));
+        const activeTrend = activeFilters.filter(f => trendFilterOptions.includes(f));
+
+        if (activeWeekly.length > 0) {
+          stocks = stocks.filter(s => 
+            s.weeklyMacdStatus && activeWeekly.includes(s.weeklyMacdStatus)
+          );
+        }
+
+        if (activeTrend.length > 0) {
+          stocks = stocks.filter(s => 
+            s.trend && activeTrend.includes(s.trend)
+          );
+        }
       }
       
       // 3. Sorting
@@ -342,6 +356,20 @@ function App() {
           if (sortConfig.key === 'weeklyStatus') {
             valA = a.weeklyMacdStatus || '';
             valB = b.weeklyMacdStatus || '';
+          } else if (sortConfig.key === 'trend') {
+            const trendOrder = [
+              '强势多头',
+              '回调多头',
+              '震荡',
+              '潜在转空',
+              '反弹空头',
+              '强势空头',
+              '潜在转多',
+            ];
+            const idxA = trendOrder.indexOf(a.trend);
+            const idxB = trendOrder.indexOf(b.trend);
+            valA = idxA === -1 ? Number.POSITIVE_INFINITY : idxA;
+            valB = idxB === -1 ? Number.POSITIVE_INFINITY : idxB;
           } else {
             valA = (a as any)[sortConfig.key];
             valB = (b as any)[sortConfig.key];

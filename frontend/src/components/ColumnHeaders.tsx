@@ -19,7 +19,7 @@ export const ColumnHeaders: React.FC<ColumnHeadersProps> = ({ sortConfig, toggle
         Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
       </div>
       <div className="col-span-3 sm:col-span-2 text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('trend')}>
-        Trend {sortConfig.key === 'trend' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+        趋势 {sortConfig.key === 'trend' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
       </div>
       <div className="col-span-2 hidden sm:block text-right cursor-pointer hover:text-zinc-300" onClick={() => toggleSort('signal')}>
         Signal {sortConfig.key === 'signal' && (sortConfig.direction === 'asc' ? '↑' : '↓')}

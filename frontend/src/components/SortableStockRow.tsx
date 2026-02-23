@@ -121,6 +121,22 @@ export const SortableStockRow = memo(function SortableStockRow({
                 {stock.signal}
               </span>
             )}
+            {!stock._loading && (
+              <span
+                className={clsx(
+                  "px-1.5 py-0.5 rounded text-[10px] font-mono whitespace-nowrap",
+                  stock.rsiStatus === '超买' ? "text-rose-400 bg-rose-500/10" :
+                  stock.rsiStatus === '超卖' ? "text-emerald-400 bg-emerald-500/10" :
+                  "text-zinc-400 bg-zinc-800/40"
+                )}
+                title={`RSI: ${stock.rsi?.toFixed(1) || 'N/A'} (${stock.rsiPeriod || 14})`}
+              >
+                RSI {stock.rsi?.toFixed(1) || 'N/A'} ({stock.rsiPeriod || 14})
+                {stock.rsiStatus && stock.rsiStatus !== '中性' && (
+                  <span className="ml-1 text-[10px] opacity-75">{stock.rsiStatus}</span>
+                )}
+              </span>
+            )}
             {stock.weeklyMacdStatus && (
               <span className={clsx(
                 "text-[10px] font-bold whitespace-nowrap",

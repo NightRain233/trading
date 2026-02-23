@@ -68,7 +68,7 @@ restart: down up ## Restart docker containers
 # --- Deployment ---
 
 deploy: ## Sync project to remote server using rsync
-	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH) --delete
+	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH) 
 
 # --- Cleanup ---
 

@@ -42,6 +42,21 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               {f}
             </button>
           ))}
+          <span className="text-xs text-zinc-500 w-full mt-2 mb-1">筛选趋势状态:</span>
+          {['强势多头', '潜在转空', '强势空头', '潜在转多'].map(f => (
+            <button
+              key={f}
+              onClick={() => toggleFilter(f)}
+              className={clsx(
+                "px-3 py-1 rounded-full text-xs font-medium transition-all",
+                activeFilters.includes(f) 
+                  ? "bg-emerald-500 text-white" 
+                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+              )}
+            >
+              {f}
+            </button>
+          ))}
           {activeFilters.length > 0 && (
             <button 
               onClick={() => setActiveFilters([])}
