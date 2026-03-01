@@ -21,6 +21,32 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
 
+  const isFiniteNumber = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+
+  const isValidDateString = (value: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+
+  const isBusinessDay = (value: unknown): value is Time =>
+    typeof value === 'object' &&
+    value !== null &&
+    isFiniteNumber((value as any).year) &&
+    isFiniteNumber((value as any).month) &&
+    isFiniteNumber((value as any).day);
+
+  const isValidTime = (value: unknown): value is Time =>
+    (typeof value === 'string' && isValidDateString(value)) ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    isBusinessDay(value);
+
+  const isValidCandle = (c: Candle) =>
+    isValidTime(c.time) &&
+    isFiniteNumber(c.open) &&
+    isFiniteNumber(c.high) &&
+    isFiniteNumber(c.low) &&
+    isFiniteNumber(c.close) &&
+    c.close > 0;
+
   // Container refs
   const priceRef = useRef<HTMLDivElement>(null);
   const rsiRef = useRef<HTMLDivElement>(null);
@@ -98,7 +124,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     if (!candles || candles.length === 0) return;
 
     // Filter valid data to avoid 0-scaling artifacts
-    const validCandles = candles.filter(c => c.open != null && c.high != null && c.low != null && c.close != null && c.close > 0);
+    const validCandles = candles.filter(isValidCandle);
 
     // 1. Price
     const candleSeries = charts[0].addSeries(CandlestickSeries, { 
@@ -123,30 +149,33 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     charts[0].priceScale('volume').applyOptions({ 
         scaleMargins: { top: 0.8, bottom: 0 } 
     });
-    volumeSeries.setData(validCandles.map((c: Candle) => ({ 
-      time: c.time as Time, 
-      value: c.volume ?? 0, 
-      color: c.close >= c.open ? '#10b98122' : '#f43f5e22' 
-    })));
+    volumeSeries.setData(validCandles.map((c: Candle) => {
+      const volume = isFiniteNumber(c.volume) ? c.volume : 0;
+      return {
+        time: c.time as Time,
+        value: volume,
+        color: c.close >= c.open ? '#10b98122' : '#f43f5e22'
+      };
+    }));
 
     // 3. Technical Indicators
     if (mainInd === 'EMA') {
       const e20 = charts[0].addSeries(LineSeries, { color: '#0ea5e9', lineWidth: 1 as LineWidth, priceLineVisible: false });
       const e50 = charts[0].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth, priceLineVisible: false });
-      e20.setData(validCandles.filter(c => c.ema20 != null && c.ema20 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema20! })));
-      e50.setData(validCandles.filter(c => c.ema50 != null && c.ema50 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema50! })));
+      e20.setData(validCandles.filter(c => isFiniteNumber(c.ema20) && c.ema20 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema20! })));
+      e50.setData(validCandles.filter(c => isFiniteNumber(c.ema50) && c.ema50 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema50! })));
     } else {
       const bup = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
       const bmid = charts[0].addSeries(LineSeries, { color: '#71717a', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false });
       const blow = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
-      bup.setData(validCandles.filter(c => c.boll_upper != null && c.boll_upper > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_upper! })));
-      bmid.setData(validCandles.filter(c => c.boll_mid != null && c.boll_mid > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_mid! })));
-      blow.setData(validCandles.filter(c => c.boll_lower != null && c.boll_lower > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_lower! })));
+      bup.setData(validCandles.filter(c => isFiniteNumber(c.boll_upper) && c.boll_upper > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_upper! })));
+      bmid.setData(validCandles.filter(c => isFiniteNumber(c.boll_mid) && c.boll_mid > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_mid! })));
+      blow.setData(validCandles.filter(c => isFiniteNumber(c.boll_lower) && c.boll_lower > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_lower! })));
     }
 
     // RSI
     const rsiLine = charts[1].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
-    rsiLine.setData(validCandles.filter(c => c.rsi != null && c.rsi > 0).map((c: Candle) => ({ time: c.time as Time, value: c.rsi! })));
+    rsiLine.setData(validCandles.filter(c => isFiniteNumber(c.rsi) && c.rsi > 0).map((c: Candle) => ({ time: c.time as Time, value: c.rsi! })));
     const ob = charts[1].addSeries(LineSeries, { color: '#f43f5e', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
     const os = charts[1].addSeries(LineSeries, { color: '#10b981', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
     ob.setData(validCandles.map((c: Candle) => ({ time: c.time as Time, value: stock.rsiOverbought || 70 })));
@@ -156,23 +185,23 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     const kLine = charts[2].addSeries(LineSeries, { color: '#ffffff', lineWidth: 1 as LineWidth });
     const dLine = charts[2].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth });
     const jLine = charts[2].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth });
-    kLine.setData(validCandles.filter(c => c.k != null && c.k > 0).map((c: Candle) => ({ time: c.time as Time, value: c.k! })));
-    dLine.setData(validCandles.filter(c => c.d != null && c.d > 0).map((c: Candle) => ({ time: c.time as Time, value: c.d! })));
-    jLine.setData(validCandles.filter(c => c.j != null && c.j > 0).map((c: Candle) => ({ time: c.time as Time, value: c.j! })));
+    kLine.setData(validCandles.filter(c => isFiniteNumber(c.k) && c.k > 0).map((c: Candle) => ({ time: c.time as Time, value: c.k! })));
+    dLine.setData(validCandles.filter(c => isFiniteNumber(c.d) && c.d > 0).map((c: Candle) => ({ time: c.time as Time, value: c.d! })));
+    jLine.setData(validCandles.filter(c => isFiniteNumber(c.j) && c.j > 0).map((c: Candle) => ({ time: c.time as Time, value: c.j! })));
 
     // MACD
     const macdHist = charts[3].addSeries(HistogramSeries, { lastValueVisible: false });
     const macdDif = charts[3].addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1 as LineWidth });
     const macdDea = charts[3].addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 as LineWidth });
-    macdHist.setData(validCandles.filter(c => c.macd_hist != null).map((c: Candle) => ({ 
+    macdHist.setData(validCandles.filter(c => isFiniteNumber(c.macd_hist)).map((c: Candle) => ({ 
       time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98166' : '#f43f5e66' 
     })));
-    macdDif.setData(validCandles.filter(c => c.macd_dif != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
-    macdDea.setData(validCandles.filter(c => c.macd_dea != null).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));
+    macdDif.setData(validCandles.filter(c => isFiniteNumber(c.macd_dif)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
+    macdDea.setData(validCandles.filter(c => isFiniteNumber(c.macd_dea)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));
 
     // ATR
     const atrLine = charts[4].addSeries(LineSeries, { color: '#fb923c', lineWidth: 1 as LineWidth });
-    atrLine.setData(validCandles.filter(c => c.atr != null && c.atr > 0).map((c: Candle) => ({ time: c.time as Time, value: c.atr! })));
+    atrLine.setData(validCandles.filter(c => isFiniteNumber(c.atr) && c.atr > 0).map((c: Candle) => ({ time: c.time as Time, value: c.atr! })));
 
     // Sync
     let isBroadcasting = false;

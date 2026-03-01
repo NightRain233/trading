@@ -30,6 +30,31 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     y: number;
   } | null>(null);
 
+  const isFiniteNumber = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+
+  const isValidDateString = (value: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+
+  const isBusinessDay = (value: unknown): value is Time =>
+    typeof value === 'object' &&
+    value !== null &&
+    isFiniteNumber((value as any).year) &&
+    isFiniteNumber((value as any).month) &&
+    isFiniteNumber((value as any).day);
+
+  const isValidTime = (value: unknown): value is Time =>
+    (typeof value === 'string' && isValidDateString(value)) ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    isBusinessDay(value);
+
+  const isValidCandle = (c: Candle) =>
+    isValidTime(c.time) &&
+    isFiniteNumber(c.open) &&
+    isFiniteNumber(c.high) &&
+    isFiniteNumber(c.low) &&
+    isFiniteNumber(c.close);
+
   // Sync with global mode whenever it changes
   useEffect(() => {
     setInternalEmaMode(propsEmaMode);
@@ -46,7 +71,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     minPrice,
     changePercent
   } = useMemo(() => {
-    const validCandles = candles.filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
+    const validCandles = candles.filter(isValidCandle);
 
     if (validCandles.length === 0) {
       return {
@@ -68,11 +93,11 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     const ema2Key = internalEmaMode === 'long' ? 'ema50' : 'ema10';
 
     const e1Data = validCandles
-      .filter(c => c[ema1Key] != null)
+      .filter(c => isFiniteNumber(c[ema1Key]))
       .map(c => ({ time: c.time as Time, value: c[ema1Key]! }));
 
     const e2Data = validCandles
-      .filter(c => c[ema2Key] != null)
+      .filter(c => isFiniteNumber(c[ema2Key]))
       .map(c => ({ time: c.time as Time, value: c[ema2Key]! }));
 
     // Meta calculations
@@ -107,7 +132,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
   }, [candles, internalEmaMode]);
 
   useEffect(() => {
-    if (!containerRef.current || candles.length === 0) return;
+    if (!containerRef.current || candleData.length === 0) return;
 
     // Cleanup old chart
     if (chartRef.current) {
@@ -259,7 +284,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     };
   }, [candleData, ema1Data, ema2Data, internalEmaMode, height]);
 
-  if (candles.length === 0) {
+  if (candleData.length === 0) {
     return (
       <div className="h-[120px] flex items-center justify-center text-zinc-600 text-xs bg-zinc-900/30 rounded-lg border border-zinc-800/50">
         No Data
@@ -278,7 +303,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
             <Calendar size={12} className="text-zinc-500" />
             <span>{firstDate} - {lastDate}</span>
             <span className="text-zinc-600 mx-1">|</span>
-            <span className="text-zinc-500">{candles.length}D</span>
+            <span className="text-zinc-500">{candleData.length}D</span>
           </div>
 
           <button

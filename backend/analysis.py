@@ -625,6 +625,38 @@ def _get_weekly_status(price: float, df_weekly: pd.DataFrame) -> dict:
     }
 
 
+def _sanitize_candle_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    清理 K 线数据中的异常值，避免前端图表报错。
+    - 将非数值转换为 NaN
+    - 移除 Inf/-Inf
+    - 丢弃 OHLC 或 time 缺失的行
+    """
+    if df is None or df.empty:
+        return df
+
+    clean_df = df.copy()
+    numeric_cols = [c for c in clean_df.columns if c != 'time']
+    for col in numeric_cols:
+        clean_df[col] = pd.to_numeric(clean_df[col], errors='coerce')
+
+    clean_df = clean_df.replace([float('inf'), float('-inf')], pd.NA)
+
+    if 'time' in clean_df.columns:
+        time_dt = pd.to_datetime(clean_df['time'], errors='coerce')
+        clean_df = clean_df[time_dt.notna()].copy()
+        clean_df['time'] = time_dt[time_dt.notna()].dt.strftime('%Y-%m-%d')
+
+    required_cols = [c for c in ['time', 'open', 'high', 'low', 'close'] if c in clean_df.columns]
+    if required_cols:
+        clean_df = clean_df.dropna(subset=required_cols)
+
+    if 'time' in clean_df.columns:
+        clean_df = clean_df[clean_df['time'].notna() & (clean_df['time'] != '')]
+
+    return clean_df
+
+
 def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART_DAYS) -> list:
     """
     构建 K 线图数据，包含成交量和各项指标
@@ -678,6 +710,7 @@ def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART
     # 过滤存在的列
     existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
+    result_df = _sanitize_candle_df(result_df)
     return result_df.to_dict('records')
 
 
@@ -720,6 +753,7 @@ def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> li
 
     existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
+    result_df = _sanitize_candle_df(result_df)
     return result_df.to_dict('records')
 
 

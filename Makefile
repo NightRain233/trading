@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-logs clean deploy
+.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-logs clean deploy deploy-up
 
 
 # 初始化项目: make install
@@ -20,6 +20,9 @@ SHELL := /bin/bash
 # Deployment config (Update these)
 DEPLOY_HOST := root@8.153.71.148
 DEPLOY_PATH := /home/zsd/trading
+
+DEPLOY_HOST_TX := root@170.106.76.26
+DEPLOY_PATH_TX := /home/trading
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -69,6 +72,15 @@ restart: down up ## Restart docker containers
 
 deploy: ## Sync project to remote server using rsync
 	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH) 
+
+deploy-up: deploy ## Deploy and start docker containers on remote
+	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --build"
+
+deploy-tx: ## Sync project to remote server using rsync
+	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST_TX):$(DEPLOY_PATH_TX) 
+
+deploy-up-tx: deploy-tx ## Deploy and start docker containers on remote
+	ssh $(DEPLOY_HOST_TX) "cd $(DEPLOY_PATH_TX) && docker compose up -d --build"
 
 # --- Cleanup ---
 
