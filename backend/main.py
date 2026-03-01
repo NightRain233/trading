@@ -1,16 +1,27 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from analysis import analyze_stock, batch_fetch_and_update, analyze_stock_summary, _build_mini_candles, DATA_DIR
+from analysis import (
+    analyze_stock,
+    batch_fetch_and_update,
+    _build_mini_candles,
+    get_cached_batch_summaries,
+    refresh_symbols_async,
+    refresh_symbols_sync_with_timeout,
+)
 import json
 import os
 import uuid
 import time
 import logging
-import asyncio
 import threading
+import hashlib
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from email.utils import formatdate
+from zoneinfo import ZoneInfo
 
 # 获取日志记录器，用于在控制台输出信息
 logger = logging.getLogger(__name__)
@@ -40,6 +51,9 @@ app.add_middleware(
 )
 
 WATCHLIST_FILE = "watchlist.json"
+PREWARM_HOURS = (9, 12, 15, 21)
+PREWARM_TZ = ZoneInfo("Asia/Shanghai")
+COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
 
 class UpdateAliasRequest(BaseModel):
     alias: str
@@ -137,6 +151,67 @@ class UpdateWatchlistRequest(BaseModel):
 class BatchQuoteRequest(BaseModel):
     symbols: List[str]
 
+
+def normalize_symbols(symbols: List[str]) -> List[str]:
+    """标准化 symbol 列表：去空、去重、转大写、排序。"""
+    return sorted({s.strip().upper() for s in symbols if isinstance(s, str) and s.strip()})
+
+
+def _clean_etag(value: str) -> str:
+    cleaned = value.strip()
+    if cleaned.startswith("W/"):
+        cleaned = cleaned[2:]
+    return cleaned.strip('"')
+
+
+def etag_matches(if_none_match: Optional[str], current_etag: str) -> bool:
+    """支持 If-None-Match 多值与弱 ETag 的匹配。"""
+    if not if_none_match:
+        return False
+    normalized_current = _clean_etag(current_etag)
+    for candidate in if_none_match.split(","):
+        tag = candidate.strip()
+        if tag == "*":
+            return True
+        if _clean_etag(tag) == normalized_current:
+            return True
+    return False
+
+
+def build_quotes_etag(symbols: List[str], payload: dict, latest_mtime: Optional[float]) -> str:
+    """为批量行情响应生成稳定 ETag。"""
+    hash_input = json.dumps(
+        {
+            "symbols": symbols,
+            "latest_mtime": round(latest_mtime, 3) if latest_mtime else None,
+            "payload": payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:32]
+    return f"\"{digest}\""
+
+
+def build_cache_headers(
+    etag: str,
+    latest_mtime: Optional[float],
+    data_stale: bool,
+    refresh_triggered: bool,
+) -> dict:
+    updated_ts = latest_mtime if latest_mtime is not None else time.time()
+    last_modified = formatdate(updated_ts, usegmt=True)
+    updated_at = datetime.fromtimestamp(updated_ts, tz=timezone.utc).isoformat()
+    return {
+        "ETag": etag,
+        "Last-Modified": last_modified,
+        "Cache-Control": "private, no-cache",
+        "X-Data-Updated-At": updated_at,
+        "X-Data-Stale": "1" if data_stale else "0",
+        "X-Refresh-Triggered": "1" if refresh_triggered else "0",
+    }
+
 @app.get("/")
 def read_root():
     return {"status": "ok", "message": "Trading Backend is running"}
@@ -149,38 +224,58 @@ def get_quote(symbol: str):
     return data
 
 @app.post("/api/quotes/batch")
-def get_batch_quotes(request: BatchQuoteRequest):
+def get_batch_quotes(
+    request: BatchQuoteRequest,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+):
     """批量获取股票摘要数据（列表页使用，不含 K 线数据）"""
-    if not request.symbols:
-        return {}
-    
-    # 记录总耗时
+    normalized_symbols = normalize_symbols(request.symbols)
+    if not normalized_symbols:
+        return JSONResponse(content={})
+
     start_total = time.perf_counter()
-    
-    # 步骤 1：获取和更新数据（可能涉及网络下载）
-    with timer(f"批量获取与更新数据 ({len(request.symbols)} 只股票)"):
-        results = batch_fetch_and_update(request.symbols)
-    
-    # 步骤 2：获取股票摘要数据
-    response = {}
-    with timer("提取预缓存指标摘要"):
-        for symbol, result_tuple in results.items():
-            # 现在返回的是 (df, df_weekly, summary)
-            if len(result_tuple) >= 3:
-                summary = result_tuple[2]
-                if summary:
-                    response[symbol] = summary
-            else:
-                # 兼容性处理（如果有些旧逻辑没返回 summary）
-                df, df_weekly = result_tuple[0], result_tuple[1]
-                summary = analyze_stock_summary(symbol, df, df_weekly)
-                if summary:
-                    response[symbol] = summary
-                
+    refresh_triggered = False
+
+    # 第一步：仅读缓存，不在请求路径阻塞网络下载
+    with timer(f"批量读取缓存 ({len(normalized_symbols)} 只股票)"):
+        cache_info = get_cached_batch_summaries(normalized_symbols)
+    response_payload = cache_info["results"]
+
+    # 冷启动兜底：首次请求且全量无缓存，允许限时同步刷新（超时后转后台继续）
+    if not response_payload and not if_none_match:
+        with timer("冷启动限时刷新"):
+            completed = refresh_symbols_sync_with_timeout(
+                normalized_symbols,
+                timeout_seconds=COLD_START_SYNC_TIMEOUT_SECONDS,
+                reason="cold_start",
+            )
+        if not completed:
+            refresh_triggered = True
+        cache_info = get_cached_batch_summaries(normalized_symbols)
+        response_payload = cache_info["results"]
+
+    refresh_candidates = sorted(set(cache_info["stale_symbols"] + cache_info["missing_symbols"]))
+    if refresh_candidates:
+        if refresh_symbols_async(refresh_candidates, reason="batch_swr"):
+            refresh_triggered = True
+
+    data_stale = bool(cache_info["stale_symbols"] or cache_info["missing_symbols"])
+    etag = build_quotes_etag(normalized_symbols, response_payload, cache_info["latest_mtime"])
+    headers = build_cache_headers(
+        etag=etag,
+        latest_mtime=cache_info["latest_mtime"],
+        data_stale=data_stale,
+        refresh_triggered=refresh_triggered,
+    )
+
+    if etag_matches(if_none_match, etag):
+        end_total = time.perf_counter()
+        logger.info(f"==> [总耗时] 批量获取接口完成(304): {end_total - start_total:.4f} 秒")
+        return Response(status_code=304, headers=headers)
+
     end_total = time.perf_counter()
     logger.info(f"==> [总耗时] 批量获取接口完成: {end_total - start_total:.4f} 秒")
-    
-    return response
+    return JSONResponse(content=response_payload, headers=headers)
 
 @app.post("/api/quotes/batch/charts")
 def get_batch_charts(request: BatchQuoteRequest):
@@ -297,26 +392,65 @@ def update_watchlist(request: UpdateWatchlistRequest):
     save_watchlist(groups)
     return {"message": "Watchlist updated"}
 
+def _next_prewarm_run(now_local: datetime) -> datetime:
+    """计算下一个固定预热时间点（本地时区时间）。"""
+    today_candidates = [
+        now_local.replace(hour=hour, minute=0, second=0, microsecond=0)
+        for hour in PREWARM_HOURS
+    ]
+    for candidate in today_candidates:
+        if candidate > now_local:
+            return candidate
+    return (now_local + timedelta(days=1)).replace(
+        hour=PREWARM_HOURS[0],
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+
+def _collect_watchlist_symbols() -> List[str]:
+    groups = load_watchlist()
+    symbols = []
+    for group in groups:
+        for item in group.get("symbols", []):
+            symbol = item.get("symbol", "").strip().upper()
+            if symbol:
+                symbols.append(symbol)
+    return normalize_symbols(symbols)
+
+
 def refresh_watchlist_background():
-    """后台任务：每隔 20 分钟自动刷新一次观察列表，保持缓存新鲜"""
+    """后台任务：固定时点预热观察列表缓存（Asia/Shanghai 09/12/15/21）。"""
     while True:
         try:
-            logger.info("==> [后台管家] 开始例行维护观察列表数据...")
-            groups = load_watchlist()
-            all_symbols = []
-            for g in groups:
-                for s in g["symbols"]:
-                    all_symbols.append(s["symbol"])
-            
-            if all_symbols:
-                # 传入 force_refresh=True 或特定标志，确保后台会去更新
-                batch_fetch_and_update(all_symbols)
-                logger.info(f"==> [后台管家] 维护完成，已新鲜化 {len(all_symbols)} 只股票数据。")
+            now_local = datetime.now(PREWARM_TZ)
+            next_run = _next_prewarm_run(now_local)
+            sleep_seconds = max(1.0, (next_run - now_local).total_seconds())
+            logger.info(
+                "==> [后台预热] 下次执行时间: %s (%s), %.0f 秒后触发",
+                next_run.strftime("%Y-%m-%d %H:%M:%S"),
+                PREWARM_TZ.key,
+                sleep_seconds,
+            )
+            time.sleep(sleep_seconds)
+
+            symbols = _collect_watchlist_symbols()
+            if symbols:
+                triggered = refresh_symbols_async(
+                    symbols,
+                    reason="scheduled_prewarm",
+                    min_interval_seconds=0,
+                )
+                if triggered:
+                    logger.info(f"==> [后台预热] 已提交 {len(symbols)} 只股票刷新任务。")
+                else:
+                    logger.info("==> [后台预热] 本轮无可刷新股票（可能正在刷新中）。")
+            else:
+                logger.info("==> [后台预热] 观察列表为空，跳过本轮预热。")
         except Exception as e:
-            logger.error(f"==> [后台管家] 维护作业出错: {e}")
-        
-        # 每 20 分钟跑一次
-        time.sleep(1200)
+            logger.error(f"==> [后台预热] 作业出错: {e}")
+            time.sleep(30)
 
 @app.on_event("startup")
 async def startup_event():

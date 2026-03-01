@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
-import { fetchWatchlist, fetchBatchQuotes, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
+import { fetchWatchlist, fetchBatchQuotes, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, Candle, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 import { SortableGroup } from './components/SortableGroup';
@@ -27,14 +27,12 @@ const SortableContextAny = SortableContext as any;
 
 const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
   const symbols = new Set<string>();
-  const aliasMap = new Map<string, string>();
   groupsData.forEach(g => {
     g.symbols.forEach(s => {
       symbols.add(s.symbol);
-      if (s.alias) aliasMap.set(s.symbol, s.alias);
     });
   });
-  return { symbols: Array.from(symbols), aliasMap };
+  return { symbols: Array.from(symbols) };
 };
 
 const scheduleIdle = (cb: () => void) => {
@@ -43,6 +41,57 @@ const scheduleIdle = (cb: () => void) => {
     return;
   }
   setTimeout(cb, 0);
+};
+
+const buildPlaceholderStock = (symbol: string, alias = ''): StockData => ({
+  symbol,
+  name: symbol,
+  alias,
+  price: 0,
+  changePercent: 0,
+  candles: [],
+  ema20: 0,
+  ema50: 0,
+  adx: 0,
+  rsi: 0,
+  rsiPeriod: 14,
+  rsiStatus: '中性',
+  rsiOverbought: 70,
+  rsiOversold: 30,
+  trend: '震荡',
+  signal: '观望',
+  _loading: true,
+});
+
+const mergeGroupsWithStockMap = (
+  groupsData: WatchlistGroup[],
+  stockMap: Record<string, StockData>,
+  fallbackStockMap?: Map<string, StockData>
+) => {
+  return groupsData.map(g => ({
+    ...g,
+    stocks: g.symbols.map(symObj => {
+      const incoming = stockMap[symObj.symbol];
+      if (incoming) {
+        return {
+          ...incoming,
+          alias: symObj.alias || incoming.alias || '',
+          _loading: false,
+        };
+      }
+
+      const fallback = fallbackStockMap?.get(symObj.symbol);
+      if (fallback) {
+        return {
+          ...fallback,
+          alias: symObj.alias || fallback.alias || '',
+          _loading: false,
+        };
+      }
+
+      return buildPlaceholderStock(symObj.symbol, symObj.alias || '');
+    }),
+  }));
 };
 
 function App() {
@@ -73,55 +122,31 @@ function App() {
   const [chartData, setChartData] = useState<Record<string, Candle[]>>({});
   const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
   const [showCharts, setShowCharts] = useState(false);
+  const [lastDataUpdatedAt, setLastDataUpdatedAt] = useState<string | null>(null);
+  const [dataStale, setDataStale] = useState(false);
+  const etagRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setDataStale(false);
     try {
       // 1. Fetch group structure (lightweight) → 立即渲染骨架
       const groupsData = await fetchWatchlist();
 
-      const { symbols: uniqueSymbols, aliasMap } = getUniqueSymbols(groupsData);
+      const { symbols: uniqueSymbols } = getUniqueSymbols(groupsData);
 
       // 先用 watchlist 信息渲染股票名称占位行
-      setGroups(groupsData.map(g => ({
-        ...g,
-        stocks: g.symbols.map(s => ({
-          symbol: s.symbol,
-          name: s.symbol,
-          alias: s.alias,
-          price: 0,
-          changePercent: 0,
-          candles: [],
-          ema20: 0,
-          ema50: 0,
-          adx: 0,
-          rsi: 0,
-          rsiPeriod: 14,
-          rsiStatus: '中性' as const,
-          rsiOverbought: 70,
-          rsiOversold: 30,
-          trend: '震荡' as const,
-          signal: '观望' as const,
-          _loading: true,
-        }))
-      })));
-      // 2. 异步拉取批量数据，回来后填充
-      const stockMap = await fetchBatchQuotes(uniqueSymbols);
+      setGroups(mergeGroupsWithStockMap(groupsData, {}));
 
-      for (const [symbol, alias] of aliasMap) {
-        if (stockMap[symbol]) {
-          stockMap[symbol].alias = alias;
-        }
+      if (uniqueSymbols.length === 0) {
+        setLastDataUpdatedAt(null);
+        setDataStale(false);
+        return;
       }
 
-      const populatedGroups = groupsData.map(g => ({
-        ...g,
-        stocks: g.symbols
-          .map(symObj => stockMap[symObj.symbol])
-          .filter((s): s is StockData => s !== undefined)
-      }));
-
-      setGroups(populatedGroups);
+      // 2. 异步拉取批量数据，回来后填充
+      const stockMap = await fetchBatchQuotes(uniqueSymbols);
+      setGroups(mergeGroupsWithStockMap(groupsData, stockMap));
     } catch (error) {
       console.error("Failed to load watchlist:", error);
     } finally {
@@ -136,10 +161,15 @@ function App() {
   const allSymbols = useMemo(() => {
     const symbolSet = new Set<string>();
     groups.forEach(g => {
-      (g.stocks || []).forEach(s => symbolSet.add(s.symbol));
+      g.symbols.forEach(s => symbolSet.add(s.symbol));
     });
-    return Array.from(symbolSet);
+    return Array.from(symbolSet).sort();
   }, [groups]);
+  const symbolsKey = useMemo(() => allSymbols.join(','), [allSymbols]);
+  const formattedUpdatedAt = useMemo(
+    () => (lastDataUpdatedAt ? new Date(lastDataUpdatedAt).toLocaleString('zh-CN', { hour12: false }) : ''),
+    [lastDataUpdatedAt]
+  );
 
   const loadCharts = useCallback(async (symbols: string[]) => {
     if (symbols.length === 0) return;
@@ -157,6 +187,69 @@ function App() {
       loadCharts(missingSymbols);
     });
   }, [showCharts, allSymbols, chartData, loadCharts]);
+
+  useEffect(() => {
+    etagRef.current = null;
+  }, [symbolsKey]);
+
+  useEffect(() => {
+    if (!symbolsKey) return;
+
+    const symbols = symbolsKey.split(',');
+    let disposed = false;
+    let timerId: number | null = null;
+
+    const runPoll = async () => {
+      const result = await fetchBatchQuotesConditional(symbols, etagRef.current || undefined);
+      if (disposed) return;
+
+      if (result.etag) {
+        etagRef.current = result.etag;
+      }
+      if (result.updatedAt) {
+        setLastDataUpdatedAt(result.updatedAt);
+      }
+      setDataStale(result.stale);
+
+      if (result.status === 'updated' && Object.keys(result.data).length > 0) {
+        setGroups(prevGroups => {
+          const fallbackStockMap = new Map<string, StockData>();
+          prevGroups.forEach(group => {
+            (group.stocks || []).forEach(stock => fallbackStockMap.set(stock.symbol, stock));
+          });
+          return mergeGroupsWithStockMap(prevGroups, result.data, fallbackStockMap);
+        });
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      if (disposed) return;
+      const delay = document.visibilityState === 'visible' ? 30_000 : 300_000;
+      timerId = window.setTimeout(async () => {
+        await runPoll();
+        scheduleNextPoll();
+      }, delay);
+    };
+
+    const handleVisibilityChange = () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+      void runPoll().then(scheduleNextPoll);
+    };
+
+    void runPoll().then(scheduleNextPoll);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      disposed = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [symbolsKey]);
 
   const handleEditAlias = async () => {
     if (!editingAliasStock) return;
@@ -218,6 +311,11 @@ function App() {
       collapsed: g.collapsed
     })));
   }, []);
+
+  const handleManualRefresh = useCallback(() => {
+    etagRef.current = null;
+    loadData();
+  }, [loadData]);
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
@@ -425,7 +523,7 @@ function App() {
         showCharts={showCharts}
         setShowCharts={setShowCharts}
         loading={loading}
-        handleRefresh={loadData}
+        handleRefresh={handleManualRefresh}
       />
 
       {showNewGroupInput && (
@@ -449,6 +547,10 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
+        <div className="mb-3 text-xs text-zinc-500">
+          {formattedUpdatedAt ? `数据时间: ${formattedUpdatedAt}` : '数据时间: --'}
+          {dataStale ? <span className="ml-2 text-amber-400">数据可能延迟</span> : null}
+        </div>
         
         <FilterBar 
           showFilters={showFilters}

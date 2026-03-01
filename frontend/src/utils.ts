@@ -4,6 +4,34 @@ import type { Candle, StockData, WatchlistGroup, WatchlistItem } from './types';
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
 const API_BASE_URL = '/api';
 
+export type BatchQuotesConditionalResult =
+  | {
+      status: 'not_modified';
+      etag: string | null;
+      updatedAt: string | null;
+      stale: boolean;
+      refreshTriggered: boolean;
+    }
+  | {
+      status: 'updated';
+      data: Record<string, StockData>;
+      etag: string | null;
+      updatedAt: string | null;
+      stale: boolean;
+      refreshTriggered: boolean;
+    };
+
+function parseBatchResponseMeta(response: Response) {
+  const stale = response.headers.get('X-Data-Stale') === '1';
+  const refreshTriggered = response.headers.get('X-Refresh-Triggered') === '1';
+  return {
+    etag: response.headers.get('ETag'),
+    updatedAt: response.headers.get('X-Data-Updated-At'),
+    stale,
+    refreshTriggered,
+  };
+}
+
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
   try {
     const response = await fetch(`${API_BASE_URL}/quote/${symbol}`);
@@ -35,6 +63,62 @@ export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string
   } catch (error) {
     console.error('Error fetching batch quotes:', error);
     return {};
+  }
+}
+
+export async function fetchBatchQuotesConditional(
+  symbols: string[],
+  etag?: string
+): Promise<BatchQuotesConditionalResult> {
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (etag) {
+      headers['If-None-Match'] = etag;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/quotes/batch`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ symbols }),
+    });
+
+    const meta = parseBatchResponseMeta(response);
+    if (response.status === 304) {
+      return {
+        status: 'not_modified',
+        ...meta,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        status: 'updated',
+        data: {},
+        etag: null,
+        updatedAt: null,
+        stale: true,
+        refreshTriggered: false,
+      };
+    }
+
+    const data = (await response.json()) as Record<string, StockData>;
+    return {
+      status: 'updated',
+      data,
+      ...meta,
+    };
+  } catch (error) {
+    console.error('Error fetching conditional batch quotes:', error);
+    return {
+      status: 'updated',
+      data: {},
+      etag: null,
+      updatedAt: null,
+      stale: true,
+      refreshTriggered: false,
+    };
   }
 }
 

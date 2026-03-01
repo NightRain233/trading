@@ -11,7 +11,7 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import pandas as pd
 import pandas_ta as ta
@@ -23,7 +23,9 @@ import yfinance as yf
 
 DATA_DIR = "data"
 CACHE_DURATION_SECONDS = 60 * 60  # 缓存有效期：1小时
+ALLOW_STALE_SECONDS = 60 * 60 * 24  # 允许返回旧数据的最大窗口：24小时
 DATA_RETENTION_DAYS = 730         # 数据保留天数：2年
+REFRESH_MIN_INTERVAL_SECONDS = 60  # 同一 symbol 最小刷新间隔：60秒
 
 # 技术指标参数
 EMA_FAST_5 = 5
@@ -85,6 +87,12 @@ logger = logging.getLogger(__name__)
 _memory_cache = {}
 _memory_cache_lock = threading.Lock()
 
+# 异步刷新去重与节流
+_refresh_state_lock = threading.Lock()
+_refresh_inflight_symbols = set()
+_last_refresh_requested_at: Dict[str, float] = {}
+_refresh_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="swr-refresh")
+
 # 确保数据目录存在
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -93,6 +101,209 @@ if not os.path.exists(DATA_DIR):
 def get_symbol_lock(symbol: str) -> threading.Lock:
     """获取指定股票代码的线程锁"""
     return symbol_locks[symbol.upper()]
+
+
+def _normalize_symbols(symbols: List[str]) -> List[str]:
+    """标准化股票代码列表（去空、去重、转大写、排序）"""
+    return sorted({s.strip().upper() for s in symbols if isinstance(s, str) and s.strip()})
+
+
+def _pick_refreshable_symbols(symbols: List[str], min_interval_seconds: int) -> List[str]:
+    """
+    选出可刷新 symbol，并在全局状态里标记 inflight。
+    - 同 symbol 在刷新中：跳过
+    - 同 symbol 距离上次触发小于阈值：跳过
+    """
+    now = time.time()
+    refreshable = []
+    with _refresh_state_lock:
+        for symbol in symbols:
+            if symbol in _refresh_inflight_symbols:
+                continue
+            last_requested = _last_refresh_requested_at.get(symbol, 0)
+            if now - last_requested < min_interval_seconds:
+                continue
+            _last_refresh_requested_at[symbol] = now
+            _refresh_inflight_symbols.add(symbol)
+            refreshable.append(symbol)
+    return refreshable
+
+
+def _release_refresh_symbols(symbols: List[str]) -> None:
+    """刷新任务结束后释放 inflight 标记。"""
+    with _refresh_state_lock:
+        for symbol in symbols:
+            _refresh_inflight_symbols.discard(symbol)
+
+
+def _refresh_worker(symbols: List[str], reason: str) -> None:
+    """刷新任务执行器，统一异常处理与状态回收。"""
+    try:
+        logger.info(f"==> [异步刷新] 开始刷新 {len(symbols)} 只股票, reason={reason}, symbols={symbols}")
+        batch_fetch_and_update(symbols)
+        logger.info(f"==> [异步刷新] 刷新完成 {len(symbols)} 只股票, reason={reason}")
+    except Exception as e:
+        logger.error(f"==> [异步刷新] 刷新失败 reason={reason}: {e}")
+    finally:
+        _release_refresh_symbols(symbols)
+
+
+def refresh_symbols_async(symbols: List[str], reason: str = "api", min_interval_seconds: int = REFRESH_MIN_INTERVAL_SECONDS) -> bool:
+    """
+    异步刷新 symbols（带去重与节流）。
+
+    Returns:
+        True: 成功提交了刷新任务
+        False: 没有可刷新的 symbol（例如都在 inflight 或节流窗口内）
+    """
+    normalized = _normalize_symbols(symbols)
+    if not normalized:
+        return False
+
+    refreshable = _pick_refreshable_symbols(normalized, min_interval_seconds)
+    if not refreshable:
+        return False
+
+    _refresh_executor.submit(_refresh_worker, refreshable, reason)
+    return True
+
+
+def refresh_symbols_sync_with_timeout(
+    symbols: List[str],
+    timeout_seconds: float = 5.0,
+    reason: str = "cold_start",
+    min_interval_seconds: int = REFRESH_MIN_INTERVAL_SECONDS,
+) -> bool:
+    """
+    触发一次同步等待刷新（超时后继续后台执行，不阻塞接口）。
+
+    Returns:
+        True: 在超时前完成刷新
+        False: 超时/异常/无可刷新 symbol
+    """
+    normalized = _normalize_symbols(symbols)
+    if not normalized:
+        return False
+
+    refreshable = _pick_refreshable_symbols(normalized, min_interval_seconds)
+    if not refreshable:
+        return False
+
+    future = _refresh_executor.submit(_refresh_worker, refreshable, reason)
+    try:
+        future.result(timeout=timeout_seconds)
+        return True
+    except FutureTimeoutError:
+        logger.warning(
+            f"==> [冷启动刷新] 超时 {timeout_seconds:.1f}s, 将继续后台刷新: symbols={refreshable}"
+        )
+        return False
+    except Exception as e:
+        logger.error(f"==> [冷启动刷新] 执行失败: {e}")
+        return False
+
+
+def get_cached_batch_summaries(symbols: List[str]) -> dict:
+    """
+    只读取内存/磁盘缓存，返回列表页摘要，不进行网络拉取。
+
+    Returns:
+        {
+          "results": {symbol: summary},
+          "fresh_symbols": [...],
+          "stale_symbols": [...],
+          "very_stale_symbols": [...],
+          "missing_symbols": [...],
+          "latest_mtime": Optional[float]
+        }
+    """
+    normalized = _normalize_symbols(symbols)
+    now_ts = time.time()
+
+    results: Dict[str, dict] = {}
+    fresh_symbols: List[str] = []
+    stale_symbols: List[str] = []
+    very_stale_symbols: List[str] = []
+    missing_symbols: List[str] = []
+    latest_mtime: Optional[float] = None
+
+    for symbol in normalized:
+        summary = None
+        timestamp = None
+
+        with _memory_cache_lock:
+            entry = _memory_cache.get(symbol)
+
+        if entry:
+            summary = entry.get("summary")
+            timestamp = entry.get("timestamp")
+            if summary and timestamp is not None:
+                results[symbol] = summary
+                latest_mtime = max(latest_mtime, float(timestamp)) if latest_mtime is not None else float(timestamp)
+
+                age = now_ts - float(timestamp)
+                if age < CACHE_DURATION_SECONDS:
+                    fresh_symbols.append(symbol)
+                else:
+                    stale_symbols.append(symbol)
+                    if age > ALLOW_STALE_SECONDS:
+                        very_stale_symbols.append(symbol)
+                continue
+
+        # 内存未命中时，尝试磁盘缓存（仅本地 I/O，不联网）
+        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        weekly_file_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+
+        df_local, _ = _load_local_data(file_path, symbol)
+        if df_local is None or df_local.empty:
+            missing_symbols.append(symbol)
+            continue
+
+        has_daily_indicators = "EMA20" in df_local.columns and "EMA5" in df_local.columns
+        if not has_daily_indicators:
+            missing_symbols.append(symbol)
+            continue
+
+        df_weekly, _ = _load_local_data(weekly_file_path, symbol)
+        has_weekly_indicators = df_weekly is not None and not df_weekly.empty and "MACD_W" in df_weekly.columns
+        if not has_weekly_indicators:
+            missing_symbols.append(symbol)
+            continue
+
+        summary = analyze_stock_summary(symbol, df_local, df_weekly)
+        if not summary:
+            missing_symbols.append(symbol)
+            continue
+
+        file_mod_time = os.path.getmtime(file_path) if os.path.exists(file_path) else now_ts
+        results[symbol] = summary
+        latest_mtime = max(latest_mtime, float(file_mod_time)) if latest_mtime is not None else float(file_mod_time)
+
+        age = now_ts - float(file_mod_time)
+        if age < CACHE_DURATION_SECONDS:
+            fresh_symbols.append(symbol)
+        else:
+            stale_symbols.append(symbol)
+            if age > ALLOW_STALE_SECONDS:
+                very_stale_symbols.append(symbol)
+
+        # 同步回填一级缓存，加速后续请求
+        with _memory_cache_lock:
+            _memory_cache[symbol] = {
+                "df": df_local,
+                "df_weekly": df_weekly,
+                "summary": summary,
+                "timestamp": float(file_mod_time),
+            }
+
+    return {
+        "results": results,
+        "fresh_symbols": fresh_symbols,
+        "stale_symbols": stale_symbols,
+        "very_stale_symbols": very_stale_symbols,
+        "missing_symbols": missing_symbols,
+        "latest_mtime": latest_mtime,
+    }
 
 
 # ============================================
@@ -854,9 +1065,6 @@ def batch_fetch_and_update(symbols: list) -> dict:
     count_mem_hit = 0
     count_disk_hit = 0
     count_to_fetch = 0
-    
-    # 定义判定逻辑：过期多少秒以内依然允许先看“旧数据”
-    ALLOW_STALE_SECONDS = 3600 * 24 # 只要数据在 24 小时内，都允许作为旧数据先返回
     
     def process_symbol_initial(symbol):
         # 1.1 检查一级缓存：内存
