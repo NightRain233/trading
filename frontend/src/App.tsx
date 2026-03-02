@@ -106,11 +106,11 @@ function App() {
   const [aliasModalOpen, setAliasModalOpen] = useState(false);
   const [editingAliasStock, setEditingAliasStock] = useState<StockData | null>(null);
   const [aliasInput, setAliasInput] = useState('');
-  
+
   // Sorting and Filtering State
   const [sortConfig, setSortConfig] = useState<{
-    key: keyof StockData | 'weeklyStatus'; 
-    direction: 'asc' | 'desc' | null 
+    key: keyof StockData | 'weeklyStatus';
+    direction: 'asc' | 'desc' | null
   }>({ key: 'price', direction: null });
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
@@ -276,7 +276,7 @@ function App() {
   const handleAddStock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTicker.trim()) return;
-    
+
     const success = await addTicker(newTicker);
     if (success) {
       setNewTicker('');
@@ -289,8 +289,8 @@ function App() {
   const handleRemoveStock = useCallback(async (e: React.MouseEvent, symbol: string) => {
     e.stopPropagation();
     if (confirm(`Remove ${symbol}?`)) {
-       await removeTicker(symbol);
-       loadData();
+      await removeTicker(symbol);
+      loadData();
     }
   }, [loadData]);
 
@@ -332,19 +332,19 @@ function App() {
 
     // Check if dragging a group
     const isGroup = groups.some(g => g.id === active.id);
-    
+
     if (isGroup) {
       // Reorder groups
       const oldIndex = groups.findIndex(g => g.id === active.id);
       const newIndex = groups.findIndex(g => g.id === over.id);
-      
+
       if (oldIndex !== -1 && newIndex !== -1) {
         const newGroups = [...groups];
         const movedGroups = Array.from(newGroups);
         const [removed] = movedGroups.splice(oldIndex, 1);
         movedGroups.splice(newIndex, 0, removed);
         setGroups(movedGroups);
-        
+
         await updateWatchlist(movedGroups.map(g => ({
           id: g.id,
           name: g.name,
@@ -400,7 +400,7 @@ function App() {
       }
 
       setGroups(newGroups);
-      
+
       await updateWatchlist(newGroups.map(g => ({
         id: g.id,
         name: g.name,
@@ -415,39 +415,39 @@ function App() {
     if (!needsFilter) return groups;
     return groups.map(g => {
       let stocks = [...(g.stocks || [])];
-      
+
       // 1. Text Search
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
-        stocks = stocks.filter(s => 
-          s.symbol.toLowerCase().includes(term) || 
+        stocks = stocks.filter(s =>
+          s.symbol.toLowerCase().includes(term) ||
           s.name.toLowerCase().includes(term)
         );
       }
-      
+
       // 2. Status Filters
       if (activeFilters.length > 0) {
         const activeWeekly = activeFilters.filter(f => weeklyFilterOptions.includes(f));
         const activeTrend = activeFilters.filter(f => trendFilterOptions.includes(f));
 
         if (activeWeekly.length > 0) {
-          stocks = stocks.filter(s => 
+          stocks = stocks.filter(s =>
             s.weeklyMacdStatus && activeWeekly.includes(s.weeklyMacdStatus)
           );
         }
 
         if (activeTrend.length > 0) {
-          stocks = stocks.filter(s => 
+          stocks = stocks.filter(s =>
             s.trend && activeTrend.includes(s.trend)
           );
         }
       }
-      
+
       // 3. Sorting
       if (sortConfig.direction && sortConfig.key) {
         stocks.sort((a, b) => {
           if (!a || !b) return 0;
-          
+
           let valA: any = null;
           let valB: any = null;
 
@@ -507,8 +507,8 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-emerald-500/30">
-      <Header 
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
+      <Header
         newTicker={newTicker}
         setNewTicker={setNewTicker}
         handleAddStock={handleAddStock}
@@ -527,16 +527,16 @@ function App() {
       />
 
       {showNewGroupInput && (
-        <NewGroupModal 
+        <NewGroupModal
           newGroupName={newGroupName}
           setNewGroupName={setNewGroupName}
           handleCreateGroup={handleCreateGroup}
           setShowNewGroupInput={setShowNewGroupInput}
         />
       )}
-      
+
       {aliasModalOpen && editingAliasStock && (
-        <AliasEditModal 
+        <AliasEditModal
           symbol={editingAliasStock.symbol}
           aliasInput={aliasInput}
           setAliasInput={setAliasInput}
@@ -546,13 +546,23 @@ function App() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        <div className="mb-3 text-xs text-zinc-500">
-          {formattedUpdatedAt ? `数据时间: ${formattedUpdatedAt}` : '数据时间: --'}
-          {dataStale ? <span className="ml-2 text-amber-400">数据可能延迟</span> : null}
+      <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+        {/* Data timestamp */}
+        <div className="mb-4 flex items-center gap-2">
+          <div className="data-chip rounded-lg px-3 py-1.5 inline-flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/60 animate-pulse" />
+            <span className="text-[11px] text-zinc-500 font-medium">
+              {formattedUpdatedAt ? `数据更新: ${formattedUpdatedAt}` : '数据加载中...'}
+            </span>
+          </div>
+          {dataStale && (
+            <span className="text-[11px] text-amber-400/80 bg-amber-500/5 border border-amber-500/15 px-2 py-1 rounded-lg font-medium">
+              ⚠ 数据可能延迟
+            </span>
+          )}
         </div>
-        
-        <FilterBar 
+
+        <FilterBar
           showFilters={showFilters}
           activeFilters={activeFilters}
           toggleFilter={toggleFilter}
@@ -587,8 +597,10 @@ function App() {
         </DndContext>
 
         {filteredGroups.length === 0 && (
-          <div className="p-8 text-center text-zinc-500">
-            No groups found
+          <div className="glass-card rounded-2xl p-12 text-center animate-fade-in-up">
+            <div className="text-3xl mb-3">📊</div>
+            <div className="text-zinc-500 font-medium">暂无分组数据</div>
+            <div className="text-zinc-700 text-sm mt-1">点击右上角 + 添加标的开始使用</div>
           </div>
         )}
       </main>
@@ -596,8 +608,11 @@ function App() {
       {/* Detail Modal */}
       {selectedStock && (
         <Suspense fallback={
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md">
-            <div className="text-zinc-400 text-sm">Loading chart...</div>
+          <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+              <div className="text-zinc-500 text-sm font-medium">加载图表中...</div>
+            </div>
           </div>
         }>
           <ChartModal stock={selectedStock} onClose={() => setSelectedStock(null)} />

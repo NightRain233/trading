@@ -868,6 +868,21 @@ def _sanitize_candle_df(df: pd.DataFrame) -> pd.DataFrame:
     return clean_df
 
 
+def _ensure_time_ascending(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    保证图表数据满足 lightweight-charts 的要求：
+    - time 严格升序
+    - 同一 time 仅保留一条记录（保留最后一条）
+    """
+    if df is None or df.empty or 'time' not in df.columns:
+        return df
+    return (
+        df.drop_duplicates(subset=['time'], keep='last')
+        .sort_values('time', ascending=True)
+        .reset_index(drop=True)
+    )
+
+
 def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART_DAYS) -> list:
     """
     构建 K 线图数据，包含成交量和各项指标
@@ -922,6 +937,7 @@ def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART
     existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
     result_df = _sanitize_candle_df(result_df)
+    result_df = _ensure_time_ascending(result_df)
     return result_df.to_dict('records')
 
 
@@ -965,6 +981,7 @@ def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> li
     existing_cols = {k: v for k, v in cols.items() if k in chart_df.columns}
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
     result_df = _sanitize_candle_df(result_df)
+    result_df = _ensure_time_ascending(result_df)
     return result_df.to_dict('records')
 
 

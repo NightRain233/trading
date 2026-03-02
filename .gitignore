@@ -28,3 +28,4 @@ backend/cache.pkl
 
 # --- Docker ---
 .docker/
+backend/tests/__pycache__/

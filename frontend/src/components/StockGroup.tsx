@@ -9,31 +9,31 @@ interface StockGroupProps {
   renderStockRow: (stock: StockData) => React.ReactNode;
 }
 
-export function StockGroup({ 
-  group, 
-  onToggleCollapse, 
-  renderStockRow 
+export function StockGroup({
+  group,
+  onToggleCollapse,
+  renderStockRow
 }: StockGroupProps) {
   return (
     <div className="mb-4">
       {/* Group Header */}
-      <div 
-        className="flex items-center gap-2 p-3 bg-zinc-800/50 rounded-t-lg cursor-pointer hover:bg-zinc-800 transition-colors border border-zinc-700/50"
+      <div
+        className="flex items-center gap-2 p-3.5 bg-zinc-800/30 backdrop-blur-sm rounded-t-xl cursor-pointer hover:bg-zinc-800/50 transition-all border border-zinc-700/30 border-b-0 group/group-header"
         onClick={() => onToggleCollapse(group.id)}
       >
-        <GripVertical className="text-zinc-600 cursor-grab" size={16} />
+        <GripVertical className="text-zinc-600 cursor-grab group-hover/group-header:text-zinc-400 transition-colors" size={16} />
         {group.collapsed ? (
           <ChevronRight className="text-zinc-400" size={18} />
         ) : (
           <ChevronDown className="text-zinc-400" size={18} />
         )}
-        <span className="font-medium text-zinc-200">{group.name}</span>
+        <span className="font-semibold text-zinc-100 tracking-tight">{group.name}</span>
         <span className="text-xs text-zinc-500 ml-2">({(group.stocks || []).length})</span>
       </div>
-      
+
       {/* Stocks List */}
       {!group.collapsed && (
-        <div className="border border-t-0 border-zinc-700/50 rounded-b-lg overflow-hidden">
+        <div className="border border-t-0 border-zinc-700/30 rounded-b-xl overflow-hidden bg-zinc-900/10">
           {(group.stocks || []).length === 0 ? (
             <div className="p-4 text-center text-zinc-600 text-sm">
               拖拽股票到此分组

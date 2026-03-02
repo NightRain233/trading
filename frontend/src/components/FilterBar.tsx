@@ -1,6 +1,7 @@
 import React from 'react';
 import { clsx } from 'clsx';
 import type { StockData } from '../types';
+import { X } from 'lucide-react';
 
 interface FilterBarProps {
   showFilters: boolean;
@@ -26,51 +27,59 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     <>
       {/* Filter Toolbar */}
       {showFilters && (
-        <div className="mb-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2">
-          <span className="text-xs text-zinc-500 w-full mb-1">筛选周线状态:</span>
-          {['周线牛市', '周线反弹', '周线回调', '周线熊市'].map(f => (
-            <button
-              key={f}
-              onClick={() => toggleFilter(f)}
-              className={clsx(
-                "px-3 py-1 rounded-full text-xs font-medium transition-all",
-                activeFilters.includes(f) 
-                  ? "bg-emerald-500 text-white" 
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-              )}
-            >
-              {f}
-            </button>
-          ))}
-          <span className="text-xs text-zinc-500 w-full mt-2 mb-1">筛选趋势状态:</span>
-          {['强势多头', '潜在转空', '强势空头', '潜在转多'].map(f => (
-            <button
-              key={f}
-              onClick={() => toggleFilter(f)}
-              className={clsx(
-                "px-3 py-1 rounded-full text-xs font-medium transition-all",
-                activeFilters.includes(f) 
-                  ? "bg-emerald-500 text-white" 
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-              )}
-            >
-              {f}
-            </button>
-          ))}
-          {activeFilters.length > 0 && (
-            <button 
-              onClick={() => setActiveFilters([])}
-              className="px-3 py-1 text-xs text-rose-400 hover:text-rose-300"
-            >
-              清除全部
-            </button>
-          )}
+        <div className="mb-5 p-5 glass-card rounded-2xl animate-slide-down shadow-xl">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">周线状态</span>
+            {activeFilters.length > 0 && (
+              <button
+                onClick={() => setActiveFilters([])}
+                className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-rose-400 hover:text-rose-300 bg-rose-500/5 hover:bg-rose-500/10 rounded-md transition-all"
+              >
+                <X size={10} />
+                清除全部
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['周线牛市', '周线反弹', '周线回调', '周线熊市'].map(f => (
+              <button
+                key={f}
+                onClick={() => toggleFilter(f)}
+                className={clsx(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 border",
+                  activeFilters.includes(f)
+                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-[0_0_16px_-4px_rgba(16,185,129,0.25)]"
+                    : "bg-zinc-800/30 border-zinc-700/25 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 hover:border-zinc-600/40"
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold block mb-2">趋势状态</span>
+          <div className="flex flex-wrap gap-2">
+            {['强势多头', '潜在转多', '强势空头', '潜在转空'].map(f => (
+              <button
+                key={f}
+                onClick={() => toggleFilter(f)}
+                className={clsx(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 border",
+                  activeFilters.includes(f)
+                    ? "bg-sky-500/15 border-sky-500/40 text-sky-400 shadow-[0_0_16px_-4px_rgba(14,165,233,0.25)]"
+                    : "bg-zinc-800/30 border-zinc-700/25 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 hover:border-zinc-600/40"
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       {/* Mobile Sort Tabs */}
-      <div className="flex sm:hidden overflow-x-auto gap-2 pb-4 mb-2 no-scrollbar items-center">
-        <span className="text-[10px] text-zinc-500 whitespace-nowrap mr-1">排序:</span>
+      <div className="flex sm:hidden overflow-x-auto gap-1.5 pb-4 mb-2 no-scrollbar items-center">
+        <span className="text-[10px] text-zinc-600 whitespace-nowrap mr-1 font-medium">排序</span>
         {[
           { label: '代码', key: 'symbol' },
           { label: '价格', key: 'price' },
@@ -83,15 +92,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             key={item.key}
             onClick={() => toggleSort(item.key)}
             className={clsx(
-              "px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap border transition-all flex items-center gap-1",
-              sortConfig.key === item.key 
-                ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                : "bg-zinc-900 border-zinc-800 text-zinc-500"
+              "px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap border transition-all duration-200 flex items-center gap-1",
+              sortConfig.key === item.key
+                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                : "bg-zinc-900/50 border-zinc-800/50 text-zinc-500 hover:text-zinc-300"
             )}
           >
             {item.label}
             {sortConfig.key === item.key && (
-              <span className="text-[10px] leading-none">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
+              <span className="text-[10px] leading-none font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>
             )}
           </button>
         ))}

@@ -73,11 +73,11 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     if (!stock || !priceRef.current || !rsiRef.current || !kdjRef.current || !macdRef.current || !atrRef.current) return;
 
     const containers = [priceRef.current, rsiRef.current, kdjRef.current, macdRef.current, atrRef.current];
-    
+
     // CRITICAL FIX: Clear the containers explicitly before creating new charts
     // This prevents double rendering when useEffect triggers multiple times
     containers.forEach(container => {
-        if (container) container.innerHTML = '';
+      if (container) container.innerHTML = '';
     });
 
     const charts: IChartApi[] = [];
@@ -111,7 +111,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     };
 
     // Responsive Heights
-    const pHeight = isMobile ? 280 : 400; 
+    const pHeight = isMobile ? 280 : 400;
     const sHeight = isMobile ? 100 : 130;
 
     charts[0] = createChart(priceRef.current, { ...commonOptions, height: pHeight });
@@ -127,27 +127,27 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     const validCandles = candles.filter(isValidCandle);
 
     // 1. Price
-    const candleSeries = charts[0].addSeries(CandlestickSeries, { 
-       upColor: '#10b981', 
-       downColor: '#f43f5e', 
-       borderVisible: false, 
-       wickUpColor: '#10b981', 
-       wickDownColor: '#f43f5e' 
+    const candleSeries = charts[0].addSeries(CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e'
     });
-    candleSeries.setData(validCandles.map((c: Candle) => ({ 
-      time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close 
+    candleSeries.setData(validCandles.map((c: Candle) => ({
+      time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close
     })));
 
     // 2. Volume
-    const volumeSeries = charts[0].addSeries(HistogramSeries, { 
-      color: '#3f3f46', 
-      priceFormat: { type: 'volume' }, 
+    const volumeSeries = charts[0].addSeries(HistogramSeries, {
+      color: '#3f3f46',
+      priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    charts[0].priceScale('volume').applyOptions({ 
-        scaleMargins: { top: 0.8, bottom: 0 } 
+    charts[0].priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 }
     });
     volumeSeries.setData(validCandles.map((c: Candle) => {
       const volume = isFiniteNumber(c.volume) ? c.volume : 0;
@@ -193,8 +193,8 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     const macdHist = charts[3].addSeries(HistogramSeries, { lastValueVisible: false });
     const macdDif = charts[3].addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1 as LineWidth });
     const macdDea = charts[3].addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 as LineWidth });
-    macdHist.setData(validCandles.filter(c => isFiniteNumber(c.macd_hist)).map((c: Candle) => ({ 
-      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98166' : '#f43f5e66' 
+    macdHist.setData(validCandles.filter(c => isFiniteNumber(c.macd_hist)).map((c: Candle) => ({
+      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98166' : '#f43f5e66'
     })));
     macdDif.setData(validCandles.filter(c => isFiniteNumber(c.macd_dif)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
     macdDea.setData(validCandles.filter(c => isFiniteNumber(c.macd_dea)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));
@@ -242,7 +242,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     return () => {
       window.removeEventListener('resize', handleResize);
       charts.forEach(c => {
-          try { c.remove(); } catch(e) {}
+        try { c.remove(); } catch (e) { }
       });
     };
   }, [stock, timeframe, mainInd, isMobile]);
@@ -250,108 +250,110 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   if (!stock) return null;
 
   const TabButton = ({ active, onClick, children }: { active: boolean, onClick: () => void, children: React.ReactNode }) => (
-    <button 
+    <button
       onClick={onClick}
-      className={`px-3 py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all ${
-        active ? 'bg-zinc-100 text-zinc-950 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-      }`}
+      className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-semibold transition-all duration-200 ${active ? 'bg-zinc-100 text-zinc-950 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+        }`}
     >
       {children}
     </button>
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md sm:p-4 animate-in fade-in duration-200">
+    <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center sm:p-4 animate-fade-in-scale">
       <div className="bg-zinc-950 w-full sm:max-w-6xl sm:rounded-2xl border-x sm:border border-zinc-800/50 shadow-2xl overflow-hidden flex flex-col h-full sm:h-[95vh]">
-        
+
         {/* Compact Header */}
+        {/* Top accent line */}
+        <div className="h-[1px] bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
+
         <div className="px-4 py-3 border-b border-zinc-800/50 bg-zinc-900/20 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0">
             <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                    <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">{stock.symbol}</h2>
-                    <div className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400 font-mono tracking-wider">{stock.name}</div>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className={`text-lg sm:text-xl font-mono font-bold ${stock.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stock.price.toFixed(2)}
-                    </span>
-                    <span className={`text-xs font-mono font-medium ${stock.changePercent >= 0 ? 'text-emerald-500/80' : 'text-rose-500/80'}`}>
-                        {stock.changePercent >= 0 ? '▲' : '▼'} {Math.abs(stock.changePercent).toFixed(2)}%
-                    </span>
-                </div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">{stock.symbol}</h2>
+                <div className="px-2 py-0.5 rounded-lg bg-zinc-800/60 text-[10px] text-zinc-400 font-mono tracking-wider border border-zinc-700/30">{stock.name}</div>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className={`text-lg sm:text-xl font-mono font-bold ${(stock.changePercent || 0) >= 0 ? 'price-up' : 'price-down'}`}>
+                  {(stock.price || 0).toFixed(2)}
+                </span>
+                <span className={`text-xs font-mono font-medium ${(stock.changePercent || 0) >= 0 ? 'text-emerald-500/80' : 'text-rose-500/80'}`}>
+                  {(stock.changePercent || 0) >= 0 ? '▲' : '▼'} {Math.abs(stock.changePercent || 0).toFixed(2)}%
+                </span>
+              </div>
             </div>
 
             <div className="hidden sm:flex h-8 w-px bg-zinc-800/50 mx-2"></div>
 
             <div className="flex flex-wrap gap-2">
-                <StatusBadge status={stock.trend} type="trend" />
-                <StatusBadge status={stock.signal} type="signal" />
-                {hoverDate && (
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono shadow-inner">
-                        <Calendar size={12} className="opacity-70" /> {hoverDate}
-                    </div>
-                )}
+              <StatusBadge status={stock.trend} type="trend" />
+              <StatusBadge status={stock.signal} type="signal" />
+              {hoverDate && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono shadow-inner">
+                  <Calendar size={12} className="opacity-70" /> {hoverDate}
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800/50">
-                <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
-                    <TabButton onClick={() => setTimeframe('D')} active={timeframe === 'D'}>D</TabButton>
-                    <TabButton onClick={() => setTimeframe('W')} active={timeframe === 'W'}>W</TabButton>
-                </div>
-                <div className="w-px h-4 bg-zinc-800/50"></div>
-                <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
-                    <TabButton onClick={() => setMainInd('EMA')} active={mainInd === 'EMA'}>EMA</TabButton>
-                    <TabButton onClick={() => setMainInd('BOLL')} active={mainInd === 'BOLL'}>BOLL</TabButton>
-                </div>
-             </div>
-             
-             <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-white transition-all">
-                <X size={24} />
-             </button>
+            <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800/50">
+              <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
+                <TabButton onClick={() => setTimeframe('D')} active={timeframe === 'D'}>D</TabButton>
+                <TabButton onClick={() => setTimeframe('W')} active={timeframe === 'W'}>W</TabButton>
+              </div>
+              <div className="w-px h-4 bg-zinc-800/50"></div>
+              <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
+                <TabButton onClick={() => setMainInd('EMA')} active={mainInd === 'EMA'}>EMA</TabButton>
+                <TabButton onClick={() => setMainInd('BOLL')} active={mainInd === 'BOLL'}>BOLL</TabButton>
+              </div>
+            </div>
+
+            <button onClick={onClose} className="p-2 hover:bg-zinc-800/80 rounded-xl text-zinc-500 hover:text-white transition-all duration-200 border border-transparent hover:border-zinc-700/30">
+              <X size={22} />
+            </button>
           </div>
         </div>
 
         {/* Charts - Stacking */}
         <div className="flex-1 overflow-y-auto bg-zinc-950 custom-scrollbar">
-           <div className="relative border-b border-zinc-900">
-             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
-               <Activity size={12} className="text-emerald-500/50" /> Price & Volume
-             </div>
-             <div className="w-full" ref={priceRef} />
-           </div>
+          <div className="relative border-b border-zinc-900">
+            <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+              <Activity size={12} className="text-emerald-500/50" /> Price & Volume
+            </div>
+            <div className="w-full" ref={priceRef} />
+          </div>
 
-           <div className="relative border-b border-zinc-900">
-             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
-               <LayoutGrid size={12} className="text-purple-500/50" /> RSI
-             </div>
-             <div className="w-full" ref={rsiRef} />
-           </div>
+          <div className="relative border-b border-zinc-900">
+            <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+              <LayoutGrid size={12} className="text-purple-500/50" /> RSI
+            </div>
+            <div className="w-full" ref={rsiRef} />
+          </div>
 
-           <div className="relative border-b border-zinc-900">
-             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
-               <LayoutGrid size={12} className="text-amber-500/50" /> KDJ
-             </div>
-             <div className="w-full" ref={kdjRef} />
-           </div>
+          <div className="relative border-b border-zinc-900">
+            <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+              <LayoutGrid size={12} className="text-amber-500/50" /> KDJ
+            </div>
+            <div className="w-full" ref={kdjRef} />
+          </div>
 
-           <div className="relative border-b border-zinc-900">
-             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
-               <LayoutGrid size={12} className="text-blue-500/50" /> MACD
-             </div>
-             <div className="w-full" ref={macdRef} />
-           </div>
+          <div className="relative border-b border-zinc-900">
+            <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+              <LayoutGrid size={12} className="text-blue-500/50" /> MACD
+            </div>
+            <div className="w-full" ref={macdRef} />
+          </div>
 
-           <div className="relative">
-             <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
-               <Info size={12} className="text-orange-500/50" /> ATR
-             </div>
-             <div className="w-full" ref={atrRef} />
-           </div>
+          <div className="relative">
+            <div className="absolute top-3 left-4 z-10 text-[10px] uppercase tracking-widest text-zinc-600 font-bold pointer-events-none flex items-center gap-2">
+              <Info size={12} className="text-orange-500/50" /> ATR
+            </div>
+            <div className="w-full" ref={atrRef} />
+          </div>
 
-           <div className="h-10 invisible" />
+          <div className="h-10 invisible" />
         </div>
       </div>
     </div>
