@@ -47,6 +47,14 @@ export interface StockData {
   weeklyMacdStatus?: '周线牛市' | '周线反弹' | '周线回调' | '周线熊市';
   weeklyPriceVsMA5?: '线上' | '线下';
   weeklyMacdHist?: number;
+  // Resonance Strategy
+  resonanceInPool?: boolean;
+  resonanceBuySignal?: boolean;
+  resonancePoolReason?: string;
+  resonanceBuyReason?: string;
+  resonanceExitSignal?: boolean;
+  resonanceExitLevel?: 'none' | 'warn' | 'hard';
+  resonanceExitReason?: string;
 }
 
 export interface WatchlistItem {

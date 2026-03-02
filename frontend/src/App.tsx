@@ -117,6 +117,7 @@ function App() {
 
   const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '周线熊市'];
   const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
+  const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 
   // 迷你图状态
   const [chartData, setChartData] = useState<Record<string, Candle[]>>({});
@@ -429,6 +430,7 @@ function App() {
       if (activeFilters.length > 0) {
         const activeWeekly = activeFilters.filter(f => weeklyFilterOptions.includes(f));
         const activeTrend = activeFilters.filter(f => trendFilterOptions.includes(f));
+        const activeResonance = activeFilters.filter(f => resonanceFilterOptions.includes(f));
 
         if (activeWeekly.length > 0) {
           stocks = stocks.filter(s =>
@@ -439,6 +441,14 @@ function App() {
         if (activeTrend.length > 0) {
           stocks = stocks.filter(s =>
             s.trend && activeTrend.includes(s.trend)
+          );
+        }
+
+        if (activeResonance.length > 0) {
+          stocks = stocks.filter(s =>
+            (activeResonance.includes('共振买点') && !!s.resonanceBuySignal) ||
+            (activeResonance.includes('离场预警') && s.resonanceExitLevel === 'warn') ||
+            (activeResonance.includes('共振离场') && s.resonanceExitLevel === 'hard')
           );
         }
       }

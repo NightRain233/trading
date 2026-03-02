@@ -52,6 +52,12 @@ KDJ_SIGNAL_D = 3
 # ATR 参数
 ATR_PERIOD = 14
 
+# Resonance v1 策略参数
+RESONANCE_GOLDEN_CROSS_LOOKBACK = 15
+RESONANCE_PULLBACK_LOOKBACK = 3
+RESONANCE_VOLUME_MA_WINDOW = 20
+RESONANCE_VOLUME_SHRINK_RATIO = 0.8
+
 # RSI 阈值配置 (超买, 超卖)
 RSI_THRESHOLDS = {
     "uptrend_strong": (75, 45),    # 上升趋势，ADX > 25
@@ -702,6 +708,206 @@ def _get_dynamic_rsi(adx: float, last_row: pd.Series) -> Tuple[int, float]:
     return period, rsi
 
 
+def _is_recent_ema20_50_golden_cross(
+    df_daily: pd.DataFrame, lookback_bars: int = RESONANCE_GOLDEN_CROSS_LOOKBACK
+) -> Tuple[bool, Optional[int]]:
+    """
+    判断 EMA20/EMA50 金叉是否仍在有效窗口内。
+
+    Returns:
+        (是否有效, 距离最近金叉的 bar 数)
+    """
+    if (
+        df_daily is None
+        or df_daily.empty
+        or "EMA20" not in df_daily.columns
+        or "EMA50" not in df_daily.columns
+        or len(df_daily) < 2
+    ):
+        return False, None
+
+    cond = df_daily["EMA20"] > df_daily["EMA50"]
+    if not bool(cond.iloc[-1]):
+        return False, None
+
+    golden_cross = cond & (~cond.shift(1, fill_value=False))
+    cross_positions = [idx for idx, flag in enumerate(golden_cross.tolist()) if bool(flag)]
+    if not cross_positions:
+        return False, None
+
+    bars_since = len(df_daily) - 1 - int(cross_positions[-1])
+    return bars_since <= lookback_bars, bars_since
+
+
+def _has_pullback_reclaim_signal(
+    df_daily: pd.DataFrame,
+    ema_col: str,
+    lookback_bars: int = RESONANCE_PULLBACK_LOOKBACK,
+    volume_ma_window: int = RESONANCE_VOLUME_MA_WINDOW,
+    volume_shrink_ratio: float = RESONANCE_VOLUME_SHRINK_RATIO,
+) -> Tuple[bool, str]:
+    """
+    检测最近窗口内是否出现“回踩短期均线后收回 + 缩量 + 不破EMA20 + 均线上行”。
+    """
+    required_cols = {"Low", "Close", "Volume", "EMA20", ema_col}
+    if df_daily is None or df_daily.empty or not required_cols.issubset(df_daily.columns):
+        return False, ""
+    if len(df_daily) < max(volume_ma_window, 2):
+        return False, ""
+
+    volume_ma = df_daily["Volume"].rolling(window=volume_ma_window).mean()
+    start_idx = max(1, len(df_daily) - lookback_bars)
+
+    for i in range(len(df_daily) - 1, start_idx - 1, -1):
+        low = float(df_daily["Low"].iloc[i])
+        close = float(df_daily["Close"].iloc[i])
+        ema = float(df_daily[ema_col].iloc[i])
+        ema_prev = float(df_daily[ema_col].iloc[i - 1])
+        ema20 = float(df_daily["EMA20"].iloc[i])
+        vol = float(df_daily["Volume"].iloc[i])
+        vol_ma = volume_ma.iloc[i]
+
+        touched_and_reclaimed = low <= ema and close >= ema
+        trend_protected = low >= ema20
+        ema_is_rising = ema > ema_prev
+        volume_shrunk = pd.notna(vol_ma) and float(vol_ma) > 0 and vol <= float(vol_ma) * volume_shrink_ratio
+
+        if touched_and_reclaimed and trend_protected and ema_is_rising and volume_shrunk:
+            return True, f"{ema_col}回踩确认"
+
+    return False, ""
+
+
+def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
+    """
+    resonance_v1:
+    1) 周线 MACD 金叉 + 价格在周 MA5 上方（池子过滤）
+    2) 日线 EMA20/50 金叉在有效窗口内（池子过滤）
+    3) 最近出现 EMA5/EMA10 回踩确认（买点）
+    """
+    result = {
+        "inPool": False,
+        "buySignal": False,
+        "poolReason": "",
+        "buyReason": "",
+    }
+
+    if (
+        df_daily is None
+        or df_daily.empty
+        or df_weekly is None
+        or df_weekly.empty
+        or "Close" not in df_daily.columns
+        or "MACD_W" not in df_weekly.columns
+        or "MACD_Signal_W" not in df_weekly.columns
+        or "MA5_W" not in df_weekly.columns
+    ):
+        return result
+
+    price = float(df_daily["Close"].iloc[-1])
+    w_last = df_weekly.iloc[-1]
+    weekly_ok = float(w_last["MACD_W"]) > float(w_last["MACD_Signal_W"]) and price > float(w_last["MA5_W"])
+
+    cross_ok, bars_since_cross = _is_recent_ema20_50_golden_cross(df_daily)
+    result["inPool"] = weekly_ok and cross_ok
+
+    if result["inPool"]:
+        result["poolReason"] = (
+            f"周线过滤通过; 日线EMA20/50金叉距今{bars_since_cross}根K线"
+            if bars_since_cross is not None
+            else "周线过滤通过; 日线EMA20/50金叉有效"
+        )
+    elif not weekly_ok:
+        result["poolReason"] = "周线过滤未通过"
+    else:
+        result["poolReason"] = "日线EMA20/50金叉超出窗口或不存在"
+
+    if not result["inPool"]:
+        return result
+
+    pullback_ema5, reason_ema5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
+    pullback_ema10, reason_ema10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
+    result["buySignal"] = pullback_ema5 or pullback_ema10
+
+    if result["buySignal"]:
+        result["buyReason"] = reason_ema5 or reason_ema10
+    else:
+        result["buyReason"] = "最近未出现有效回踩确认"
+
+    return result
+
+
+def _evaluate_resonance_exit_no_position(df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
+    """
+    resonance_v1 无持仓离场信号：
+    - hard: 跌破 EMA50 / 周线 MACD 走弱 / 跌破周 MA5
+    - warn: 跌破 EMA20 / 日线 MACD 死叉
+    - none: 其余情况
+    """
+    result = {
+        "exitSignal": False,
+        "exitLevel": "none",
+        "exitReason": "",
+    }
+
+    required_daily = {"Close", "EMA20", "EMA50", "MACD_DIF", "MACD_DEA"}
+    required_weekly = {"MACD_W", "MACD_Signal_W", "MA5_W"}
+    if (
+        df_daily is None
+        or df_daily.empty
+        or df_weekly is None
+        or df_weekly.empty
+        or not required_daily.issubset(df_daily.columns)
+        or not required_weekly.issubset(df_weekly.columns)
+    ):
+        return result
+
+    last_d = df_daily.iloc[-1]
+    last_w = df_weekly.iloc[-1]
+    price = float(last_d["Close"])
+    ema20 = float(last_d["EMA20"])
+    ema50 = float(last_d["EMA50"])
+    macd_dif = float(last_d["MACD_DIF"])
+    macd_dea = float(last_d["MACD_DEA"])
+    w_macd = float(last_w["MACD_W"])
+    w_signal = float(last_w["MACD_Signal_W"])
+    w_ma5 = float(last_w["MA5_W"])
+
+    # Hard exit conditions
+    if price < ema50:
+        result["exitSignal"] = True
+        result["exitLevel"] = "hard"
+        result["exitReason"] = "收盘跌破EMA50"
+        return result
+
+    if w_macd <= w_signal:
+        result["exitSignal"] = True
+        result["exitLevel"] = "hard"
+        result["exitReason"] = "周线MACD走弱"
+        return result
+
+    if price < w_ma5:
+        result["exitSignal"] = True
+        result["exitLevel"] = "hard"
+        result["exitReason"] = "价格跌破周MA5"
+        return result
+
+    # Warning exit conditions
+    if price < ema20:
+        result["exitSignal"] = True
+        result["exitLevel"] = "warn"
+        result["exitReason"] = "收盘跌破EMA20"
+        return result
+
+    if macd_dif <= macd_dea:
+        result["exitSignal"] = True
+        result["exitLevel"] = "warn"
+        result["exitReason"] = "日线MACD死叉"
+        return result
+
+    return result
+
+
 def _analyze_trend(price: float, ema20: float, ema50: float) -> str:
     """
     分析价格趋势
@@ -1029,6 +1235,8 @@ def analyze_stock(symbol: str) -> Optional[dict]:
 
     # 周线分析
     weekly_status = _get_weekly_status(price, df_weekly)
+    resonance = _evaluate_resonance_strategy(df, df_weekly)
+    resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
 
     # K线数据 (日线和周线)
     candles = _build_candles(df, rsi_period)
@@ -1049,6 +1257,13 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "rsiOversold": rsi_oversold,
         "trend": trend,
         "signal": signal,
+        "resonanceInPool": resonance["inPool"],
+        "resonanceBuySignal": resonance["buySignal"],
+        "resonancePoolReason": resonance["poolReason"],
+        "resonanceBuyReason": resonance["buyReason"],
+        "resonanceExitSignal": resonance_exit["exitSignal"],
+        "resonanceExitLevel": resonance_exit["exitLevel"],
+        "resonanceExitReason": resonance_exit["exitReason"],
         "candles": candles,
         "weekly_candles": weekly_candles,
         **weekly_status
@@ -1315,6 +1530,8 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
     change_percent = ((price - prev_close) / prev_close) * 100
 
     weekly_status = _get_weekly_status(price, df_weekly)
+    resonance = _evaluate_resonance_strategy(df, df_weekly)
+    resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
 
     return {
         "symbol": symbol,
@@ -1331,6 +1548,13 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
         "rsiOversold": rsi_oversold,
         "trend": trend,
         "signal": signal,
+        "resonanceInPool": resonance["inPool"],
+        "resonanceBuySignal": resonance["buySignal"],
+        "resonancePoolReason": resonance["poolReason"],
+        "resonanceBuyReason": resonance["buyReason"],
+        "resonanceExitSignal": resonance_exit["exitSignal"],
+        "resonanceExitLevel": resonance_exit["exitLevel"],
+        "resonanceExitReason": resonance_exit["exitReason"],
         "candles": [],
         "weekly_candles": [],
         **weekly_status

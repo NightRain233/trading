@@ -74,6 +74,24 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               </button>
             ))}
           </div>
+
+          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold block mt-4 mb-2">共振策略</span>
+          <div className="flex flex-wrap gap-2">
+            {['共振买点', '离场预警', '共振离场'].map(f => (
+              <button
+                key={f}
+                onClick={() => toggleFilter(f)}
+                className={clsx(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 border",
+                  activeFilters.includes(f)
+                    ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-300 shadow-[0_0_16px_-4px_rgba(34,211,238,0.25)]"
+                    : "bg-zinc-800/30 border-zinc-700/25 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 hover:border-zinc-600/40"
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

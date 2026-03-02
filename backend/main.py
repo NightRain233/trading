@@ -130,6 +130,14 @@ class StockResponse(BaseModel):
     weeklyMacdStatus: Optional[str] = None
     weeklyPriceVsMA5: Optional[str] = None
     weeklyMacdHist: Optional[float] = None
+    # Resonance Strategy
+    resonanceInPool: Optional[bool] = None
+    resonanceBuySignal: Optional[bool] = None
+    resonancePoolReason: Optional[str] = None
+    resonanceBuyReason: Optional[str] = None
+    resonanceExitSignal: Optional[bool] = None
+    resonanceExitLevel: Optional[str] = None
+    resonanceExitReason: Optional[str] = None
 
 class Group(BaseModel):
     id: str

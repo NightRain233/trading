@@ -44,6 +44,7 @@ export const SortableStockRow = memo(function SortableStockRow({
   };
 
   const isPositive = (stock.changePercent || 0) >= 0;
+  const resonanceExitLabel = stock.resonanceExitLevel === 'hard' ? '共振离场' : '离场预警';
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -154,6 +155,24 @@ export const SortableStockRow = memo(function SortableStockRow({
                   {stock.signal}
                 </span>
               )}
+              {stock.resonanceBuySignal && (
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap bg-cyan-500/85 text-zinc-950">
+                  共振买点
+                </span>
+              )}
+              {stock.resonanceExitSignal && (
+                <span
+                  className={clsx(
+                    "px-2 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap",
+                    stock.resonanceExitLevel === 'hard'
+                      ? "bg-rose-500/90 text-white"
+                      : "bg-amber-500/90 text-zinc-900"
+                  )}
+                  title={stock.resonanceExitReason || ''}
+                >
+                  {resonanceExitLabel}
+                </span>
+              )}
               {!stock._loading && (
                 <span
                   className={clsx(
@@ -190,17 +209,41 @@ export const SortableStockRow = memo(function SortableStockRow({
         <div className="col-span-2 hidden sm:flex sm:justify-end">
           {stock._loading ? (
             <div className="h-6 w-14 bg-zinc-800/50 rounded-lg animate-pulse" />
-          ) : stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
-            <span className={clsx(
-              "px-2.5 py-1 rounded-lg text-xs font-bold transition-all",
-              stock.signal === '强烈信号'
-                ? "bg-emerald-500/90 text-white badge-glow-green"
-                : "bg-amber-500/90 text-zinc-900 badge-glow-amber"
-            )}>
-              {stock.signal}
-            </span>
           ) : (
-            <span className="text-zinc-700 text-xs font-medium">观望</span>
+            <div className="flex flex-wrap justify-end gap-1.5 max-w-[170px]">
+              {stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
+                <span className={clsx(
+                  "px-2.5 py-1 rounded-lg text-xs font-bold transition-all",
+                  stock.signal === '强烈信号'
+                    ? "bg-emerald-500/90 text-white badge-glow-green"
+                    : "bg-amber-500/90 text-zinc-900 badge-glow-amber"
+                )}>
+                  {stock.signal}
+                </span>
+              ) : (
+                <span className="text-zinc-700 text-xs font-medium">观望</span>
+              )}
+
+              {stock.resonanceBuySignal && (
+                <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-500/85 text-zinc-950">
+                  共振买点
+                </span>
+              )}
+
+              {stock.resonanceExitSignal && (
+                <span
+                  className={clsx(
+                    "px-2.5 py-1 rounded-lg text-xs font-bold",
+                    stock.resonanceExitLevel === 'hard'
+                      ? "bg-rose-500/90 text-white"
+                      : "bg-amber-500/90 text-zinc-900"
+                  )}
+                  title={stock.resonanceExitReason || ''}
+                >
+                  {resonanceExitLabel}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
