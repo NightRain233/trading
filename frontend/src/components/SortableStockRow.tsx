@@ -317,7 +317,7 @@ export const SortableStockRow = memo(function SortableStockRow({
       {/* Mini Chart */}
       {showCharts && miniCandles && miniCandles.length > 0 && (
         <div className="px-4 pb-3" onClick={() => onStockClick(stock)}>
-          <Suspense fallback={<div className="h-[120px] bg-zinc-900/20 rounded-xl animate-pulse" />}>
+          <Suspense fallback={<div className="h-[170px] bg-zinc-900/20 rounded-xl animate-pulse" />}>
             <MiniChart candles={miniCandles} emaMode={emaMode} />
           </Suspense>
         </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, memo } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineSeries, CrosshairMode } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, CrosshairMode } from 'lightweight-charts';
 import type { IChartApi, Time, MouseEventParams } from 'lightweight-charts';
 import type { Candle } from '../types';
 import { clsx } from 'clsx';
@@ -11,9 +11,29 @@ interface MiniChartProps {
   height?: number;
 }
 
-export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMode, height = 120 }: MiniChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
+const splitTimeKey = (time: Time): string | null => {
+  if (typeof time === 'string') return time;
+  if (typeof time === 'number') {
+    const d = new Date(time * 1000);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
+  if (typeof time === 'object' && time !== null && 'year' in time && 'month' in time && 'day' in time) {
+    const year = (time as any).year;
+    const month = (time as any).month;
+    const day = (time as any).day;
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    return `${String(year)}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return null;
+};
+
+export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMode, height = 170 }: MiniChartProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const mainContainerRef = useRef<HTMLDivElement>(null);
+  const macdContainerRef = useRef<HTMLDivElement>(null);
+  const mainChartRef = useRef<IChartApi | null>(null);
+  const macdChartRef = useRef<IChartApi | null>(null);
 
   // Local state for EMA mode to allow per-stock overrides
   const [internalEmaMode, setInternalEmaMode] = useState(propsEmaMode);
@@ -26,6 +46,9 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     low: number;
     ema1?: number;
     ema2?: number;
+    macdDif?: number;
+    macdDea?: number;
+    macdHist?: number;
     x: number;
     y: number;
   } | null>(null);
@@ -55,29 +78,49 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     isFiniteNumber(c.low) &&
     isFiniteNumber(c.close);
 
+  const ema1Key = internalEmaMode === 'long' ? 'ema20' : 'ema5';
+  const ema2Key = internalEmaMode === 'long' ? 'ema50' : 'ema10';
+
   // Sync with global mode whenever it changes
   useEffect(() => {
     setInternalEmaMode(propsEmaMode);
   }, [propsEmaMode]);
+
+  const macdPaneHeight = Math.max(56, Math.round(height * 0.4));
+  const mainPaneHeight = Math.max(86, height - macdPaneHeight - 6);
+  const totalChartHeight = mainPaneHeight + macdPaneHeight + 6;
 
   // Memoize data to prevent unnecessary recalculations
   const {
     candleData,
     ema1Data,
     ema2Data,
+    macdHistData,
+    macdDifData,
+    macdDeaData,
+    candleByTime,
     firstDate,
     lastDate,
     maxPrice,
     minPrice,
-    changePercent
+    changePercent,
   } = useMemo(() => {
     const validCandles = candles.filter(isValidCandle);
 
     if (validCandles.length === 0) {
       return {
-        candleData: [], ema1Data: [], ema2Data: [],
-        periodChange: 0, firstDate: '', lastDate: '',
-        maxPrice: 0, minPrice: 0, changePercent: 0
+        candleData: [],
+        ema1Data: [],
+        ema2Data: [],
+        macdHistData: [],
+        macdDifData: [],
+        macdDeaData: [],
+        candleByTime: new Map<string, Candle>(),
+        changePercent: 0,
+        firstDate: '',
+        lastDate: '',
+        maxPrice: 0,
+        minPrice: 0,
       };
     }
 
@@ -89,9 +132,6 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
       close: c.close,
     }));
 
-    const ema1Key = internalEmaMode === 'long' ? 'ema20' : 'ema5';
-    const ema2Key = internalEmaMode === 'long' ? 'ema50' : 'ema10';
-
     const e1Data = validCandles
       .filter(c => isFiniteNumber(c[ema1Key]))
       .map(c => ({ time: c.time as Time, value: c[ema1Key]! }));
@@ -99,6 +139,27 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
     const e2Data = validCandles
       .filter(c => isFiniteNumber(c[ema2Key]))
       .map(c => ({ time: c.time as Time, value: c[ema2Key]! }));
+
+    const mHistData = validCandles
+      .filter(c => isFiniteNumber(c.macd_hist))
+      .map(c => ({
+        time: c.time as Time,
+        value: c.macd_hist!,
+        color: c.macd_hist! >= 0 ? '#ef444466' : '#22c55e66',
+      }));
+
+    const mDifData = validCandles
+      .filter(c => isFiniteNumber(c.macd_dif))
+      .map(c => ({ time: c.time as Time, value: c.macd_dif! }));
+
+    const mDeaData = validCandles
+      .filter(c => isFiniteNumber(c.macd_dea))
+      .map(c => ({ time: c.time as Time, value: c.macd_dea! }));
+
+    const byTime = new Map<string, Candle>();
+    validCandles.forEach(c => {
+      byTime.set(c.time, c);
+    });
 
     // Meta calculations
     const first = validCandles[0];
@@ -111,7 +172,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
       try {
         const date = new Date(d);
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } catch (e) {
+      } catch (_e) {
         return d;
       }
     };
@@ -122,30 +183,35 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
       candleData: cData,
       ema1Data: e1Data,
       ema2Data: e2Data,
-      periodChange: change,
+      macdHistData: mHistData,
+      macdDifData: mDifData,
+      macdDeaData: mDeaData,
+      candleByTime: byTime,
       changePercent: changePct,
       firstDate: formatDate(first.time),
       lastDate: formatDate(last.time),
       maxPrice: Math.max(...prices),
-      minPrice: Math.min(...prices)
+      minPrice: Math.min(...prices),
     };
-  }, [candles, internalEmaMode]);
+  }, [candles, ema1Key, ema2Key]);
 
   useEffect(() => {
-    if (!containerRef.current || candleData.length === 0) return;
+    if (!mainContainerRef.current || !macdContainerRef.current || !wrapperRef.current || candleData.length === 0) return;
 
-    // Cleanup old chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
+    if (mainChartRef.current) {
+      mainChartRef.current.remove();
+      mainChartRef.current = null;
+    }
+    if (macdChartRef.current) {
+      macdChartRef.current.remove();
+      macdChartRef.current = null;
     }
 
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: height,
+    const commonChartOptions: any = {
+      width: wrapperRef.current.clientWidth,
       layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#71717a', // zinc-500
+        background: { type: ColorType.Solid as const, color: 'transparent' },
+        textColor: '#71717a',
         attributionLogo: false,
       },
       grid: {
@@ -157,14 +223,12 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
         borderVisible: false,
         fixLeftEdge: true,
         fixRightEdge: true,
+        barSpacing: 4,
+        minBarSpacing: 2,
       },
       rightPriceScale: {
         visible: false,
         borderVisible: false,
-        scaleMargins: {
-          top: 0.2, // increased margin for labels
-          bottom: 0.2,
-        }
       },
       crosshair: {
         mode: CrosshairMode.Magnet,
@@ -182,28 +246,55 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
       handleScroll: false,
       handleScale: false,
       kineticScroll: { touch: false, mouse: false },
+    };
+
+    const mainChart = createChart(mainContainerRef.current, {
+      ...commonChartOptions,
+      height: mainPaneHeight,
+      rightPriceScale: {
+        ...commonChartOptions.rightPriceScale,
+        scaleMargins: {
+          top: 0.15,
+          bottom: 0.15,
+        },
+      },
     });
 
-    chartRef.current = chart;
+    const macdChart = createChart(macdContainerRef.current, {
+      ...commonChartOptions,
+      height: macdPaneHeight,
+      crosshair: {
+        ...commonChartOptions.crosshair,
+        mode: CrosshairMode.Normal,
+      },
+      rightPriceScale: {
+        ...commonChartOptions.rightPriceScale,
+        scaleMargins: {
+          top: 0.18,
+          bottom: 0.18,
+        },
+      },
+    });
 
-    // Candle Series
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981', // emerald-500
-      downColor: '#f43f5e', // rose-500
-      borderUpColor: '#10b981',
-      borderDownColor: '#f43f5e',
-      wickUpColor: '#10b981',
-      wickDownColor: '#f43f5e',
+    mainChartRef.current = mainChart;
+    macdChartRef.current = macdChart;
+
+    const candleSeries = mainChart.addSeries(CandlestickSeries, {
+      upColor: '#ef4444',
+      downColor: '#22c55e',
+      borderUpColor: '#ef4444',
+      borderDownColor: '#22c55e',
+      wickUpColor: '#ef4444',
+      wickDownColor: '#22c55e',
     });
     candleSeries.setData(candleData);
 
-    // EMA Lines
-    const ema1Color = internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8'; // amber-500 : sky-400
-    const ema2Color = internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c'; // violet-500 : orange-400
+    const ema1Color = internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8';
+    const ema2Color = internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c';
 
     let line1: any = null;
     if (ema1Data.length > 0) {
-      line1 = chart.addSeries(LineSeries, {
+      line1 = mainChart.addSeries(LineSeries, {
         color: ema1Color,
         lineWidth: 2,
         crosshairMarkerVisible: false,
@@ -215,7 +306,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
 
     let line2: any = null;
     if (ema2Data.length > 0) {
-      line2 = chart.addSeries(LineSeries, {
+      line2 = mainChart.addSeries(LineSeries, {
         color: ema2Color,
         lineWidth: 2,
         crosshairMarkerVisible: false,
@@ -225,68 +316,135 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
       line2.setData(ema2Data);
     }
 
-    chart.timeScale().fitContent();
+    const macdHistSeries = macdChart.addSeries(HistogramSeries, {
+      priceLineVisible: false,
+      lastValueVisible: false,
+      base: 0,
+    });
+    macdHistSeries.setData(macdHistData);
 
-    // Crosshair Handler
-    const handleCrosshairMove = (param: MouseEventParams) => {
-      const container = containerRef.current;
+    const macdZeroSeries = macdChart.addSeries(LineSeries, {
+      color: '#71717a66',
+      lineWidth: 1,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    macdZeroSeries.setData(candleData.map(c => ({ time: c.time, value: 0 })));
+
+    const macdDifSeries = macdChart.addSeries(LineSeries, {
+      color: '#38bdf8',
+      lineWidth: 1,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    macdDifSeries.setData(macdDifData);
+
+    const macdDeaSeries = macdChart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 1,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    macdDeaSeries.setData(macdDeaData);
+
+    mainChart.timeScale().fitContent();
+    macdChart.timeScale().fitContent();
+
+    const updateHover = (param: MouseEventParams) => {
+      const container = wrapperRef.current;
       if (
         !param.time ||
         param.point === undefined ||
-        !param.point.x ||
-        !param.point.y ||
+        param.point.x === undefined ||
+        param.point.y === undefined ||
+        !Number.isFinite(param.point.x) ||
+        !Number.isFinite(param.point.y) ||
         !container
       ) {
         setHoverData(null);
         return;
       }
 
-      const dataPoint = param.seriesData.get(candleSeries) as any;
+      const timeKey = splitTimeKey(param.time);
+      if (!timeKey) {
+        setHoverData(null);
+        return;
+      }
+
+      const dataPoint = candleByTime.get(timeKey);
       if (!dataPoint) {
         setHoverData(null);
         return;
       }
 
-      const ema1Val = line1 ? param.seriesData.get(line1) : undefined;
-      const ema2Val = line2 ? param.seriesData.get(line2) : undefined;
-
-      // Note: param.point is relative to the chart canvas
       setHoverData({
-        date: dataPoint.time.toString(),
+        date: timeKey,
         price: dataPoint.close,
         open: dataPoint.open,
         high: dataPoint.high,
         low: dataPoint.low,
-        ema1: ema1Val ? (ema1Val as any).value : undefined,
-        ema2: ema2Val ? (ema2Val as any).value : undefined,
+        ema1: isFiniteNumber(dataPoint[ema1Key]) ? dataPoint[ema1Key] : undefined,
+        ema2: isFiniteNumber(dataPoint[ema2Key]) ? dataPoint[ema2Key] : undefined,
+        macdDif: isFiniteNumber(dataPoint.macd_dif) ? dataPoint.macd_dif : undefined,
+        macdDea: isFiniteNumber(dataPoint.macd_dea) ? dataPoint.macd_dea : undefined,
+        macdHist: isFiniteNumber(dataPoint.macd_hist) ? dataPoint.macd_hist : undefined,
         x: param.point.x,
         y: param.point.y,
       });
     };
 
-    chart.subscribeCrosshairMove(handleCrosshairMove);
+    mainChart.subscribeCrosshairMove(updateHover);
+    macdChart.subscribeCrosshairMove(updateHover);
 
-    // Resize Observer to handle container resizing
     const resizeObserver = new ResizeObserver(entries => {
-      if (entries.length === 0 || !entries[0].contentRect || !chartRef.current) return;
+      if (entries.length === 0 || !entries[0].contentRect) return;
       const { width } = entries[0].contentRect;
-      chartRef.current.applyOptions({ width });
+      if (mainChartRef.current) {
+        mainChartRef.current.applyOptions({ width });
+      }
+      if (macdChartRef.current) {
+        macdChartRef.current.applyOptions({ width });
+      }
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(wrapperRef.current);
 
     return () => {
-      if (chartRef.current) {
-        chartRef.current.unsubscribeCrosshairMove(handleCrosshairMove);
-        chartRef.current.remove();
-        chartRef.current = null;
+      if (mainChartRef.current) {
+        mainChartRef.current.unsubscribeCrosshairMove(updateHover);
+        mainChartRef.current.remove();
+        mainChartRef.current = null;
+      }
+      if (macdChartRef.current) {
+        macdChartRef.current.unsubscribeCrosshairMove(updateHover);
+        macdChartRef.current.remove();
+        macdChartRef.current = null;
       }
       resizeObserver.disconnect();
     };
-  }, [candleData, ema1Data, ema2Data, internalEmaMode, height]);
+  }, [
+    candleData,
+    ema1Data,
+    ema2Data,
+    macdHistData,
+    macdDifData,
+    macdDeaData,
+    candleByTime,
+    ema1Key,
+    ema2Key,
+    internalEmaMode,
+    mainPaneHeight,
+    macdPaneHeight,
+  ]);
 
   if (candleData.length === 0) {
     return (
-      <div className="h-[120px] flex items-center justify-center text-zinc-600 text-xs bg-zinc-900/30 rounded-lg border border-zinc-800/50">
+      <div
+        className="flex items-center justify-center text-zinc-600 text-xs bg-zinc-900/30 rounded-lg border border-zinc-800/50"
+        style={{ height: totalChartHeight }}
+      >
         No Data
       </div>
     );
@@ -309,7 +467,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setInternalEmaMode(prev => prev === 'long' ? 'short' : 'long');
+              setInternalEmaMode(prev => (prev === 'long' ? 'short' : 'long'));
             }}
             className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-zinc-700/50 bg-zinc-800/20 text-[10px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 hover:bg-zinc-800/50 transition-all group/ema"
             title="点击切换当前股票均线模式"
@@ -319,38 +477,49 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
           </button>
         </div>
 
-        <div className={clsx(
-          "flex items-center gap-1 text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-md border transition-colors",
-          isPositive
-            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-            : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-        )}>
+        <div
+          className={clsx(
+            'flex items-center gap-1 text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-md border transition-colors',
+            isPositive
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+          )}
+        >
           {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+          {isPositive ? '+' : ''}
+          {changePercent.toFixed(2)}%
         </div>
       </div>
 
       {/* Chart Container */}
-      <div className="relative">
-        <div ref={containerRef} className="w-full relative z-10 box-border" style={{ height }} />
+      <div className="relative" ref={wrapperRef}>
+        <div ref={mainContainerRef} className="w-full relative z-10 box-border" style={{ height: mainPaneHeight }} />
+        <div className="h-1.5" />
+        <div ref={macdContainerRef} className="w-full relative z-10 box-border" style={{ height: macdPaneHeight }} />
 
-        {/* Min/Max Price Labels (Background) - Positioned inside chart area */}
+        {/* Main pane price labels */}
         <div className="absolute top-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
           H: {maxPrice.toFixed(2)}
         </div>
-        <div className="absolute bottom-0 right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0">
+        <div
+          className="absolute right-1 text-[9px] text-zinc-600/50 font-mono pointer-events-none select-none z-0"
+          style={{ top: Math.max(0, mainPaneHeight - 12) }}
+        >
           L: {minPrice.toFixed(2)}
         </div>
 
-        {/* Improved Tooltip */}
+        <div
+          className="absolute right-1 text-[9px] text-zinc-600/60 font-mono pointer-events-none select-none z-0"
+          style={{ top: mainPaneHeight + 8 }}
+        >
+          MACD
+        </div>
+
+        {/* Tooltip */}
         {hoverData && (() => {
-          const tooltipWidth = 140; // Approximate width
-          const chartWidth = containerRef.current?.offsetWidth || 0;
-
-          // Calculate tooltip position
-          const leftPos = Math.max(0, Math.min(chartWidth - tooltipWidth, hoverData.x - (tooltipWidth / 2)));
-
-          // Calculate arrow position relative to tooltip
+          const tooltipWidth = 148;
+          const chartWidth = wrapperRef.current?.offsetWidth || 0;
+          const leftPos = Math.max(0, Math.min(chartWidth - tooltipWidth, hoverData.x - tooltipWidth / 2));
           const arrowPos = Math.max(10, Math.min(tooltipWidth - 14, hoverData.x - leftPos));
 
           return (
@@ -360,59 +529,91 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
                 top: -10,
                 transform: 'translateY(-100%)',
                 left: leftPos,
-                width: tooltipWidth
+                width: tooltipWidth,
               }}
             >
               <div className="w-full bg-zinc-950/90 border border-zinc-700/80 rounded-lg shadow-xl shadow-black/60 p-2 text-[10px] backdrop-blur-md animate-in fade-in zoom-in-95 leading-tight">
                 <div className="flex justify-between items-center mb-1 pb-1 border-b border-zinc-800">
                   <span className="text-zinc-400 font-medium whitespace-nowrap">{hoverData.date}</span>
-                  <span className={clsx("font-bold ml-2",
-                    hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400"
-                  )}>
-                    {((hoverData.price - hoverData.open) / hoverData.open * 100).toFixed(2)}%
+                  <span
+                    className={clsx(
+                      'font-bold ml-2',
+                      hoverData.price >= hoverData.open ? 'text-emerald-400' : 'text-rose-400'
+                    )}
+                  >
+                    {(((hoverData.price - hoverData.open) / hoverData.open) * 100).toFixed(2)}%
                   </span>
                 </div>
 
                 <div className="space-y-0.5">
                   <div className="flex justify-between items-center">
                     <span className="text-zinc-500">Close</span>
-                    <span className={clsx("font-mono font-medium", hoverData.price >= hoverData.open ? "text-emerald-400" : "text-rose-400")}>
+                    <span
+                      className={clsx(
+                        'font-mono font-medium',
+                        hoverData.price >= hoverData.open ? 'text-emerald-400' : 'text-rose-400'
+                      )}
+                    >
                       {hoverData.price.toFixed(2)}
                     </span>
                   </div>
 
-                  {hoverData.ema1 && (
+                  {hoverData.ema1 !== undefined && (
                     <div className="flex justify-between items-center">
                       <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8' }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-current" />
                         {internalEmaMode === 'long' ? 'EMA20' : 'EMA5'}
                       </span>
-                      <span className="font-mono text-zinc-300">
-                        {hoverData.ema1.toFixed(2)}
-                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.ema1.toFixed(2)}</span>
                     </div>
                   )}
 
-                  {hoverData.ema2 && (
+                  {hoverData.ema2 !== undefined && (
                     <div className="flex justify-between items-center">
                       <span className="flex items-center gap-1.5" style={{ color: internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c' }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-current" />
                         {internalEmaMode === 'long' ? 'EMA50' : 'EMA10'}
                       </span>
-                      <span className="font-mono text-zinc-300">
-                        {hoverData.ema2.toFixed(2)}
+                      <span className="font-mono text-zinc-300">{hoverData.ema2.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {hoverData.macdDif !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5 text-sky-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        DIF
+                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.macdDif.toFixed(3)}</span>
+                    </div>
+                  )}
+
+                  {hoverData.macdDea !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5 text-amber-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        DEA
+                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.macdDea.toFixed(3)}</span>
+                    </div>
+                  )}
+
+                  {hoverData.macdHist !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className={clsx('text-zinc-500', hoverData.macdHist >= 0 ? 'text-rose-400' : 'text-emerald-400')}>
+                        MACD
+                      </span>
+                      <span className={clsx('font-mono', hoverData.macdHist >= 0 ? 'text-rose-300' : 'text-emerald-300')}>
+                        {hoverData.macdHist.toFixed(3)}
                       </span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Tooltip Arrow */}
               <div
                 className="w-2 h-2 bg-zinc-950 border-r border-b border-zinc-700/80 rotate-45 -mt-1 z-50 relative"
-                style={{
-                  left: arrowPos
-                }}
+                style={{ left: arrowPos }}
               />
             </div>
           );

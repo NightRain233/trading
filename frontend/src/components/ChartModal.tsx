@@ -96,6 +96,8 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
       timeScale: {
         borderColor: '#27272a',
         visible: false,
+        barSpacing: 4,
+        minBarSpacing: 2,
       },
       rightPriceScale: {
         borderColor: '#27272a',
@@ -128,11 +130,11 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
 
     // 1. Price
     const candleSeries = charts[0].addSeries(CandlestickSeries, {
-      upColor: '#10b981',
-      downColor: '#f43f5e',
+      upColor: '#ef4444',
+      downColor: '#22c55e',
       borderVisible: false,
-      wickUpColor: '#10b981',
-      wickDownColor: '#f43f5e'
+      wickUpColor: '#ef4444',
+      wickDownColor: '#22c55e'
     });
     candleSeries.setData(validCandles.map((c: Candle) => ({
       time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close
@@ -154,7 +156,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
       return {
         time: c.time as Time,
         value: volume,
-        color: c.close >= c.open ? '#10b98122' : '#f43f5e22'
+        color: c.close >= c.open ? '#ef444422' : '#22c55e22'
       };
     }));
 
@@ -191,10 +193,19 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
 
     // MACD
     const macdHist = charts[3].addSeries(HistogramSeries, { lastValueVisible: false });
+    const macdZero = charts[3].addSeries(LineSeries, {
+      color: '#71717a88',
+      lineWidth: 1 as LineWidth,
+      lineStyle: LineStyle.Dashed,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
     const macdDif = charts[3].addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1 as LineWidth });
     const macdDea = charts[3].addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1 as LineWidth });
+    macdZero.setData(validCandles.map((c: Candle) => ({ time: c.time as Time, value: 0 })));
     macdHist.setData(validCandles.filter(c => isFiniteNumber(c.macd_hist)).map((c: Candle) => ({
-      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b98166' : '#f43f5e66'
+      time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#ef444466' : '#22c55e66'
     })));
     macdDif.setData(validCandles.filter(c => isFiniteNumber(c.macd_dif)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dif! })));
     macdDea.setData(validCandles.filter(c => isFiniteNumber(c.macd_dea)).map((c: Candle) => ({ time: c.time as Time, value: c.macd_dea! })));

@@ -50,6 +50,28 @@ class CandleOrderTests(unittest.TestCase):
         except ValueError as exc:
             self.fail(f"mini candles should not contain NaN for JSON serialization: {exc}")
 
+    def test_build_mini_candles_includes_macd_fields_when_available(self):
+        index = pd.to_datetime(["2026-01-01", "2026-01-02"])
+        df = pd.DataFrame(
+            {
+                "Open": [10.0, 11.0],
+                "High": [10.5, 11.5],
+                "Low": [9.8, 10.6],
+                "Close": [10.2, 11.2],
+                "MACD_DIF": [0.12, 0.18],
+                "MACD_DEA": [0.08, 0.1],
+                "MACD_Hist": [0.04, 0.08],
+            },
+            index=index,
+        )
+
+        candles = _build_mini_candles(df, num_days=10)
+        self.assertGreater(len(candles), 0)
+        first = candles[0]
+        self.assertIn("macd_dif", first)
+        self.assertIn("macd_dea", first)
+        self.assertIn("macd_hist", first)
+
 
 if __name__ == "__main__":
     unittest.main()
