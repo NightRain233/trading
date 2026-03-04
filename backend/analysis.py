@@ -1089,6 +1089,19 @@ def _ensure_time_ascending(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _to_json_safe_records(df: pd.DataFrame) -> list:
+    """
+    将 DataFrame 转换为 JSON 安全的 records：
+    - Inf/-Inf -> None
+    - NaN/NA -> None
+    """
+    if df is None or df.empty:
+        return []
+    safe_df = df.replace([float('inf'), float('-inf')], pd.NA)
+    safe_df = safe_df.astype(object).where(pd.notna(safe_df), None)
+    return safe_df.to_dict('records')
+
+
 def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART_DAYS) -> list:
     """
     构建 K 线图数据，包含成交量和各项指标
@@ -1144,7 +1157,7 @@ def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
     result_df = _sanitize_candle_df(result_df)
     result_df = _ensure_time_ascending(result_df)
-    return result_df.to_dict('records')
+    return _to_json_safe_records(result_df)
 
 
 
@@ -1188,7 +1201,7 @@ def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> li
     result_df = chart_df[list(existing_cols.keys())].rename(columns=existing_cols)
     result_df = _sanitize_candle_df(result_df)
     result_df = _ensure_time_ascending(result_df)
-    return result_df.to_dict('records')
+    return _to_json_safe_records(result_df)
 
 
 # ============================================
