@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import { fetchWatchlist, fetchBatchQuotes, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
-import type { StockData, Candle, WatchlistGroup } from './types';
+import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
@@ -120,7 +120,11 @@ function App() {
   const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 
   // 迷你图状态
-  const [chartData, setChartData] = useState<Record<string, Candle[]>>({});
+  const [chartDataByTimeframe, setChartDataByTimeframe] = useState<Record<Timeframe, Record<string, Candle[]>>>({
+    '1D': {},
+    '1W': {},
+  });
+  const [chartTimeframe, setChartTimeframe] = useState<Timeframe>('1D');
   const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
   const [showCharts, setShowCharts] = useState(false);
   const [lastDataUpdatedAt, setLastDataUpdatedAt] = useState<string | null>(null);
@@ -172,22 +176,30 @@ function App() {
     [lastDataUpdatedAt]
   );
 
-  const loadCharts = useCallback(async (symbols: string[]) => {
+  const currentChartData = chartDataByTimeframe[chartTimeframe] || {};
+
+  const loadCharts = useCallback(async (symbols: string[], timeframe: Timeframe) => {
     if (symbols.length === 0) return;
-    const charts = await fetchBatchCharts(symbols);
+    const charts = await fetchBatchCharts(symbols, timeframe);
     if (charts && Object.keys(charts).length > 0) {
-      setChartData(prev => ({ ...prev, ...charts }));
+      setChartDataByTimeframe(prev => ({
+        ...prev,
+        [timeframe]: {
+          ...(prev[timeframe] || {}),
+          ...charts,
+        },
+      }));
     }
   }, []);
 
   useEffect(() => {
     if (!showCharts) return;
-    const missingSymbols = allSymbols.filter(s => !chartData[s]);
+    const missingSymbols = allSymbols.filter(s => !currentChartData[s]);
     if (missingSymbols.length === 0) return;
     scheduleIdle(() => {
-      loadCharts(missingSymbols);
+      loadCharts(missingSymbols, chartTimeframe);
     });
-  }, [showCharts, allSymbols, chartData, loadCharts]);
+  }, [showCharts, allSymbols, currentChartData, chartTimeframe, loadCharts]);
 
   useEffect(() => {
     etagRef.current = null;
@@ -532,6 +544,8 @@ function App() {
         setEmaMode={setEmaMode}
         showCharts={showCharts}
         setShowCharts={setShowCharts}
+        chartTimeframe={chartTimeframe}
+        setChartTimeframe={setChartTimeframe}
         loading={loading}
         handleRefresh={handleManualRefresh}
       />
@@ -598,7 +612,8 @@ function App() {
                 onStockClick={setSelectedStock}
                 onRemoveStock={handleRemoveStock}
                 onEditAlias={openAliasModal}
-                chartData={chartData}
+                chartData={currentChartData}
+                chartTimeframe={chartTimeframe}
                 emaMode={emaMode}
                 showCharts={showCharts}
               />

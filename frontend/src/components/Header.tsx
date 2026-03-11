@@ -1,6 +1,7 @@
 import React from 'react';
 import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal } from 'lucide-react';
 import { clsx } from 'clsx';
+import type { Timeframe } from '../types';
 
 interface HeaderProps {
   newTicker: string;
@@ -16,6 +17,8 @@ interface HeaderProps {
   setEmaMode: (val: 'long' | 'short' | ((prev: 'long' | 'short') => 'long' | 'short')) => void;
   showCharts: boolean;
   setShowCharts: (val: boolean) => void;
+  chartTimeframe: Timeframe;
+  setChartTimeframe: (val: Timeframe) => void;
   loading: boolean;
   handleRefresh: () => void;
 }
@@ -34,6 +37,8 @@ export const Header: React.FC<HeaderProps> = ({
   setEmaMode,
   showCharts,
   setShowCharts,
+  chartTimeframe,
+  setChartTimeframe,
   loading,
   handleRefresh,
 }) => {
@@ -121,6 +126,15 @@ export const Header: React.FC<HeaderProps> = ({
             {emaMode === 'long' ? 'EMA 20/50' : 'EMA 5/10'}
           </button>
 
+          {/* Timeframe Toggle */}
+          <button
+            onClick={() => setChartTimeframe(chartTimeframe === '1D' ? '1W' : '1D')}
+            className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
+            title="切换日线/周线"
+          >
+            {chartTimeframe === '1D' ? '日线' : '周线'}
+          </button>
+
           {/* Chart Toggle */}
           <button
             onClick={() => setShowCharts(!showCharts)}
@@ -133,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="显示/隐藏趋势图"
           >
             <LineChart size={13} />
-            <span className="hidden sm:inline">30日</span>
+            <span className="hidden sm:inline">{chartTimeframe === '1D' ? '30日' : '30周'}</span>
           </button>
 
           {/* Refresh */}

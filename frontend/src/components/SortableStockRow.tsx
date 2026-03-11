@@ -1,5 +1,5 @@
 import { memo, lazy, Suspense } from 'react';
-import type { StockData, Candle } from '../types';
+import type { StockData, Candle, Timeframe } from '../types';
 const MiniChart = lazy(() => import('./MiniChart').then(m => ({ default: m.MiniChart })));
 import { StatusBadge } from './StatusBadge';
 import { GripVertical, Trash2, Pencil } from 'lucide-react';
@@ -13,6 +13,7 @@ interface SortableStockRowProps {
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
   onEditAlias: (stock: StockData) => void;
   miniCandles?: Candle[];
+  chartTimeframe: Timeframe;
   emaMode: 'long' | 'short';
   showCharts: boolean;
   index?: number;
@@ -24,6 +25,7 @@ export const SortableStockRow = memo(function SortableStockRow({
   onRemoveStock,
   onEditAlias,
   miniCandles,
+  chartTimeframe,
   emaMode,
   showCharts,
   index = 0
@@ -318,7 +320,7 @@ export const SortableStockRow = memo(function SortableStockRow({
       {showCharts && miniCandles && miniCandles.length > 0 && (
         <div className="px-4 pb-3" onClick={() => onStockClick(stock)}>
           <Suspense fallback={<div className="h-[170px] bg-zinc-900/20 rounded-xl animate-pulse" />}>
-            <MiniChart candles={miniCandles} emaMode={emaMode} />
+            <MiniChart candles={miniCandles} timeframe={chartTimeframe} emaMode={emaMode} />
           </Suspense>
         </div>
       )}

@@ -535,6 +535,8 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
 
         # EMA 指标
+        df_weekly['EMA5'] = ta.ema(df_weekly['Close'], length=EMA_FAST_5)
+        df_weekly['EMA10'] = ta.ema(df_weekly['Close'], length=EMA_FAST_10)
         df_weekly['EMA20'] = ta.ema(df_weekly['Close'], length=EMA_SHORT_PERIOD)
         df_weekly['EMA50'] = ta.ema(df_weekly['Close'], length=EMA_LONG_PERIOD)
 

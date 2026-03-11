@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, useMemo, memo } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, CrosshairMode } from 'lightweight-charts';
 import type { IChartApi, Time, MouseEventParams } from 'lightweight-charts';
-import type { Candle } from '../types';
+import type { Candle, Timeframe } from '../types';
 import { clsx } from 'clsx';
 import { TrendingUp, TrendingDown, Calendar, Activity } from 'lucide-react';
 
 interface MiniChartProps {
   candles: Candle[];
+  timeframe: Timeframe;
   emaMode: 'long' | 'short';
   height?: number;
 }
@@ -28,7 +29,7 @@ const splitTimeKey = (time: Time): string | null => {
   return null;
 };
 
-export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMode, height = 170 }: MiniChartProps) {
+export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: propsEmaMode, height = 170 }: MiniChartProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const macdContainerRef = useRef<HTMLDivElement>(null);
@@ -461,7 +462,7 @@ export const MiniChart = memo(function MiniChart({ candles, emaMode: propsEmaMod
             <Calendar size={12} className="text-zinc-500" />
             <span>{firstDate} - {lastDate}</span>
             <span className="text-zinc-600 mx-1">|</span>
-            <span className="text-zinc-500">{candleData.length}D</span>
+            <span className="text-zinc-500">{candleData.length}{timeframe === '1W' ? 'W' : 'D'}</span>
           </div>
 
           <button

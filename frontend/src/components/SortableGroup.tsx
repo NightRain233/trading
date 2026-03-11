@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { StockData, Candle, WatchlistGroup } from '../types';
+import type { StockData, Candle, Timeframe, WatchlistGroup } from '../types';
 import { SortableStockRow } from './SortableStockRow';
 import { GripVertical, ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ interface SortableGroupProps {
   onRemoveStock: (e: React.MouseEvent, symbol: string) => void;
   onEditAlias: (stock: StockData) => void;
   chartData: Record<string, Candle[]>;
+  chartTimeframe: Timeframe;
   emaMode: 'long' | 'short';
   showCharts: boolean;
 }
@@ -29,6 +30,7 @@ export const SortableGroup = memo(function SortableGroup({
   onRemoveStock,
   onEditAlias,
   chartData,
+  chartTimeframe,
   emaMode,
   showCharts
 }: SortableGroupProps) {
@@ -120,6 +122,7 @@ export const SortableGroup = memo(function SortableGroup({
                     onRemoveStock={onRemoveStock}
                     onEditAlias={onEditAlias}
                     miniCandles={chartData[stock.symbol]}
+                    chartTimeframe={chartTimeframe}
                     emaMode={emaMode}
                     showCharts={showCharts}
                     index={index}

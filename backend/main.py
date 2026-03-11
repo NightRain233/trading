@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Literal
 from analysis import (
     analyze_stock,
     batch_fetch_and_update,
@@ -158,6 +158,7 @@ class UpdateWatchlistRequest(BaseModel):
 
 class BatchQuoteRequest(BaseModel):
     symbols: List[str]
+    timeframe: Literal["1D", "1W"] = "1D"
 
 
 def normalize_symbols(symbols: List[str]) -> List[str]:
@@ -290,10 +291,14 @@ def get_batch_charts(request: BatchQuoteRequest):
     """批量获取迷你 K 线图数据（列表页缩略图使用）"""
     if not request.symbols:
         return {}
+    timeframe = request.timeframe or "1D"
     results = batch_fetch_and_update(request.symbols)
     response = {}
     for symbol, result_tuple in results.items():
-        df = result_tuple[0]
+        if timeframe == "1W":
+            df = result_tuple[1]
+        else:
+            df = result_tuple[0]
         if df is not None and not df.empty:
             response[symbol] = _build_mini_candles(df)
     return response
