@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
-import { fetchWatchlist, fetchBatchQuotes, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
+import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 import { SortableGroup } from './components/SortableGroup';
@@ -150,8 +150,10 @@ function App() {
       }
 
       // 2. 异步拉取批量数据，回来后填充
-      const stockMap = await fetchBatchQuotes(uniqueSymbols);
-      setGroups(mergeGroupsWithStockMap(groupsData, stockMap));
+      const snapshot = await fetchBatchQuotesSnapshot(uniqueSymbols);
+      setLastDataUpdatedAt(snapshot.updatedAt);
+      setDataStale(snapshot.stale);
+      setGroups(mergeGroupsWithStockMap(groupsData, snapshot.data));
     } catch (error) {
       console.error("Failed to load watchlist:", error);
     } finally {
@@ -211,6 +213,7 @@ function App() {
     const symbols = symbolsKey.split(',');
     let disposed = false;
     let timerId: number | null = null;
+    const QUICK_REPOLL_DELAY_MS = 1_500;
 
     const runPoll = async () => {
       const result = await fetchBatchQuotesConditional(symbols, etagRef.current || undefined);
@@ -233,14 +236,16 @@ function App() {
           return mergeGroupsWithStockMap(prevGroups, result.data, fallbackStockMap);
         });
       }
+
+      return result.refreshTriggered ? QUICK_REPOLL_DELAY_MS : null;
     };
 
-    const scheduleNextPoll = () => {
+    const scheduleNextPoll = (overrideDelay?: number | null) => {
       if (disposed) return;
-      const delay = document.visibilityState === 'visible' ? 30_000 : 300_000;
+      const delay = overrideDelay ?? (document.visibilityState === 'visible' ? 30_000 : 300_000);
       timerId = window.setTimeout(async () => {
-        await runPoll();
-        scheduleNextPoll();
+        const nextDelay = await runPoll();
+        scheduleNextPoll(nextDelay);
       }, delay);
     };
 
@@ -249,10 +254,10 @@ function App() {
         window.clearTimeout(timerId);
         timerId = null;
       }
-      void runPoll().then(scheduleNextPoll);
+      void runPoll().then(nextDelay => scheduleNextPoll(nextDelay));
     };
 
-    void runPoll().then(scheduleNextPoll);
+    void runPoll().then(nextDelay => scheduleNextPoll(nextDelay));
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
@@ -576,7 +581,7 @@ function App() {
           <div className="data-chip rounded-lg px-3 py-1.5 inline-flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/60 animate-pulse" />
             <span className="text-[11px] text-zinc-500 font-medium">
-              {formattedUpdatedAt ? `数据更新: ${formattedUpdatedAt}` : '数据加载中...'}
+              {formattedUpdatedAt ? `行情更新至: ${formattedUpdatedAt}` : '数据加载中...'}
             </span>
           </div>
           {dataStale && (

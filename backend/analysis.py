@@ -9,7 +9,7 @@ import os
 import time
 import threading
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Dict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
@@ -112,6 +112,59 @@ def get_symbol_lock(symbol: str) -> threading.Lock:
 def _normalize_symbols(symbols: List[str]) -> List[str]:
     """标准化股票代码列表（去空、去重、转大写、排序）"""
     return sorted({s.strip().upper() for s in symbols if isinstance(s, str) and s.strip()})
+
+
+def _to_unix_timestamp(value) -> Optional[float]:
+    """将 DataFrame 索引时间统一转换为 UTC unix timestamp。"""
+    if value is None:
+        return None
+    ts = pd.Timestamp(value)
+    dt = ts.to_pydatetime()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.timestamp()
+
+
+def _get_latest_data_timestamp(df: Optional[pd.DataFrame]) -> Optional[float]:
+    """返回数据最后一根 bar 的时间戳。"""
+    if df is None or df.empty:
+        return None
+    return _to_unix_timestamp(df.index[-1])
+
+
+def _max_timestamp(current: Optional[float], candidate: Optional[float]) -> Optional[float]:
+    if candidate is None:
+        return current
+    if current is None:
+        return candidate
+    return max(current, candidate)
+
+
+def _extract_ohlcv(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if df is None or df.empty:
+        return None
+    cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
+    if not cols:
+        return None
+    return df[cols].copy()
+
+
+def _market_data_changed(previous_df: Optional[pd.DataFrame], candidate_df: Optional[pd.DataFrame]) -> bool:
+    """
+    判断下载/合并后的 OHLCV 是否真的发生了变化。
+    只有市场数据变了，才应刷新缓存 freshness。
+    """
+    prev_ohlcv = _extract_ohlcv(previous_df)
+    next_ohlcv = _extract_ohlcv(candidate_df)
+
+    if prev_ohlcv is None:
+        return next_ohlcv is not None and not next_ohlcv.empty
+    if next_ohlcv is None:
+        return False
+
+    return not prev_ohlcv.equals(next_ohlcv)
 
 
 def _pick_refreshable_symbols(symbols: List[str], min_interval_seconds: int) -> List[str]:
@@ -220,7 +273,8 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
           "stale_symbols": [...],
           "very_stale_symbols": [...],
           "missing_symbols": [...],
-          "latest_mtime": Optional[float]
+          "latest_mtime": Optional[float],
+          "latest_data_ts": Optional[float]
         }
     """
     normalized = _normalize_symbols(symbols)
@@ -232,10 +286,12 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
     very_stale_symbols: List[str] = []
     missing_symbols: List[str] = []
     latest_mtime: Optional[float] = None
+    latest_data_ts: Optional[float] = None
 
     for symbol in normalized:
         summary = None
         timestamp = None
+        data_timestamp = None
 
         with _memory_cache_lock:
             entry = _memory_cache.get(symbol)
@@ -243,9 +299,11 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
         if entry:
             summary = entry.get("summary")
             timestamp = entry.get("timestamp")
+            data_timestamp = entry.get("data_timestamp") or _get_latest_data_timestamp(entry.get("df"))
             if summary and timestamp is not None:
                 results[symbol] = summary
-                latest_mtime = max(latest_mtime, float(timestamp)) if latest_mtime is not None else float(timestamp)
+                latest_mtime = _max_timestamp(latest_mtime, float(timestamp))
+                latest_data_ts = _max_timestamp(latest_data_ts, data_timestamp)
 
                 age = now_ts - float(timestamp)
                 if age < CACHE_DURATION_SECONDS:
@@ -282,8 +340,10 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
             continue
 
         file_mod_time = os.path.getmtime(file_path) if os.path.exists(file_path) else now_ts
+        data_timestamp = _get_latest_data_timestamp(df_local)
         results[symbol] = summary
-        latest_mtime = max(latest_mtime, float(file_mod_time)) if latest_mtime is not None else float(file_mod_time)
+        latest_mtime = _max_timestamp(latest_mtime, float(file_mod_time))
+        latest_data_ts = _max_timestamp(latest_data_ts, data_timestamp)
 
         age = now_ts - float(file_mod_time)
         if age < CACHE_DURATION_SECONDS:
@@ -300,6 +360,7 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
                 "df_weekly": df_weekly,
                 "summary": summary,
                 "timestamp": float(file_mod_time),
+                "data_timestamp": data_timestamp,
             }
 
     return {
@@ -309,6 +370,7 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
         "very_stale_symbols": very_stale_symbols,
         "missing_symbols": missing_symbols,
         "latest_mtime": latest_mtime,
+        "latest_data_ts": latest_data_ts,
     }
 
 
@@ -1361,7 +1423,8 @@ def batch_fetch_and_update(symbols: list) -> dict:
                                 "df": df_local, 
                                 "df_weekly": df_weekly, 
                                 "summary": summary,
-                                "timestamp": file_mod_time
+                                "timestamp": file_mod_time,
+                                "data_timestamp": _get_latest_data_timestamp(df_local),
                             }
                         
                         res_data = (df_local, df_weekly, summary)
@@ -1464,6 +1527,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
             file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
             weekly_file_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
             df = df_local
+            merged_df = df_local
+            market_data_changed = df_local is None or df_local.empty
+
+            with _memory_cache_lock:
+                cached_entry = _memory_cache.get(symbol)
 
             if symbol in downloaded_data:
                 new_df = downloaded_data[symbol]
@@ -1472,16 +1540,28 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 if isinstance(new_df.columns, pd.MultiIndex):
                     new_df.columns = new_df.columns.get_level_values(0)
 
-                if df is not None:
-                    ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
-                    df = df[ohlcv_cols]
-                df = _merge_and_clean_data(df, new_df, now)
+                base_ohlcv = _extract_ohlcv(df_local)
+                merged_df = _merge_and_clean_data(base_ohlcv, new_df, now)
+                market_data_changed = _market_data_changed(df_local, merged_df)
 
-            if df is None or df.empty:
+            if (
+                not market_data_changed
+                and cached_entry
+                and cached_entry.get("df") is not None
+                and cached_entry.get("df_weekly") is not None
+                and cached_entry.get("summary") is not None
+            ):
+                return symbol, (
+                    cached_entry["df"],
+                    cached_entry["df_weekly"],
+                    cached_entry["summary"],
+                )
+
+            if merged_df is None or merged_df.empty:
                 return None
 
             # 计算日线指标
-            df = _calculate_daily_indicators(df)
+            df = _calculate_daily_indicators(merged_df)
             
             # 保存数据
             with get_symbol_lock(symbol):
@@ -1500,7 +1580,8 @@ def batch_fetch_and_update(symbols: list) -> dict:
                     "df": df, 
                     "df_weekly": df_weekly, 
                     "summary": summary,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
+                    "data_timestamp": _get_latest_data_timestamp(df),
                 }
             
             return symbol, (df, df_weekly, summary)

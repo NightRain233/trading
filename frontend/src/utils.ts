@@ -1,4 +1,5 @@
 import type { Candle, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
+import { normalizeBatchSnapshot, parseBatchHeaders, parseBatchResponse } from './batchResponse.js';
 
 // 自动根据环境判断 API 地址
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
@@ -21,16 +22,13 @@ export type BatchQuotesConditionalResult =
       refreshTriggered: boolean;
     };
 
-function parseBatchResponseMeta(response: Response) {
-  const stale = response.headers.get('X-Data-Stale') === '1';
-  const refreshTriggered = response.headers.get('X-Refresh-Triggered') === '1';
-  return {
-    etag: response.headers.get('ETag'),
-    updatedAt: response.headers.get('X-Data-Updated-At'),
-    stale,
-    refreshTriggered,
-  };
-}
+export type BatchQuotesSnapshot = {
+  data: Record<string, StockData>;
+  etag: string | null;
+  updatedAt: string | null;
+  stale: boolean;
+  refreshTriggered: boolean;
+};
 
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
   try {
@@ -44,13 +42,18 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
 }
 
 export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string, StockData>> {
+  const snapshot = await fetchBatchQuotesSnapshot(symbols);
+  return snapshot.data;
+}
+
+export async function fetchBatchQuotesSnapshot(symbols: string[]): Promise<BatchQuotesSnapshot> {
   try {
     // 优先使用 index.html 中预抓取的 Promise
     const prefetchPromise = (window as any).__BATCH_PROMISE__;
     if (prefetchPromise) {
-      const data = await prefetchPromise;
+      const snapshot = normalizeBatchSnapshot(await prefetchPromise);
       (window as any).__BATCH_PROMISE__ = null;
-      if (data) return data;
+      if (Object.keys(snapshot.data).length > 0 || snapshot.updatedAt) return snapshot;
     }
 
     const response = await fetch(`${API_BASE_URL}/quotes/batch`, {
@@ -58,11 +61,10 @@ export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbols })
     });
-    if (!response.ok) return {};
-    return await response.json();
+    return normalizeBatchSnapshot(await parseBatchResponse(response)) as BatchQuotesSnapshot;
   } catch (error) {
     console.error('Error fetching batch quotes:', error);
-    return {};
+    return normalizeBatchSnapshot(null) as BatchQuotesSnapshot;
   }
 }
 
@@ -84,7 +86,7 @@ export async function fetchBatchQuotesConditional(
       body: JSON.stringify({ symbols }),
     });
 
-    const meta = parseBatchResponseMeta(response);
+    const meta = parseBatchHeaders(response.headers);
     if (response.status === 304) {
       return {
         status: 'not_modified',

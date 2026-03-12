@@ -206,11 +206,13 @@ def build_quotes_etag(symbols: List[str], payload: dict, latest_mtime: Optional[
 def build_cache_headers(
     etag: str,
     latest_mtime: Optional[float],
+    latest_data_ts: Optional[float],
     data_stale: bool,
     refresh_triggered: bool,
 ) -> dict:
-    updated_ts = latest_mtime if latest_mtime is not None else time.time()
-    last_modified = formatdate(updated_ts, usegmt=True)
+    last_modified_ts = latest_mtime if latest_mtime is not None else time.time()
+    updated_ts = latest_data_ts if latest_data_ts is not None else last_modified_ts
+    last_modified = formatdate(last_modified_ts, usegmt=True)
     updated_at = datetime.fromtimestamp(updated_ts, tz=timezone.utc).isoformat()
     return {
         "ETag": etag,
@@ -273,6 +275,7 @@ def get_batch_quotes(
     headers = build_cache_headers(
         etag=etag,
         latest_mtime=cache_info["latest_mtime"],
+        latest_data_ts=cache_info["latest_data_ts"],
         data_stale=data_stale,
         refresh_triggered=refresh_triggered,
     )
