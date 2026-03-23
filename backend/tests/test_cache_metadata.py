@@ -1,3 +1,4 @@
+import json
 import tempfile
 import time
 import unittest
@@ -96,6 +97,22 @@ class CacheMetadataTests(unittest.TestCase):
 
             expected_ts = daily_df.index[-1].to_pydatetime().replace(tzinfo=timezone.utc).timestamp()
             self.assertEqual(result["latest_data_ts"], expected_ts)
+
+    def test_analyze_stock_summary_converts_nan_weekly_values_to_none(self):
+        daily_df = _build_daily_df()
+        weekly_df = _build_weekly_df()
+        weekly_df.loc[weekly_df.index[-1], "MA5_W"] = float("nan")
+        weekly_df.loc[weekly_df.index[-1], "MACD_Hist_W"] = float("nan")
+
+        summary = analysis.analyze_stock_summary("TEST", daily_df, weekly_df)
+
+        try:
+            json.dumps(summary, allow_nan=False)
+        except ValueError as exc:
+            self.fail(f"summary should not contain NaN for JSON serialization: {exc}")
+
+        self.assertIsNone(summary["weeklyMA5"])
+        self.assertIsNone(summary["weeklyMacdHist"])
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "TEST", "price": 1.23})
     @patch.object(analysis, "_calculate_weekly_indicators")

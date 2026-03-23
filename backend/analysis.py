@@ -5,7 +5,9 @@
 """
 
 import logging
+import math
 import os
+import numbers
 import time
 import threading
 from collections import defaultdict
@@ -1166,6 +1168,27 @@ def _to_json_safe_records(df: pd.DataFrame) -> list:
     return safe_df.to_dict('records')
 
 
+def _make_json_safe(value):
+    """
+    递归清理响应数据中的 JSON 非法数值：
+    - NaN/NA -> None
+    - Inf/-Inf -> None
+    """
+    if isinstance(value, dict):
+        return {key: _make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_make_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_make_json_safe(item) for item in value]
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return int(value)
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        return None if not math.isfinite(float(value)) else float(value)
+    if pd.isna(value):
+        return None
+    return value
+
+
 def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART_DAYS) -> list:
     """
     构建 K 线图数据，包含成交量和各项指标
@@ -1322,7 +1345,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
     candles = _build_candles(df, rsi_period)
     weekly_candles = _build_candles(df_weekly, rsi_period=14)
 
-    return {
+    return _make_json_safe({
         "symbol": symbol,
         "name": symbol,
         "price": price,
@@ -1347,7 +1370,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "candles": candles,
         "weekly_candles": weekly_candles,
         **weekly_status
-    }
+    })
 
 
 # ============================================
@@ -1632,7 +1655,7 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
     resonance = _evaluate_resonance_strategy(df, df_weekly)
     resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
 
-    return {
+    return _make_json_safe({
         "symbol": symbol,
         "name": symbol,
         "price": price,
@@ -1657,4 +1680,4 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
         "candles": [],
         "weekly_candles": [],
         **weekly_status
-    }
+    })
