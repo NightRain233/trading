@@ -1,0 +1,2619 @@
+{
+  "summary": {
+    "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+    "tradeCount": 47,
+    "winRate": 0.723404255319149,
+    "averageReturnPct": 4.818549839577038,
+    "maxDrawdownPct": 9.07094935867349,
+    "averageHoldingDays": 18.4468085106383,
+    "exitReasonCounts": {
+      "target": 18,
+      "hard_exit": 24,
+      "stop": 5
+    }
+  },
+  "byPoolType": {
+    "establishedTrend": {
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "tradeCount": 47,
+      "winRate": 0.723404255319149,
+      "averageReturnPct": 4.818549839577038,
+      "maxDrawdownPct": 9.07094935867349,
+      "averageHoldingDays": 18.4468085106383,
+      "exitReasonCounts": {
+        "target": 18,
+        "hard_exit": 24,
+        "stop": 5
+      }
+    }
+  },
+  "byAssetClass": {
+    "etf": {
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "tradeCount": 47,
+      "winRate": 0.723404255319149,
+      "averageReturnPct": 4.818549839577038,
+      "maxDrawdownPct": 9.07094935867349,
+      "averageHoldingDays": 18.4468085106383,
+      "exitReasonCounts": {
+        "target": 18,
+        "hard_exit": 24,
+        "stop": 5
+      }
+    }
+  },
+  "byYear": {
+    "2025": {
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "tradeCount": 47,
+      "winRate": 0.723404255319149,
+      "averageReturnPct": 4.818549839577038,
+      "maxDrawdownPct": 9.07094935867349,
+      "averageHoldingDays": 18.4468085106383,
+      "exitReasonCounts": {
+        "target": 18,
+        "hard_exit": 24,
+        "stop": 5
+      }
+    }
+  },
+  "symbolContribution": [
+    {
+      "symbol": "159326.SZ",
+      "tradeCount": 2,
+      "winRate": 1.0,
+      "averageReturnPct": 12.79181046592178,
+      "totalReturnPct": 25.58362093184356,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 2
+      }
+    },
+    {
+      "symbol": "515790.SS",
+      "tradeCount": 3,
+      "winRate": 1.0,
+      "averageReturnPct": 7.323252258847838,
+      "totalReturnPct": 21.969756776543516,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1,
+        "hard_exit": 2
+      }
+    },
+    {
+      "symbol": "515880.SS",
+      "tradeCount": 2,
+      "winRate": 1.0,
+      "averageReturnPct": 10.107607384841911,
+      "totalReturnPct": 20.215214769683822,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "510500.SS",
+      "tradeCount": 3,
+      "winRate": 1.0,
+      "averageReturnPct": 6.6492635324372875,
+      "totalReturnPct": 19.94779059731186,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 2,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "159915.SZ",
+      "tradeCount": 2,
+      "winRate": 1.0,
+      "averageReturnPct": 9.132326537880086,
+      "totalReturnPct": 18.264653075760172,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "159553.SZ",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 15.502072005619523,
+      "totalReturnPct": 15.502072005619523,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1
+      }
+    },
+    {
+      "symbol": "512660.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 15.499006165975302,
+      "totalReturnPct": 15.499006165975302,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1
+      }
+    },
+    {
+      "symbol": "159869.SZ",
+      "tradeCount": 3,
+      "winRate": 0.3333333333333333,
+      "averageReturnPct": 4.180218188932535,
+      "totalReturnPct": 12.540654566797606,
+      "maxDrawdownPct": 2.9386447914046703,
+      "exitReasonCounts": {
+        "hard_exit": 2,
+        "target": 1
+      }
+    },
+    {
+      "symbol": "515070.SS",
+      "tradeCount": 2,
+      "winRate": 0.5,
+      "averageReturnPct": 5.72227438110713,
+      "totalReturnPct": 11.44454876221426,
+      "maxDrawdownPct": 0.7304861579814972,
+      "exitReasonCounts": {
+        "target": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "159922.SZ",
+      "tradeCount": 3,
+      "winRate": 0.6666666666666666,
+      "averageReturnPct": 3.262357955883512,
+      "totalReturnPct": 9.787073867650536,
+      "maxDrawdownPct": 3.6218117046184015,
+      "exitReasonCounts": {
+        "target": 1,
+        "stop": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "512040.SS",
+      "tradeCount": 3,
+      "winRate": 0.6666666666666666,
+      "averageReturnPct": 2.7002805451335656,
+      "totalReturnPct": 8.100841635400696,
+      "maxDrawdownPct": 2.4753874738543145,
+      "exitReasonCounts": {
+        "target": 1,
+        "stop": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "510050.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 7.350869951195946,
+      "totalReturnPct": 7.350869951195946,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1
+      }
+    },
+    {
+      "symbol": "159919.SZ",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 7.019720332767761,
+      "totalReturnPct": 7.019720332767761,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1
+      }
+    },
+    {
+      "symbol": "510300.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 6.840999796725033,
+      "totalReturnPct": 6.840999796725033,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "target": 1
+      }
+    },
+    {
+      "symbol": "513910.SS",
+      "tradeCount": 2,
+      "winRate": 0.5,
+      "averageReturnPct": 2.9902303157280157,
+      "totalReturnPct": 5.980460631456031,
+      "maxDrawdownPct": 2.5736083919951747,
+      "exitReasonCounts": {
+        "target": 1,
+        "stop": 1
+      }
+    },
+    {
+      "symbol": "513010.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 5.669176692231364,
+      "totalReturnPct": 5.669176692231364,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "512010.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 5.4179015342616585,
+      "totalReturnPct": 5.4179015342616585,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "159845.SZ",
+      "tradeCount": 3,
+      "winRate": 0.3333333333333333,
+      "averageReturnPct": 1.5890319980951728,
+      "totalReturnPct": 4.767095994285518,
+      "maxDrawdownPct": 4.578415972575998,
+      "exitReasonCounts": {
+        "target": 1,
+        "stop": 1,
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "512890.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 4.6945400837559745,
+      "totalReturnPct": 4.6945400837559745,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "512760.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 2.96144086075482,
+      "totalReturnPct": 2.96144086075482,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "510880.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 2.7797463444342614,
+      "totalReturnPct": 2.7797463444342614,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "588080.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 1.8373937275598453,
+      "totalReturnPct": 1.8373937275598453,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "588000.SS",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 1.5153651661415888,
+      "totalReturnPct": 1.5153651661415888,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "159967.SZ",
+      "tradeCount": 1,
+      "winRate": 1.0,
+      "averageReturnPct": 1.0225976471662874,
+      "totalReturnPct": 1.0225976471662874,
+      "maxDrawdownPct": 0.0,
+      "exitReasonCounts": {
+        "hard_exit": 1
+      }
+    },
+    {
+      "symbol": "512170.SS",
+      "tradeCount": 3,
+      "winRate": 0.3333333333333333,
+      "averageReturnPct": -0.31090116639774307,
+      "totalReturnPct": -0.9327034991932293,
+      "maxDrawdownPct": 1.6069916830450226,
+      "exitReasonCounts": {
+        "hard_exit": 3
+      }
+    },
+    {
+      "symbol": "512720.SS",
+      "tradeCount": 3,
+      "winRate": 0.0,
+      "averageReturnPct": -3.102665319407644,
+      "totalReturnPct": -9.307995958222932,
+      "maxDrawdownPct": 9.070949358673497,
+      "exitReasonCounts": {
+        "hard_exit": 2,
+        "stop": 1
+      }
+    }
+  ],
+  "diagnostics": {
+    "lossSummary": {
+      "lossTradeCount": 13,
+      "averageLossPct": -2.332055337020918,
+      "totalLossPct": -30.31671938127193,
+      "worstReturnPct": -4.982341229068377
+    },
+    "worstTrades": [
+      {
+        "symbol": "512720.SS",
+        "entryDate": "2025-09-02",
+        "exitDate": "2025-09-03",
+        "returnPct": -4.982341229068377,
+        "exitReason": "stop",
+        "holdingDays": 2,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "high"
+      },
+      {
+        "symbol": "512720.SS",
+        "entryDate": "2025-09-23",
+        "exitDate": "2025-10-14",
+        "returnPct": -3.7159427837902594,
+        "exitReason": "hard_exit",
+        "holdingDays": 10,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "high"
+      },
+      {
+        "symbol": "159922.SZ",
+        "entryDate": "2025-09-03",
+        "exitDate": "2025-09-04",
+        "returnPct": -3.6218117046183997,
+        "exitReason": "stop",
+        "holdingDays": 2,
+        "poolType": "establishedTrend",
+        "entryScore": 92,
+        "riskLevel": "medium"
+      },
+      {
+        "symbol": "159845.SZ",
+        "entryDate": "2025-09-02",
+        "exitDate": "2025-09-03",
+        "returnPct": -3.0623137311035733,
+        "exitReason": "stop",
+        "holdingDays": 2,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "medium"
+      },
+      {
+        "symbol": "159869.SZ",
+        "entryDate": "2025-09-22",
+        "exitDate": "2025-10-09",
+        "returnPct": -2.9386447914046663,
+        "exitReason": "hard_exit",
+        "holdingDays": 8,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "high"
+      },
+      {
+        "symbol": "513910.SS",
+        "entryDate": "2025-08-21",
+        "exitDate": "2025-08-27",
+        "returnPct": -2.57360839199517,
+        "exitReason": "stop",
+        "holdingDays": 5,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "low"
+      },
+      {
+        "symbol": "512040.SS",
+        "entryDate": "2025-09-01",
+        "exitDate": "2025-09-04",
+        "returnPct": -2.4753874738543016,
+        "exitReason": "stop",
+        "holdingDays": 4,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "low"
+      },
+      {
+        "symbol": "159869.SZ",
+        "entryDate": "2025-03-17",
+        "exitDate": "2025-03-17",
+        "returnPct": -2.235532736029988,
+        "exitReason": "hard_exit",
+        "holdingDays": 1,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "high"
+      },
+      {
+        "symbol": "512170.SS",
+        "entryDate": "2025-03-18",
+        "exitDate": "2025-03-20",
+        "returnPct": -1.6069916830450257,
+        "exitReason": "hard_exit",
+        "holdingDays": 3,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "medium"
+      },
+      {
+        "symbol": "159845.SZ",
+        "entryDate": "2025-09-17",
+        "exitDate": "2025-10-14",
+        "returnPct": -1.5639967280288718,
+        "exitReason": "hard_exit",
+        "holdingDays": 14,
+        "poolType": "establishedTrend",
+        "entryScore": 95,
+        "riskLevel": "medium"
+      }
+    ],
+    "byEntryScoreBucket": {
+      "90-100": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 47,
+        "winRate": 0.723404255319149,
+        "averageReturnPct": 4.818549839577038,
+        "maxDrawdownPct": 9.07094935867349,
+        "averageHoldingDays": 18.4468085106383,
+        "exitReasonCounts": {
+          "target": 18,
+          "hard_exit": 24,
+          "stop": 5
+        }
+      }
+    },
+    "byRiskLevel": {
+      "high": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 16,
+        "winRate": 0.5625,
+        "averageReturnPct": 1.521135769081752,
+        "maxDrawdownPct": 9.070949358673495,
+        "averageHoldingDays": 11.25,
+        "exitReasonCounts": {
+          "hard_exit": 14,
+          "stop": 1,
+          "target": 1
+        }
+      },
+      "low": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 13,
+        "winRate": 0.8461538461538461,
+        "averageReturnPct": 5.674468564604519,
+        "maxDrawdownPct": 2.5736083919951755,
+        "averageHoldingDays": 24.615384615384617,
+        "exitReasonCounts": {
+          "target": 9,
+          "hard_exit": 2,
+          "stop": 2
+        }
+      },
+      "medium": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 18,
+        "winRate": 0.7777777777777778,
+        "averageReturnPct": 7.131421045275222,
+        "maxDrawdownPct": 4.578415972576004,
+        "averageHoldingDays": 20.38888888888889,
+        "exitReasonCounts": {
+          "hard_exit": 8,
+          "stop": 2,
+          "target": 8
+        }
+      }
+    },
+    "byExitReason": {
+      "hard_exit": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 24,
+        "winRate": 0.6666666666666666,
+        "averageReturnPct": 1.5689513909649389,
+        "maxDrawdownPct": 5.801652556733818,
+        "averageHoldingDays": 17.958333333333332,
+        "exitReasonCounts": {
+          "hard_exit": 24
+        }
+      },
+      "stop": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 5,
+        "winRate": 0.0,
+        "averageReturnPct": -3.3430925061279644,
+        "maxDrawdownPct": 15.653593528888354,
+        "averageHoldingDays": 3.0,
+        "exitReasonCounts": {
+          "stop": 5
+        }
+      },
+      "target": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 18,
+        "winRate": 1.0,
+        "averageReturnPct": 11.418470644866781,
+        "maxDrawdownPct": 0.0,
+        "averageHoldingDays": 23.38888888888889,
+        "exitReasonCounts": {
+          "target": 18
+        }
+      }
+    },
+    "byMarketRegimeAtExit": {
+      "bullish_ema": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 37,
+        "winRate": 0.7027027027027027,
+        "averageReturnPct": 5.626436149326282,
+        "maxDrawdownPct": 5.561675244800239,
+        "averageHoldingDays": 18.513513513513512,
+        "exitReasonCounts": {
+          "target": 18,
+          "stop": 5,
+          "hard_exit": 14
+        }
+      },
+      "bullish_trend_pullback": {
+        "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+        "tradeCount": 10,
+        "winRate": 0.8,
+        "averageReturnPct": 1.8293704935048347,
+        "maxDrawdownPct": 3.7159427837902657,
+        "averageHoldingDays": 18.2,
+        "exitReasonCounts": {
+          "hard_exit": 10
+        }
+      }
+    }
+  },
+  "diagnosticsByYear": {
+    "2025": {
+      "lossSummary": {
+        "lossTradeCount": 13,
+        "averageLossPct": -2.332055337020918,
+        "totalLossPct": -30.31671938127193,
+        "worstReturnPct": -4.982341229068377
+      },
+      "worstTrades": [
+        {
+          "symbol": "512720.SS",
+          "entryDate": "2025-09-02",
+          "exitDate": "2025-09-03",
+          "returnPct": -4.982341229068377,
+          "exitReason": "stop",
+          "holdingDays": 2,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "high"
+        },
+        {
+          "symbol": "512720.SS",
+          "entryDate": "2025-09-23",
+          "exitDate": "2025-10-14",
+          "returnPct": -3.7159427837902594,
+          "exitReason": "hard_exit",
+          "holdingDays": 10,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "high"
+        },
+        {
+          "symbol": "159922.SZ",
+          "entryDate": "2025-09-03",
+          "exitDate": "2025-09-04",
+          "returnPct": -3.6218117046183997,
+          "exitReason": "stop",
+          "holdingDays": 2,
+          "poolType": "establishedTrend",
+          "entryScore": 92,
+          "riskLevel": "medium"
+        },
+        {
+          "symbol": "159845.SZ",
+          "entryDate": "2025-09-02",
+          "exitDate": "2025-09-03",
+          "returnPct": -3.0623137311035733,
+          "exitReason": "stop",
+          "holdingDays": 2,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "medium"
+        },
+        {
+          "symbol": "159869.SZ",
+          "entryDate": "2025-09-22",
+          "exitDate": "2025-10-09",
+          "returnPct": -2.9386447914046663,
+          "exitReason": "hard_exit",
+          "holdingDays": 8,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "high"
+        },
+        {
+          "symbol": "513910.SS",
+          "entryDate": "2025-08-21",
+          "exitDate": "2025-08-27",
+          "returnPct": -2.57360839199517,
+          "exitReason": "stop",
+          "holdingDays": 5,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "low"
+        },
+        {
+          "symbol": "512040.SS",
+          "entryDate": "2025-09-01",
+          "exitDate": "2025-09-04",
+          "returnPct": -2.4753874738543016,
+          "exitReason": "stop",
+          "holdingDays": 4,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "low"
+        },
+        {
+          "symbol": "159869.SZ",
+          "entryDate": "2025-03-17",
+          "exitDate": "2025-03-17",
+          "returnPct": -2.235532736029988,
+          "exitReason": "hard_exit",
+          "holdingDays": 1,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "high"
+        },
+        {
+          "symbol": "512170.SS",
+          "entryDate": "2025-03-18",
+          "exitDate": "2025-03-20",
+          "returnPct": -1.6069916830450257,
+          "exitReason": "hard_exit",
+          "holdingDays": 3,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "medium"
+        },
+        {
+          "symbol": "159845.SZ",
+          "entryDate": "2025-09-17",
+          "exitDate": "2025-10-14",
+          "returnPct": -1.5639967280288718,
+          "exitReason": "hard_exit",
+          "holdingDays": 14,
+          "poolType": "establishedTrend",
+          "entryScore": 95,
+          "riskLevel": "medium"
+        }
+      ],
+      "byEntryScoreBucket": {
+        "90-100": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 47,
+          "winRate": 0.723404255319149,
+          "averageReturnPct": 4.818549839577038,
+          "maxDrawdownPct": 9.07094935867349,
+          "averageHoldingDays": 18.4468085106383,
+          "exitReasonCounts": {
+            "target": 18,
+            "hard_exit": 24,
+            "stop": 5
+          }
+        }
+      },
+      "byRiskLevel": {
+        "high": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 16,
+          "winRate": 0.5625,
+          "averageReturnPct": 1.521135769081752,
+          "maxDrawdownPct": 9.070949358673495,
+          "averageHoldingDays": 11.25,
+          "exitReasonCounts": {
+            "hard_exit": 14,
+            "stop": 1,
+            "target": 1
+          }
+        },
+        "low": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 13,
+          "winRate": 0.8461538461538461,
+          "averageReturnPct": 5.674468564604519,
+          "maxDrawdownPct": 2.5736083919951755,
+          "averageHoldingDays": 24.615384615384617,
+          "exitReasonCounts": {
+            "target": 9,
+            "hard_exit": 2,
+            "stop": 2
+          }
+        },
+        "medium": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 18,
+          "winRate": 0.7777777777777778,
+          "averageReturnPct": 7.131421045275222,
+          "maxDrawdownPct": 4.578415972576004,
+          "averageHoldingDays": 20.38888888888889,
+          "exitReasonCounts": {
+            "hard_exit": 8,
+            "stop": 2,
+            "target": 8
+          }
+        }
+      },
+      "byExitReason": {
+        "hard_exit": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 24,
+          "winRate": 0.6666666666666666,
+          "averageReturnPct": 1.5689513909649389,
+          "maxDrawdownPct": 5.801652556733818,
+          "averageHoldingDays": 17.958333333333332,
+          "exitReasonCounts": {
+            "hard_exit": 24
+          }
+        },
+        "stop": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 5,
+          "winRate": 0.0,
+          "averageReturnPct": -3.3430925061279644,
+          "maxDrawdownPct": 15.653593528888354,
+          "averageHoldingDays": 3.0,
+          "exitReasonCounts": {
+            "stop": 5
+          }
+        },
+        "target": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 18,
+          "winRate": 1.0,
+          "averageReturnPct": 11.418470644866781,
+          "maxDrawdownPct": 0.0,
+          "averageHoldingDays": 23.38888888888889,
+          "exitReasonCounts": {
+            "target": 18
+          }
+        }
+      },
+      "byMarketRegimeAtExit": {
+        "bullish_ema": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 37,
+          "winRate": 0.7027027027027027,
+          "averageReturnPct": 5.626436149326282,
+          "maxDrawdownPct": 5.561675244800239,
+          "averageHoldingDays": 18.513513513513512,
+          "exitReasonCounts": {
+            "target": 18,
+            "stop": 5,
+            "hard_exit": 14
+          }
+        },
+        "bullish_trend_pullback": {
+          "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+          "tradeCount": 10,
+          "winRate": 0.8,
+          "averageReturnPct": 1.8293704935048347,
+          "maxDrawdownPct": 3.7159427837902657,
+          "averageHoldingDays": 18.2,
+          "exitReasonCounts": {
+            "hard_exit": 10
+          }
+        }
+      }
+    }
+  },
+  "filters": {
+    "assetClass": "etf",
+    "poolType": "establishedTrend"
+  },
+  "portfolio": {
+    "mode": "closed_trade_equal_slot",
+    "maxPositions": 5,
+    "acceptedTradeCount": 22,
+    "skippedTradeCount": 25,
+    "totalReturnPct": 22.58973750851656,
+    "maxDrawdownPct": 1.4415182145990464,
+    "startDate": "2025-03-17",
+    "endDate": "2025-11-20",
+    "equityCurve": [
+      {
+        "date": null,
+        "equity": 1.0,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-03-17",
+        "equity": 0.99552893452794,
+        "drawdownPct": 0.44710654720599985
+      },
+      {
+        "date": "2025-03-17",
+        "equity": 0.9943149627612651,
+        "drawdownPct": 0.5685037238734925
+      },
+      {
+        "date": "2025-03-20",
+        "equity": 0.991119251010296,
+        "drawdownPct": 0.8880748989704035
+      },
+      {
+        "date": "2025-07-24",
+        "equity": 1.002963273798777,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-07-31",
+        "equity": 1.008539240786665,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-07-25",
+        "equity": 1.0180084965704927,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-08-05",
+        "equity": 1.049570978602829,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-08-14",
+        "equity": 1.0675271837947888,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-08-14",
+        "equity": 1.0935215452767084,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-08-27",
+        "equity": 1.114151813577759,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-08-27",
+        "equity": 1.1084170326629983,
+        "drawdownPct": 0.514721678399038
+      },
+      {
+        "date": "2025-09-04",
+        "equity": 1.1103550737055627,
+        "drawdownPct": 0.3407740153475347
+      },
+      {
+        "date": "2025-09-04",
+        "equity": 1.1048579556236002,
+        "drawdownPct": 0.8341644146603713
+      },
+      {
+        "date": "2025-09-03",
+        "equity": 1.09809111224675,
+        "drawdownPct": 1.4415182145990464
+      },
+      {
+        "date": "2025-09-12",
+        "equity": 1.1210909913121603,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-09-15",
+        "equity": 1.160810868659063,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-10-10",
+        "equity": 1.1631849535852545,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-10-14",
+        "equity": 1.1705643850194771,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-10-13",
+        "equity": 1.1838366576760941,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-10-14",
+        "equity": 1.180133624357842,
+        "drawdownPct": 0.3127993456057807
+      },
+      {
+        "date": "2025-10-29",
+        "equity": 1.2157995205145509,
+        "drawdownPct": 0.0
+      },
+      {
+        "date": "2025-11-20",
+        "equity": 1.2258973750851656,
+        "drawdownPct": 0.0
+      }
+    ]
+  },
+  "benchmark": {
+    "symbolCount": 31,
+    "equalWeightReturnPct": 42.87259684216718,
+    "bestSymbol": {
+      "symbol": "515070.SS",
+      "returnPct": 129.72082557869734
+    },
+    "worstSymbol": {
+      "symbol": "159922.SZ",
+      "returnPct": -39.73998199228476
+    },
+    "symbols": [
+      {
+        "symbol": "515070.SS",
+        "returnPct": 129.72082557869734
+      },
+      {
+        "symbol": "159553.SZ",
+        "returnPct": 104.254513167271
+      },
+      {
+        "symbol": "588080.SS",
+        "returnPct": 102.27247530631557
+      },
+      {
+        "symbol": "588000.SS",
+        "returnPct": 102.14564593763029
+      },
+      {
+        "symbol": "159915.SZ",
+        "returnPct": 98.89096861573734
+      },
+      {
+        "symbol": "159326.SZ",
+        "returnPct": 96.55922433653369
+      },
+      {
+        "symbol": "513120.SS",
+        "returnPct": 84.85009614591549
+      },
+      {
+        "symbol": "159967.SZ",
+        "returnPct": 78.84940990346082
+      },
+      {
+        "symbol": "513910.SS",
+        "returnPct": 56.48975093056353
+      },
+      {
+        "symbol": "510500.SS",
+        "returnPct": 56.37932947109416
+      },
+      {
+        "symbol": "512660.SS",
+        "returnPct": 55.7084419963961
+      },
+      {
+        "symbol": "159845.SZ",
+        "returnPct": 54.32342870412313
+      },
+      {
+        "symbol": "512720.SS",
+        "returnPct": 47.133103111649454
+      },
+      {
+        "symbol": "510300.SS",
+        "returnPct": 38.7976527493488
+      },
+      {
+        "symbol": "159919.SZ",
+        "returnPct": 38.34301345362637
+      },
+      {
+        "symbol": "159869.SZ",
+        "returnPct": 33.44407884459527
+      },
+      {
+        "symbol": "515790.SS",
+        "returnPct": 32.47646645384871
+      },
+      {
+        "symbol": "512040.SS",
+        "returnPct": 31.93720496810669
+      },
+      {
+        "symbol": "159201.SZ",
+        "returnPct": 31.30545424546094
+      },
+      {
+        "symbol": "510050.SS",
+        "returnPct": 26.656359070320466
+      },
+      {
+        "symbol": "512760.SS",
+        "returnPct": 21.889746956298552
+      },
+      {
+        "symbol": "512880.SS",
+        "returnPct": 21.723810426482707
+      },
+      {
+        "symbol": "513010.SS",
+        "returnPct": 17.055507148796995
+      },
+      {
+        "symbol": "510880.SS",
+        "returnPct": 16.034734997783534
+      },
+      {
+        "symbol": "512890.SS",
+        "returnPct": 13.797552255227192
+      },
+      {
+        "symbol": "512100.SS",
+        "returnPct": 10.519118134887002
+      },
+      {
+        "symbol": "515880.SS",
+        "returnPct": 8.874374696627093
+      },
+      {
+        "symbol": "512010.SS",
+        "returnPct": -0.7370481435855936
+      },
+      {
+        "symbol": "512170.SS",
+        "returnPct": -1.6647587849134935
+      },
+      {
+        "symbol": "512000.SS",
+        "returnPct": -39.23999657883187
+      },
+      {
+        "symbol": "159922.SZ",
+        "returnPct": -39.73998199228476
+      }
+    ]
+  },
+  "marketBenchmark": {
+    "symbolCount": 1,
+    "equalWeightReturnPct": 31.329648932398996,
+    "bestSymbol": {
+      "symbol": "000300.SS",
+      "returnPct": 31.329648932398996
+    },
+    "worstSymbol": {
+      "symbol": "000300.SS",
+      "returnPct": 31.329648932398996
+    },
+    "symbols": [
+      {
+        "symbol": "000300.SS",
+        "returnPct": 31.329648932398996
+      }
+    ]
+  },
+  "trades": [
+    {
+      "symbol": "510050.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-07-07",
+      "entryDate": "2025-07-08",
+      "exitDate": "2025-08-22",
+      "entryPrice": 2.7554925094843465,
+      "exitPrice": 2.960800672880971,
+      "stopPrice": 2.703292044359583,
+      "targetPrice": 2.9622818137878646,
+      "returnPct": 7.350869951195946,
+      "holdingDays": 34,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1632408453575283,
+      "marketEma20VsEma50PctAtSignal": 0.7687891615978573,
+      "marketCloseVsEma20PctAtEntry": 1.8169494867886142,
+      "marketEma20VsEma50PctAtEntry": 0.8512938229092157
+    },
+    {
+      "symbol": "510300.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-07-07",
+      "entryDate": "2025-07-08",
+      "exitDate": "2025-08-14",
+      "entryPrice": 3.916296610118706,
+      "exitPrice": 4.1881267498661945,
+      "stopPrice": 3.842932324908579,
+      "targetPrice": 4.190221860796592,
+      "returnPct": 6.840999796725033,
+      "holdingDays": 28,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1632408453575283,
+      "marketEma20VsEma50PctAtSignal": 0.7687891615978573,
+      "marketCloseVsEma20PctAtEntry": 1.8169494867886142,
+      "marketEma20VsEma50PctAtEntry": 0.8512938229092157
+    },
+    {
+      "symbol": "159919.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-07-07",
+      "entryDate": "2025-07-08",
+      "exitDate": "2025-08-18",
+      "entryPrice": 4.081790226164348,
+      "exitPrice": 4.372402274837499,
+      "stopPrice": 4.007271615849428,
+      "targetPrice": 4.37458956962231,
+      "returnPct": 7.019720332767761,
+      "holdingDays": 30,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1632408453575283,
+      "marketEma20VsEma50PctAtSignal": 0.7687891615978573,
+      "marketCloseVsEma20PctAtEntry": 1.8169494867886142,
+      "marketEma20VsEma50PctAtEntry": 0.8512938229092157
+    },
+    {
+      "symbol": "510500.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-07-07",
+      "entryDate": "2025-07-08",
+      "exitDate": "2025-08-11",
+      "entryPrice": 5.909708052555422,
+      "exitPrice": 6.399389317574626,
+      "stopPrice": 5.782796059967905,
+      "targetPrice": 6.402590612881067,
+      "returnPct": 8.18604832361322,
+      "holdingDays": 25,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1632408453575283,
+      "marketEma20VsEma50PctAtSignal": 0.7687891615978573,
+      "marketCloseVsEma20PctAtEntry": 1.8169494867886142,
+      "marketEma20VsEma50PctAtEntry": 0.8512938229092157
+    },
+    {
+      "symbol": "510500.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-08-12",
+      "entryDate": "2025-08-13",
+      "exitDate": "2025-08-26",
+      "entryPrice": 6.460857066512119,
+      "exitPrice": 7.022283726159267,
+      "stopPrice": 6.304419822382491,
+      "targetPrice": 7.025796624471502,
+      "returnPct": 8.589662282688954,
+      "holdingDays": 10,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.3274254192646833,
+      "marketEma20VsEma50PctAtSignal": 1.7273425069507173,
+      "marketCloseVsEma20PctAtEntry": 1.921662796195127,
+      "marketEma20VsEma50PctAtEntry": 1.7781784404128202
+    },
+    {
+      "symbol": "510500.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-08",
+      "entryDate": "2025-09-09",
+      "exitDate": "2025-10-14",
+      "entryPrice": 7.002075619072326,
+      "exitPrice": 7.23118913435936,
+      "stopPrice": 6.734539419228297,
+      "targetPrice": 8.163904548428606,
+      "returnPct": 3.1720799910096886,
+      "holdingDays": 20,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.3358846911228457,
+      "marketEma20VsEma50PctAtSignal": 3.5410317673006135,
+      "marketCloseVsEma20PctAtEntry": 1.4622697060005772,
+      "marketEma20VsEma50PctAtEntry": 3.488923499456833
+    },
+    {
+      "symbol": "159922.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "low",
+      "signalDate": "2025-07-08",
+      "entryDate": "2025-07-09",
+      "exitDate": "2025-08-13",
+      "entryPrice": 2.380734628249889,
+      "exitPrice": 2.590142139740861,
+      "stopPrice": 2.3265717520492175,
+      "targetPrice": 2.591437858670196,
+      "returnPct": 8.6959199234612,
+      "holdingDays": 26,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.8169494867886142,
+      "marketEma20VsEma50PctAtSignal": 0.8512938229092157,
+      "marketCloseVsEma20PctAtEntry": 1.4791742371972034,
+      "marketEma20VsEma50PctAtEntry": 0.9095305858689849
+    },
+    {
+      "symbol": "159922.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-08-14",
+      "entryDate": "2025-08-15",
+      "exitDate": "2025-08-27",
+      "entryPrice": 2.565387293305591,
+      "exitPrice": 2.8099443833943285,
+      "stopPrice": 2.5059952261778062,
+      "targetPrice": 2.8113500584235402,
+      "returnPct": 9.432950082309693,
+      "holdingDays": 9,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.663530339607595,
+      "marketEma20VsEma50PctAtSignal": 1.8108724218342969,
+      "marketCloseVsEma20PctAtEntry": 2.1403190678996156,
+      "marketEma20VsEma50PctAtEntry": 1.8719884355278433
+    },
+    {
+      "symbol": "159922.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 92,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-02",
+      "entryDate": "2025-09-03",
+      "exitDate": "2025-09-04",
+      "entryPrice": 2.7796631770494873,
+      "exitPrice": 2.681768673931191,
+      "stopPrice": 2.6831102290457136,
+      "targetPrice": 3.1589293802954175,
+      "returnPct": -3.6218117046183997,
+      "holdingDays": 2,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 3.7284393690987154,
+      "marketEma20VsEma50PctAtSignal": 3.6233320623094034,
+      "marketCloseVsEma20PctAtEntry": 2.7255532590522304,
+      "marketEma20VsEma50PctAtEntry": 3.6469642708349896
+    },
+    {
+      "symbol": "159922.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-09",
+      "entryDate": "2025-09-10",
+      "exitDate": "2025-10-14",
+      "entryPrice": 2.7638640946572917,
+      "exitPrice": 2.876517412185669,
+      "stopPrice": 2.652372394169651,
+      "targetPrice": 3.2078589035460054,
+      "returnPct": 3.9759354899592423,
+      "holdingDays": 19,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 1.4622697060005772,
+      "marketEma20VsEma50PctAtSignal": 3.488923499456833,
+      "marketCloseVsEma20PctAtEntry": 1.5091246203572266,
+      "marketEma20VsEma50PctAtEntry": 3.4419183820742876
+    },
+    {
+      "symbol": "159845.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-07-14",
+      "entryDate": "2025-07-15",
+      "exitDate": "2025-08-13",
+      "entryPrice": 2.649324001908302,
+      "exitPrice": 2.9008350976774158,
+      "stopPrice": 2.5906785852358793,
+      "targetPrice": 2.9022862407978147,
+      "returnPct": 9.393406453417963,
+      "holdingDays": 22,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.6030390909490495,
+      "marketEma20VsEma50PctAtSignal": 1.1080854401942186,
+      "marketCloseVsEma20PctAtEntry": 1.479866949047388,
+      "marketEma20VsEma50PctAtEntry": 1.1561702595533818
+    },
+    {
+      "symbol": "159845.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-01",
+      "entryDate": "2025-09-02",
+      "exitDate": "2025-09-03",
+      "entryPrice": 3.073536026716232,
+      "exitPrice": 2.982488246966402,
+      "stopPrice": 2.9839802370849444,
+      "targetPrice": 3.4890792423950847,
+      "returnPct": -3.0623137311035733,
+      "holdingDays": 2,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 4.908464262745971,
+      "marketEma20VsEma50PctAtSignal": 3.5330271483244116,
+      "marketCloseVsEma20PctAtEntry": 3.7284393690987154,
+      "marketEma20VsEma50PctAtEntry": 3.6233320623094034
+    },
+    {
+      "symbol": "159845.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-16",
+      "entryDate": "2025-09-17",
+      "exitDate": "2025-10-14",
+      "entryPrice": 3.0775379751920697,
+      "exitPrice": 3.032482919931412,
+      "stopPrice": 2.9662040131687055,
+      "targetPrice": 3.5601841380600403,
+      "returnPct": -1.5639967280288718,
+      "holdingDays": 14,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.123543153036086,
+      "marketEma20VsEma50PctAtSignal": 3.546145465031964,
+      "marketCloseVsEma20PctAtEntry": 2.4802269372679966,
+      "marketEma20VsEma50PctAtEntry": 3.5575997427278185
+    },
+    {
+      "symbol": "159915.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-14",
+      "entryDate": "2025-07-15",
+      "exitDate": "2025-08-13",
+      "entryPrice": 2.1850920152664184,
+      "exitPrice": 2.4402268093749067,
+      "stopPrice": 2.1108881739350895,
+      "targetPrice": 2.4414475331414773,
+      "returnPct": 11.576157906667415,
+      "holdingDays": 22,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.6030390909490495,
+      "marketEma20VsEma50PctAtSignal": 1.1080854401942186,
+      "marketCloseVsEma20PctAtEntry": 1.479866949047388,
+      "marketEma20VsEma50PctAtEntry": 1.1561702595533818
+    },
+    {
+      "symbol": "159915.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 92,
+      "riskLevel": "high",
+      "signalDate": "2025-09-09",
+      "entryDate": "2025-09-10",
+      "exitDate": "2025-10-13",
+      "entryPrice": 2.858428612589836,
+      "exitPrice": 3.0524729008674623,
+      "stopPrice": 2.6611976056172,
+      "targetPrice": 3.580209720582348,
+      "returnPct": 6.688495169092755,
+      "holdingDays": 18,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.4622697060005772,
+      "marketEma20VsEma50PctAtSignal": 3.488923499456833,
+      "marketCloseVsEma20PctAtEntry": 1.5091246203572266,
+      "marketEma20VsEma50PctAtEntry": 3.4419183820742876
+    },
+    {
+      "symbol": "588000.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 97,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-11",
+      "entryDate": "2025-08-12",
+      "exitDate": "2025-08-21",
+      "entryPrice": 1.103551544845104,
+      "exitPrice": 1.2308600235952276,
+      "stopPrice": 1.0708811156593747,
+      "targetPrice": 1.2314757614759655,
+      "returnPct": 11.436251237634098,
+      "holdingDays": 8,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9471407363954352,
+      "marketEma20VsEma50PctAtSignal": 1.712972047834934,
+      "marketCloseVsEma20PctAtEntry": 1.3274254192646833,
+      "marketEma20VsEma50PctAtEntry": 1.7273425069507173
+    },
+    {
+      "symbol": "588000.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-17",
+      "entryDate": "2025-09-18",
+      "exitDate": "2025-10-14",
+      "entryPrice": 1.456727970421314,
+      "exitPrice": 1.4802594466209413,
+      "stopPrice": 1.348883174302073,
+      "targetPrice": 1.8044675888940023,
+      "returnPct": 1.5153651661415888,
+      "holdingDays": 13,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.4802269372679966,
+      "marketEma20VsEma50PctAtSignal": 3.5575997427278185,
+      "marketCloseVsEma20PctAtEntry": 1.164620312544676,
+      "marketEma20VsEma50PctAtEntry": 3.486167579782561
+    },
+    {
+      "symbol": "588080.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 97,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-11",
+      "entryDate": "2025-08-12",
+      "exitDate": "2025-08-21",
+      "entryPrice": 1.0651887579352384,
+      "exitPrice": 1.1903258062942832,
+      "stopPrice": 1.035566131260388,
+      "targetPrice": 1.190921266927747,
+      "returnPct": 11.647875428352291,
+      "holdingDays": 8,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9471407363954352,
+      "marketEma20VsEma50PctAtSignal": 1.712972047834934,
+      "marketCloseVsEma20PctAtEntry": 1.3274254192646833,
+      "marketEma20VsEma50PctAtEntry": 1.7273425069507173
+    },
+    {
+      "symbol": "588080.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-17",
+      "entryDate": "2025-09-18",
+      "exitDate": "2025-10-14",
+      "entryPrice": 1.4090217230866917,
+      "exitPrice": 1.436320021569729,
+      "stopPrice": 1.303444460361092,
+      "targetPrice": 1.7485799180313406,
+      "returnPct": 1.8373937275598453,
+      "holdingDays": 13,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.4802269372679966,
+      "marketEma20VsEma50PctAtSignal": 3.5575997427278185,
+      "marketCloseVsEma20PctAtEntry": 1.164620312544676,
+      "marketEma20VsEma50PctAtEntry": 3.486167579782561
+    },
+    {
+      "symbol": "510880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-05-19",
+      "entryDate": "2025-05-20",
+      "exitDate": "2025-07-31",
+      "entryPrice": 2.9808904141252794,
+      "exitPrice": 3.0667324968576435,
+      "stopPrice": 2.926253518100531,
+      "targetPrice": 3.1872123851937015,
+      "returnPct": 2.7797463444342614,
+      "holdingDays": 52,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.7469675821448437,
+      "marketEma20VsEma50PctAtSignal": 0.016633962385387425,
+      "marketCloseVsEma20PctAtEntry": 1.1685704877472634,
+      "marketEma20VsEma50PctAtEntry": 0.08839470983223462
+    },
+    {
+      "symbol": "510880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "low",
+      "signalDate": "2025-11-05",
+      "entryDate": "2025-11-06",
+      "exitDate": "2025-11-18",
+      "entryPrice": 3.1692275723125496,
+      "exitPrice": 3.136452696681023,
+      "stopPrice": 3.1035168041941468,
+      "targetPrice": 3.4575958767903083,
+      "returnPct": -1.134159740305782,
+      "holdingDays": 9,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 0.031959439391970226,
+      "marketEma20VsEma50PctAtSignal": 2.412355776566543,
+      "marketCloseVsEma20PctAtEntry": 1.320719565690134,
+      "marketEma20VsEma50PctAtEntry": 2.3979449905666463
+    },
+    {
+      "symbol": "512880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-07",
+      "entryDate": "2025-07-08",
+      "exitDate": "2025-08-15",
+      "entryPrice": 1.132565969467163,
+      "exitPrice": 1.299486442928631,
+      "stopPrice": 1.0899658340569716,
+      "targetPrice": 1.3001365111842231,
+      "returnPct": 14.638256133547687,
+      "holdingDays": 29,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1632408453575283,
+      "marketEma20VsEma50PctAtSignal": 0.7687891615978573,
+      "marketCloseVsEma20PctAtEntry": 1.8169494867886142,
+      "marketEma20VsEma50PctAtEntry": 0.8512938229092157
+    },
+    {
+      "symbol": "512000.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-01",
+      "entryDate": "2025-07-02",
+      "exitDate": "2025-08-04",
+      "entryPrice": 1.080540042936802,
+      "exitPrice": 1.0361693722783791,
+      "stopPrice": 1.0366877161364474,
+      "targetPrice": 1.2532493500309312,
+      "returnPct": -4.206342097033969,
+      "holdingDays": 24,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1774592831443473,
+      "marketEma20VsEma50PctAtSignal": 0.5234865027993831,
+      "marketCloseVsEma20PctAtEntry": 1.0856689726585818,
+      "marketEma20VsEma50PctAtEntry": 0.5702238259036652
+    },
+    {
+      "symbol": "512010.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-12",
+      "entryDate": "2025-08-13",
+      "exitDate": "2025-09-23",
+      "entryPrice": 0.40920450930297375,
+      "exitPrice": 0.43178401120007043,
+      "stopPrice": 0.39258862564927327,
+      "targetPrice": 0.4696454592559342,
+      "returnPct": 5.4179015342616585,
+      "holdingDays": 30,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.3274254192646833,
+      "marketEma20VsEma50PctAtSignal": 1.7273425069507173,
+      "marketCloseVsEma20PctAtEntry": 1.921662796195127,
+      "marketEma20VsEma50PctAtEntry": 1.7781784404128202
+    },
+    {
+      "symbol": "512170.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-03-17",
+      "entryDate": "2025-03-18",
+      "exitDate": "2025-03-20",
+      "entryPrice": 0.3551774892657995,
+      "exitPrice": 0.34982499404251577,
+      "stopPrice": 0.3341515405416938,
+      "targetPrice": 0.4183938926694979,
+      "returnPct": -1.6069916830450257,
+      "holdingDays": 3,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.5965378693798902,
+      "marketEma20VsEma50PctAtSignal": 0.704727927203097,
+      "marketCloseVsEma20PctAtEntry": 1.6928381355768038,
+      "marketEma20VsEma50PctAtEntry": 0.7820433455903475
+    },
+    {
+      "symbol": "512170.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-11",
+      "entryDate": "2025-08-12",
+      "exitDate": "2025-09-04",
+      "entryPrice": 0.37218600882589814,
+      "exitPrice": 0.37581198713183406,
+      "stopPrice": 0.3573028209264462,
+      "targetPrice": 0.4307887604016523,
+      "returnPct": 0.8742382088393023,
+      "holdingDays": 18,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9471407363954352,
+      "marketEma20VsEma50PctAtSignal": 1.712972047834934,
+      "marketCloseVsEma20PctAtEntry": 1.3274254192646833,
+      "marketEma20VsEma50PctAtEntry": 1.7273425069507173
+    },
+    {
+      "symbol": "512170.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-10",
+      "entryDate": "2025-09-11",
+      "exitDate": "2025-09-22",
+      "entryPrice": 0.38619300739467144,
+      "exitPrice": 0.38580700738728047,
+      "stopPrice": 0.37145891011253146,
+      "targetPrice": 0.47416430828987965,
+      "returnPct": -0.1999500249875058,
+      "holdingDays": 8,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.5091246203572266,
+      "marketEma20VsEma50PctAtSignal": 3.4419183820742876,
+      "marketCloseVsEma20PctAtEntry": 3.473815509288741,
+      "marketEma20VsEma50PctAtEntry": 3.5200044380864597
+    },
+    {
+      "symbol": "512760.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-17",
+      "entryDate": "2025-09-18",
+      "exitDate": "2025-10-14",
+      "entryPrice": 1.5807900429368018,
+      "exitPrice": 1.6291849952340127,
+      "stopPrice": 1.45261162286087,
+      "targetPrice": 2.0145537946588146,
+      "returnPct": 2.96144086075482,
+      "holdingDays": 13,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.4802269372679966,
+      "marketEma20VsEma50PctAtSignal": 3.5575997427278185,
+      "marketCloseVsEma20PctAtEntry": 1.164620312544676,
+      "marketEma20VsEma50PctAtEntry": 3.486167579782561
+    },
+    {
+      "symbol": "512660.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-03",
+      "entryDate": "2025-07-04",
+      "exitDate": "2025-08-25",
+      "entryPrice": 1.1225609790086746,
+      "exitPrice": 1.2976693353410704,
+      "stopPrice": 1.080420317940357,
+      "targetPrice": 1.2983184945883646,
+      "returnPct": 15.499006165975302,
+      "holdingDays": 37,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.5451563484438489,
+      "marketEma20VsEma50PctAtSignal": 0.6436615668636488,
+      "marketCloseVsEma20PctAtEntry": 1.722025872787691,
+      "marketEma20VsEma50PctAtEntry": 0.7251993122755195
+    },
+    {
+      "symbol": "512720.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-03-14",
+      "entryDate": "2025-03-17",
+      "exitDate": "2025-03-17",
+      "entryPrice": 1.219609481871128,
+      "exitPrice": 1.2133929866552353,
+      "stopPrice": 1.1396464694322508,
+      "targetPrice": 1.5364140316719372,
+      "returnPct": -0.6097119453642958,
+      "holdingDays": 1,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.0163324049944458,
+      "marketEma20VsEma50PctAtSignal": 0.630470509609952,
+      "marketCloseVsEma20PctAtEntry": 1.5965378693798902,
+      "marketEma20VsEma50PctAtEntry": 0.704727927203097
+    },
+    {
+      "symbol": "512720.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-01",
+      "entryDate": "2025-09-02",
+      "exitDate": "2025-09-03",
+      "entryPrice": 1.2946470295786856,
+      "exitPrice": 1.2314379438826564,
+      "stopPrice": 1.2320539708680904,
+      "targetPrice": 1.5667842405052992,
+      "returnPct": -4.982341229068377,
+      "holdingDays": 2,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 4.908464262745971,
+      "marketEma20VsEma50PctAtSignal": 3.5330271483244116,
+      "marketCloseVsEma20PctAtEntry": 3.7284393690987154,
+      "marketEma20VsEma50PctAtEntry": 3.6233320623094034
+    },
+    {
+      "symbol": "512720.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-22",
+      "entryDate": "2025-09-23",
+      "exitDate": "2025-10-14",
+      "entryPrice": 1.3076535410284995,
+      "exitPrice": 1.2603695371747017,
+      "stopPrice": 1.227795738600524,
+      "targetPrice": 1.5988172744797402,
+      "returnPct": -3.7159427837902594,
+      "holdingDays": 10,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 1.4406005212192203,
+      "marketEma20VsEma50PctAtSignal": 3.3672972691471714,
+      "marketCloseVsEma20PctAtEntry": 1.2443362726330982,
+      "marketEma20VsEma50PctAtEntry": 3.3087776560390374
+    },
+    {
+      "symbol": "515880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "medium",
+      "signalDate": "2025-06-24",
+      "entryDate": "2025-06-25",
+      "exitDate": "2025-07-16",
+      "entryPrice": 1.3656825095415115,
+      "exitPrice": 1.6117040727260974,
+      "stopPrice": 1.293122409682839,
+      "targetPrice": 1.6125103278900423,
+      "returnPct": 17.91455034136598,
+      "holdingDays": 16,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9177482790035427,
+      "marketEma20VsEma50PctAtSignal": 0.16071436438863948,
+      "marketCloseVsEma20PctAtEntry": 2.136180641002893,
+      "marketEma20VsEma50PctAtEntry": 0.2869094840539072
+    },
+    {
+      "symbol": "515880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-07-23",
+      "entryDate": "2025-07-24",
+      "exitDate": "2025-08-13",
+      "entryPrice": 1.6358174904584883,
+      "exitPrice": 1.9593734329274106,
+      "stopPrice": 1.5361616619399472,
+      "targetPrice": 1.9603536097322767,
+      "returnPct": 19.67946466254226,
+      "holdingDays": 15,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.6507824513856435,
+      "marketEma20VsEma50PctAtSignal": 1.630846547491216,
+      "marketCloseVsEma20PctAtEntry": 3.0483659854430476,
+      "marketEma20VsEma50PctAtEntry": 1.7558525641524905
+    },
+    {
+      "symbol": "515880.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-16",
+      "entryDate": "2025-09-17",
+      "exitDate": "2025-10-13",
+      "entryPrice": 2.5812899236679074,
+      "exitPrice": 2.5977004771232606,
+      "stopPrice": 2.318647786626743,
+      "targetPrice": 3.7054086341479335,
+      "returnPct": 0.5357501071415649,
+      "holdingDays": 13,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.123543153036086,
+      "marketEma20VsEma50PctAtSignal": 3.546145465031964,
+      "marketCloseVsEma20PctAtEntry": 2.4802269372679966,
+      "marketEma20VsEma50PctAtEntry": 3.5575997427278185
+    },
+    {
+      "symbol": "515790.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-12",
+      "entryDate": "2025-08-13",
+      "exitDate": "2025-09-04",
+      "entryPrice": 0.7483740257620811,
+      "exitPrice": 0.8723008889210632,
+      "stopPrice": 0.7155656593864969,
+      "targetPrice": 0.872737257549838,
+      "returnPct": 16.459482143008014,
+      "holdingDays": 17,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.3274254192646833,
+      "marketEma20VsEma50PctAtSignal": 1.7273425069507173,
+      "marketCloseVsEma20PctAtEntry": 1.921662796195127,
+      "marketEma20VsEma50PctAtEntry": 1.7781784404128202
+    },
+    {
+      "symbol": "515790.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-16",
+      "entryDate": "2025-09-17",
+      "exitDate": "2025-10-17",
+      "entryPrice": 0.8984490019083022,
+      "exitPrice": 0.9115440004765988,
+      "stopPrice": 0.845550969859702,
+      "targetPrice": 1.1127960657249187,
+      "returnPct": 1.3575116161833134,
+      "holdingDays": 17,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.123543153036086,
+      "marketEma20VsEma50PctAtSignal": 3.546145465031964,
+      "marketCloseVsEma20PctAtEntry": 2.4802269372679966,
+      "marketEma20VsEma50PctAtEntry": 3.5575997427278185
+    },
+    {
+      "symbol": "515790.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-10-27",
+      "entryDate": "2025-10-28",
+      "exitDate": "2025-11-20",
+      "entryPrice": 0.9414704847335815,
+      "exitPrice": 0.9815089933276177,
+      "stopPrice": 0.8808533094286735,
+      "targetPrice": 1.1815866859913609,
+      "returnPct": 4.1527630173521874,
+      "holdingDays": 18,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 2.7839042059433363,
+      "marketEma20VsEma50PctAtSignal": 2.686043864454363,
+      "marketCloseVsEma20PctAtEntry": 2.040142911756732,
+      "marketEma20VsEma50PctAtEntry": 2.7053941762954263
+    },
+    {
+      "symbol": "512890.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-05-19",
+      "entryDate": "2025-05-20",
+      "exitDate": "2025-07-25",
+      "entryPrice": 1.143571506679058,
+      "exitPrice": 1.1984005009531975,
+      "stopPrice": 1.1181032164756128,
+      "targetPrice": 1.2375869338259422,
+      "returnPct": 4.6945400837559745,
+      "holdingDays": 48,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.7469675821448437,
+      "marketEma20VsEma50PctAtSignal": 0.016633962385387425,
+      "marketCloseVsEma20PctAtEntry": 1.1685704877472634,
+      "marketEma20VsEma50PctAtEntry": 0.08839470983223462
+    },
+    {
+      "symbol": "512040.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-06-25",
+      "entryDate": "2025-06-26",
+      "exitDate": "2025-07-24",
+      "entryPrice": 0.9634814995229244,
+      "exitPrice": 1.0220137187146934,
+      "stopPrice": 0.9468687701958837,
+      "targetPrice": 1.022524981205296,
+      "returnPct": 5.975074531348208,
+      "holdingDays": 21,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.136180641002893,
+      "marketEma20VsEma50PctAtSignal": 0.2869094840539072,
+      "marketCloseVsEma20PctAtEntry": 1.6021679182146131,
+      "marketEma20VsEma50PctAtEntry": 0.37501247282849387
+    },
+    {
+      "symbol": "512040.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-08-29",
+      "entryDate": "2025-09-01",
+      "exitDate": "2025-09-04",
+      "entryPrice": 1.0735364542007446,
+      "exitPrice": 1.0480358037404005,
+      "stopPrice": 1.0485600837822915,
+      "targetPrice": 1.170759435988998,
+      "returnPct": -2.4753874738543016,
+      "holdingDays": 4,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 4.825078290842652,
+      "marketEma20VsEma50PctAtSignal": 3.3615413209133727,
+      "marketCloseVsEma20PctAtEntry": 4.908464262745971,
+      "marketEma20VsEma50PctAtEntry": 3.5330271483244116
+    },
+    {
+      "symbol": "512040.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-09",
+      "entryDate": "2025-09-10",
+      "exitDate": "2025-11-20",
+      "entryPrice": 1.0825410171747207,
+      "exitPrice": 1.1334329437613488,
+      "stopPrice": 1.053572560980474,
+      "targetPrice": 1.1957098419087924,
+      "returnPct": 4.60115457790679,
+      "holdingDays": 45,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_trend_pullback",
+      "marketCloseVsEma20PctAtSignal": 1.4622697060005772,
+      "marketEma20VsEma50PctAtSignal": 3.488923499456833,
+      "marketCloseVsEma20PctAtEntry": 1.5091246203572266,
+      "marketEma20VsEma50PctAtEntry": 3.4419183820742876
+    },
+    {
+      "symbol": "513010.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-08",
+      "entryDate": "2025-09-09",
+      "exitDate": "2025-10-13",
+      "entryPrice": 0.8004000119268894,
+      "exitPrice": 0.8465765028595925,
+      "stopPrice": 0.7668784239378138,
+      "targetPrice": 0.9224861945761983,
+      "returnPct": 5.669176692231364,
+      "holdingDays": 19,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.3358846911228457,
+      "marketEma20VsEma50PctAtSignal": 3.5410317673006135,
+      "marketCloseVsEma20PctAtEntry": 1.4622697060005772,
+      "marketEma20VsEma50PctAtEntry": 3.488923499456833
+    },
+    {
+      "symbol": "513120.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "high",
+      "signalDate": "2026-04-20",
+      "entryDate": "2026-04-21",
+      "exitDate": "2026-04-23",
+      "entryPrice": 1.3096545152664183,
+      "exitPrice": 1.2368398654367911,
+      "stopPrice": 1.237458594734158,
+      "targetPrice": 1.6051655686112802,
+      "returnPct": -5.659836505035431,
+      "holdingDays": 3,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.855556755828139,
+      "marketEma20VsEma50PctAtSignal": 0.08108239562162362,
+      "marketCloseVsEma20PctAtEntry": 2.781992430484229,
+      "marketEma20VsEma50PctAtEntry": 0.2504971467045261
+    },
+    {
+      "symbol": "513910.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 92,
+      "riskLevel": "low",
+      "signalDate": "2025-07-01",
+      "entryDate": "2025-07-02",
+      "exitDate": "2025-08-14",
+      "entryPrice": 1.4977484790086746,
+      "exitPrice": 1.6273646661797758,
+      "stopPrice": 1.4529553552180485,
+      "targetPrice": 1.6281787555575544,
+      "returnPct": 8.554069023451202,
+      "holdingDays": 32,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1774592831443473,
+      "marketEma20VsEma50PctAtSignal": 0.5234865027993831,
+      "marketCloseVsEma20PctAtEntry": 1.0856689726585818,
+      "marketEma20VsEma50PctAtEntry": 0.5702238259036652
+    },
+    {
+      "symbol": "513910.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "low",
+      "signalDate": "2025-08-20",
+      "entryDate": "2025-08-21",
+      "exitDate": "2025-08-27",
+      "entryPrice": 1.6198094580173492,
+      "exitPrice": 1.5797417153295006,
+      "stopPrice": 1.5805319813201606,
+      "targetPrice": 1.7678722273072482,
+      "returnPct": -2.57360839199517,
+      "holdingDays": 5,
+      "exitReason": "stop",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.964812000260281,
+      "marketEma20VsEma50PctAtSignal": 2.126257865496725,
+      "marketCloseVsEma20PctAtEntry": 3.0362823003502646,
+      "marketEma20VsEma50PctAtEntry": 2.23062582867111
+    },
+    {
+      "symbol": "515070.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-24",
+      "entryDate": "2025-07-25",
+      "exitDate": "2025-08-14",
+      "entryPrice": 1.3206600524783134,
+      "exitPrice": 1.482771535097102,
+      "stopPrice": 1.2591217020982075,
+      "targetPrice": 1.4835132917429734,
+      "returnPct": 12.175034920195758,
+      "holdingDays": 15,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 3.0483659854430476,
+      "marketEma20VsEma50PctAtSignal": 1.7558525641524905,
+      "marketCloseVsEma20PctAtEntry": 2.2609825320698267,
+      "marketEma20VsEma50PctAtEntry": 1.8267087926788372
+    },
+    {
+      "symbol": "515070.SS",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-17",
+      "entryDate": "2025-09-18",
+      "exitDate": "2025-10-13",
+      "entryPrice": 1.8839415162205695,
+      "exitPrice": 1.872063525736332,
+      "stopPrice": 1.7444311129316006,
+      "targetPrice": 2.4322753956857075,
+      "returnPct": -0.7304861579814971,
+      "holdingDays": 12,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.4802269372679966,
+      "marketEma20VsEma50PctAtSignal": 3.5575997427278185,
+      "marketCloseVsEma20PctAtEntry": 1.164620312544676,
+      "marketEma20VsEma50PctAtEntry": 3.486167579782561
+    },
+    {
+      "symbol": "159326.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "low",
+      "signalDate": "2025-07-02",
+      "entryDate": "2025-07-03",
+      "exitDate": "2025-07-22",
+      "entryPrice": 1.0845419914126395,
+      "exitPrice": 1.1795685455684919,
+      "stopPrice": 1.058710274638379,
+      "targetPrice": 1.1801586248809324,
+      "returnPct": 8.661906399961353,
+      "holdingDays": 14,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.0856689726585818,
+      "marketEma20VsEma50PctAtSignal": 0.5702238259036652,
+      "marketCloseVsEma20PctAtEntry": 1.5451563484438489,
+      "marketEma20VsEma50PctAtEntry": 0.6436615668636488
+    },
+    {
+      "symbol": "159326.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-11",
+      "entryDate": "2025-08-12",
+      "exitDate": "2025-09-12",
+      "entryPrice": 1.1635814875960349,
+      "exitPrice": 1.2866030515360247,
+      "stopPrice": 1.1331883741969788,
+      "targetPrice": 1.2872466748734614,
+      "returnPct": 10.472664248393384,
+      "holdingDays": 24,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9471407363954352,
+      "marketEma20VsEma50PctAtSignal": 1.712972047834934,
+      "marketCloseVsEma20PctAtEntry": 1.3274254192646833,
+      "marketEma20VsEma50PctAtEntry": 1.7273425069507173
+    },
+    {
+      "symbol": "159326.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-09-15",
+      "entryDate": "2025-09-16",
+      "exitDate": "2025-10-29",
+      "entryPrice": 1.2506249999999999,
+      "exitPrice": 1.4408570270223986,
+      "stopPrice": 1.1996055782039172,
+      "targetPrice": 1.4415778159303636,
+      "returnPct": 15.110956683450175,
+      "holdingDays": 26,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.5722773492294055,
+      "marketEma20VsEma50PctAtSignal": 3.55751937826028,
+      "marketCloseVsEma20PctAtEntry": 2.123543153036086,
+      "marketEma20VsEma50PctAtEntry": 3.546145465031964
+    },
+    {
+      "symbol": "159553.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-06-24",
+      "entryDate": "2025-06-25",
+      "exitDate": "2025-08-05",
+      "entryPrice": 1.4287139732837677,
+      "exitPrice": 1.6516229561498488,
+      "stopPrice": 1.3718876714363442,
+      "targetPrice": 1.6524491807402188,
+      "returnPct": 15.502072005619523,
+      "holdingDays": 30,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.9177482790035427,
+      "marketEma20VsEma50PctAtSignal": 0.16071436438863948,
+      "marketCloseVsEma20PctAtEntry": 2.136180641002893,
+      "marketEma20VsEma50PctAtEntry": 0.2869094840539072
+    },
+    {
+      "symbol": "159869.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "high",
+      "signalDate": "2025-02-25",
+      "entryDate": "2025-02-26",
+      "exitDate": "2025-03-10",
+      "entryPrice": 1.2446219580173492,
+      "exitPrice": 1.218390481889248,
+      "stopPrice": 1.1386333537765243,
+      "targetPrice": 1.6104667851655097,
+      "returnPct": -2.2075858383446287,
+      "holdingDays": 9,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 0.5352672263011351,
+      "marketEma20VsEma50PctAtSignal": 0.5833454016408852,
+      "marketCloseVsEma20PctAtEntry": 1.2770981722791577,
+      "marketEma20VsEma50PctAtEntry": 0.6396118444885213
+    },
+    {
+      "symbol": "159869.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-03-14",
+      "entryDate": "2025-03-17",
+      "exitDate": "2025-03-17",
+      "entryPrice": 1.2766380228996277,
+      "exitPrice": 1.2493750000000001,
+      "stopPrice": 1.176100195663231,
+      "targetPrice": 1.6155995082177423,
+      "returnPct": -2.235532736029988,
+      "holdingDays": 1,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.0163324049944458,
+      "marketEma20VsEma50PctAtSignal": 0.630470509609952,
+      "marketCloseVsEma20PctAtEntry": 1.5965378693798902,
+      "marketEma20VsEma50PctAtEntry": 0.704727927203097
+    },
+    {
+      "symbol": "159869.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "medium",
+      "signalDate": "2025-08-12",
+      "entryDate": "2025-08-13",
+      "exitDate": "2025-09-15",
+      "entryPrice": 1.362680988550186,
+      "exitPrice": 1.605440318640426,
+      "stopPrice": 1.299689067192182,
+      "targetPrice": 1.6062434403606063,
+      "returnPct": 17.71483209423226,
+      "holdingDays": 24,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.3274254192646833,
+      "marketEma20VsEma50PctAtSignal": 1.7273425069507173,
+      "marketCloseVsEma20PctAtEntry": 1.921662796195127,
+      "marketEma20VsEma50PctAtEntry": 1.7781784404128202
+    },
+    {
+      "symbol": "159869.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-19",
+      "entryDate": "2025-09-22",
+      "exitDate": "2025-10-09",
+      "entryPrice": 1.605802519083023,
+      "exitPrice": 1.5602194895148278,
+      "stopPrice": 1.506837700605276,
+      "targetPrice": 2.0326491403584366,
+      "returnPct": -2.9386447914046663,
+      "holdingDays": 8,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.1298877210209715,
+      "marketEma20VsEma50PctAtSignal": 3.4155398713113474,
+      "marketCloseVsEma20PctAtEntry": 1.4406005212192203,
+      "marketEma20VsEma50PctAtEntry": 3.3672972691471714
+    },
+    {
+      "symbol": "159967.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "earlyTrend",
+      "entryScore": 100,
+      "riskLevel": "medium",
+      "signalDate": "2025-07-10",
+      "entryDate": "2025-07-11",
+      "exitDate": "2025-08-15",
+      "entryPrice": 0.45622800023853777,
+      "exitPrice": 0.5206615508367582,
+      "stopPrice": 0.4385195134306074,
+      "targetPrice": 0.5209220118426796,
+      "returnPct": 14.023103045962008,
+      "holdingDays": 26,
+      "exitReason": "target",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 1.7633414335061244,
+      "marketEma20VsEma50PctAtSignal": 0.9831355935341166,
+      "marketCloseVsEma20PctAtEntry": 1.7023293609395311,
+      "marketEma20VsEma50PctAtEntry": 1.0500274093341093
+    },
+    {
+      "symbol": "159967.SZ",
+      "assetClass": "etf",
+      "strategyVersion": "resonance_v3_atr_2_0_8_0_csi300_entry_buffer_1_0_etf_established",
+      "poolType": "establishedTrend",
+      "entryScore": 95,
+      "riskLevel": "high",
+      "signalDate": "2025-09-08",
+      "entryDate": "2025-09-09",
+      "exitDate": "2025-10-10",
+      "entryPrice": 0.5722860267162323,
+      "exitPrice": 0.5787104961872102,
+      "stopPrice": 0.5399115167634185,
+      "targetPrice": 0.7253540426188724,
+      "returnPct": 1.0225976471662874,
+      "holdingDays": 18,
+      "exitReason": "hard_exit",
+      "marketRegimeAtSignal": "bullish_ema",
+      "marketRegimeAtEntry": "bullish_ema",
+      "marketRegimeAtExit": "bullish_ema",
+      "marketCloseVsEma20PctAtSignal": 2.3358846911228457,
+      "marketEma20VsEma50PctAtSignal": 3.5410317673006135,
+      "marketCloseVsEma20PctAtEntry": 1.4622697060005772,
+      "marketEma20VsEma50PctAtEntry": 3.488923499456833
+    }
+  ],
+  "missingSymbols": [],
+  "marketFilter": "bullish_ema",
+  "entryMarketFilter": "bullish_ema",
+  "entryMarketMinCloseVsEma20Pct": 1.0,
+  "marketSymbol": "000300.SS",
+  "symbols": [
+    "510050.SS",
+    "510300.SS",
+    "159919.SZ",
+    "510500.SS",
+    "159922.SZ",
+    "512100.SS",
+    "159845.SZ",
+    "159915.SZ",
+    "588000.SS",
+    "588080.SS",
+    "510880.SS",
+    "512880.SS",
+    "512000.SS",
+    "512010.SS",
+    "512170.SS",
+    "512760.SS",
+    "512660.SS",
+    "512720.SS",
+    "515880.SS",
+    "515790.SS",
+    "512890.SS",
+    "512040.SS",
+    "513010.SS",
+    "513120.SS",
+    "513910.SS",
+    "515070.SS",
+    "159201.SZ",
+    "159326.SZ",
+    "159553.SZ",
+    "159869.SZ",
+    "159967.SZ"
+  ],
+  "start": null,
+  "end": null,
+  "benchmarkSymbolCount": 31,
+  "portfolioMaxPositions": 5
+}

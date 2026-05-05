@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
+import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2, Repeat2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { Timeframe } from '../types';
 
@@ -22,6 +22,7 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
+  onShowRsHoldings: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   loading,
   handleRefresh,
   onShowBacktest,
+  onShowRsHoldings,
 }) => {
   return (
     <header className="header-gradient border-b border-zinc-800/50 sticky top-0 z-20">
@@ -159,6 +161,15 @@ export const Header: React.FC<HeaderProps> = ({
             title="回测"
           >
             <BarChart2 size={16} />
+          </button>
+
+          {/* RS Holdings */}
+          <button
+            onClick={onShowRsHoldings}
+            className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-amber-400"
+            title="RS轮动持仓"
+          >
+            <Repeat2 size={16} />
           </button>
 
           {/* Refresh */}

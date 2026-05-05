@@ -24,6 +24,8 @@ export function BacktestChart({ onClose }: Props) {
   const [strategyId, setStrategyId] = useState('resonance_v2_atr_2_0_csi300_entry_buffer_1_0_etf_established');
   const [start, setStart] = useState('2023-01-01');
   const [end, setEnd] = useState('');
+  const [minHistoryBars, setMinHistoryBars] = useState(250);
+  const [minAvgVolume, setMinAvgVolume] = useState(100000000);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,11 +37,17 @@ export function BacktestChart({ onClose }: Props) {
       .catch(() => {});
   }, []);
 
+  const isRsPreset = strategyId.startsWith('rs_rotation_');
+
   async function runBacktest() {
     setLoading(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { strategy_version: strategyId };
+      const body: Record<string, unknown> = {
+        rs_min_history_bars: minHistoryBars,
+        rs_min_avg_volume: minAvgVolume,
+        ...(isRsPreset ? { rs_preset: strategyId } : { strategy_version: strategyId }),
+      };
       if (start) body.start = start;
       if (end) body.end = end;
       const r = await fetch(`${API_BASE}/backtest`, {
@@ -134,6 +142,16 @@ export function BacktestChart({ onClose }: Props) {
             <input type="date" value={end} onChange={e => setEnd(e.target.value)}
               className="bg-slate-800 text-white text-sm rounded px-2 py-1 border border-slate-700" />
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-400">RS最少历史(天)</label>
+            <input type="number" value={minHistoryBars} onChange={e => setMinHistoryBars(Number(e.target.value))}
+              className="bg-slate-800 text-white text-sm rounded px-2 py-1 border border-slate-700 w-24" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-slate-400">RS最低日均量(万)</label>
+            <input type="number" value={minAvgVolume / 10000} onChange={e => setMinAvgVolume(Number(e.target.value) * 10000)}
+              className="bg-slate-800 text-white text-sm rounded px-2 py-1 border border-slate-700 w-24" />
+          </div>
           <button
             onClick={runBacktest}
             disabled={loading}
@@ -148,12 +166,21 @@ export function BacktestChart({ onClose }: Props) {
 
         {result && (
           <div className="flex gap-6 text-sm">
-            <Stat label="MTM策略收益" value={mtm ? `${mtm.totalReturnPct.toFixed(1)}%` : '-'} color="text-sky-400" />
-            <Stat label="MTM最大回撤" value={mtm ? `${mtm.maxDrawdownPct.toFixed(1)}%` : '-'} color="text-red-400" />
-            <Stat label="RS轮动收益" value={rs ? `${rs.totalReturnPct.toFixed(1)}%` : '-'} color="text-amber-400" />
-            <Stat label="RS最大回撤" value={rs ? `${rs.maxDrawdownPct.toFixed(1)}%` : '-'} color="text-red-400" />
-            <Stat label="交易次数" value={result.summary?.tradeCount ?? '-'} />
-            <Stat label="胜率" value={result.summary ? `${(result.summary.winRate * 100).toFixed(0)}%` : '-'} />
+            {isRsPreset ? (
+              <>
+                <Stat label="RS轮动收益" value={rs ? `${rs.totalReturnPct.toFixed(1)}%` : '-'} color="text-amber-400" />
+                <Stat label="RS最大回撤" value={rs ? `${rs.maxDrawdownPct.toFixed(1)}%` : '-'} color="text-red-400" />
+              </>
+            ) : (
+              <>
+                <Stat label="MTM策略收益" value={mtm ? `${mtm.totalReturnPct.toFixed(1)}%` : '-'} color="text-sky-400" />
+                <Stat label="MTM最大回撤" value={mtm ? `${mtm.maxDrawdownPct.toFixed(1)}%` : '-'} color="text-red-400" />
+                <Stat label="RS轮动收益" value={rs ? `${rs.totalReturnPct.toFixed(1)}%` : '-'} color="text-amber-400" />
+                <Stat label="RS最大回撤" value={rs ? `${rs.maxDrawdownPct.toFixed(1)}%` : '-'} color="text-red-400" />
+                <Stat label="交易次数" value={result.summary?.tradeCount ?? '-'} />
+                <Stat label="胜率" value={result.summary ? `${(result.summary.winRate * 100).toFixed(0)}%` : '-'} />
+              </>
+            )}
           </div>
         )}
 

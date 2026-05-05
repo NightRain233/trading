@@ -3,6 +3,7 @@ import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, 
 import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
+const RsHoldingsPanel = lazy(() => import('./components/RsHoldingsPanel').then(m => ({ default: m.RsHoldingsPanel })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -99,6 +100,7 @@ function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
+  const [showRsHoldings, setShowRsHoldings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -556,6 +558,7 @@ function App() {
         loading={loading}
         handleRefresh={handleManualRefresh}
         onShowBacktest={() => setShowBacktest(true)}
+        onShowRsHoldings={() => setShowRsHoldings(true)}
       />
 
       {showNewGroupInput && (
@@ -654,6 +657,11 @@ function App() {
       {showBacktest && (
         <Suspense fallback={null}>
           <BacktestChart onClose={() => setShowBacktest(false)} />
+        </Suspense>
+      )}
+      {showRsHoldings && (
+        <Suspense fallback={null}>
+          <RsHoldingsPanel onClose={() => setShowRsHoldings(false)} />
         </Suspense>
       )}
     </div>

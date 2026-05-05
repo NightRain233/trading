@@ -10,6 +10,8 @@ from backtest import (
     simulate_rs_rotation_portfolio,
     annotate_relative_strength,
     classify_asset,
+    RS_ROTATION_PRESETS,
+    list_rs_rotation_presets,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from analysis import (
@@ -441,6 +443,40 @@ class BacktestRequest(BaseModel):
     rs_top_n: int = 5
     rs_rebalance_days: int = 20
     rs_lookback_bars: int = 60
+    rs_min_history_bars: int = 250
+    rs_min_avg_volume: float = 1e8
+    rs_preset: Optional[str] = None  # "rs_rotation_a_share" or "rs_rotation_global"
+
+
+def _build_rs_rotation(request: "BacktestRequest", benchmark_frames: dict, data_dir: str) -> dict:
+    import pandas as pd
+    preset_id = request.rs_preset
+    if preset_id and preset_id in RS_ROTATION_PRESETS:
+        preset = RS_ROTATION_PRESETS[preset_id]
+        frames = dict(benchmark_frames)
+        for s in preset["extra_symbols"]:
+            p = os.path.join(data_dir, f"{s}.parquet")
+            if os.path.exists(p):
+                frames[s] = pd.read_parquet(p)
+        # resolve filter dfs
+        per_class = {}
+        for cls, (sym, mode) in preset["per_class_filters"].items():
+            p = os.path.join(data_dir, f"{sym.upper()}.parquet")
+            fdf = pd.read_parquet(p) if os.path.exists(p) else None
+            per_class[cls] = (fdf, mode)
+        return simulate_rs_rotation_portfolio(
+            frames, top_n=request.rs_top_n, rebalance_days=request.rs_rebalance_days,
+            lookback_bars=request.rs_lookback_bars, start=request.start, end=request.end,
+            fee_bps=request.fee_bps, slippage_bps=request.slippage_bps,
+            min_history_bars=0, min_avg_volume=preset["min_avg_volume"],
+            per_class_filters=per_class,
+        )
+    return simulate_rs_rotation_portfolio(
+        benchmark_frames, top_n=request.rs_top_n, rebalance_days=request.rs_rebalance_days,
+        lookback_bars=request.rs_lookback_bars, start=request.start, end=request.end,
+        fee_bps=request.fee_bps, slippage_bps=request.slippage_bps,
+        min_history_bars=request.rs_min_history_bars, min_avg_volume=request.rs_min_avg_volume,
+    )
 
 
 @app.post("/api/backtest")
@@ -510,23 +546,54 @@ def run_backtest(request: BacktestRequest):
         slippage_bps=request.slippage_bps,
     )
 
-    rs_rotation = simulate_rs_rotation_portfolio(
-        benchmark_daily_frames,
-        top_n=request.rs_top_n,
-        rebalance_days=request.rs_rebalance_days,
-        lookback_bars=request.rs_lookback_bars,
-        start=request.start,
-        end=request.end,
-        fee_bps=request.fee_bps,
-        slippage_bps=request.slippage_bps,
-    )
+    rs_rotation = _build_rs_rotation(request, benchmark_daily_frames, DATA_DIR)
 
     return {**report, "rsRotationPortfolio": rs_rotation, "missingSymbols": missing}
 
 
+@app.get("/api/rs-rotation/holdings")
+def get_rs_rotation_holdings():
+    """返回两个 RS 轮动预设当前持仓（最新 rebalance 选出的 top5）"""
+    from analysis import DATA_DIR
+    import pandas as pd
+
+    universe_symbols = load_universe_symbols("universes/a_share_etf_core.json")
+    frames_a: dict = {}
+    for s in universe_symbols:
+        p = os.path.join(DATA_DIR, f"{s.upper()}.parquet")
+        if os.path.exists(p):
+            frames_a[s.upper()] = pd.read_parquet(p)
+
+    result = {}
+    for preset_id, preset in RS_ROTATION_PRESETS.items():
+        frames = dict(frames_a)
+        for s in preset["extra_symbols"]:
+            p = os.path.join(DATA_DIR, f"{s}.parquet")
+            if os.path.exists(p):
+                frames[s] = pd.read_parquet(p)
+        per_class = {}
+        for cls, (sym, mode) in preset["per_class_filters"].items():
+            p = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+            fdf = pd.read_parquet(p) if os.path.exists(p) else None
+            per_class[cls] = (fdf, mode)
+        rotation = simulate_rs_rotation_portfolio(
+            frames, top_n=5, rebalance_days=20, lookback_bars=60,
+            fee_bps=5.0, slippage_bps=5.0,
+            min_history_bars=0, min_avg_volume=preset["min_avg_volume"],
+            per_class_filters=per_class,
+        )
+        last = rotation["equityCurve"][-1] if rotation["equityCurve"] else {}
+        result[preset_id] = {
+            "label": preset["label"],
+            "holdings": last.get("holdings", []),
+            "date": last.get("date"),
+        }
+    return result
+
+
 @app.get("/api/backtest/strategies")
 def list_strategies():
-    return [{"id": v.id, "label": v.label} for v in list_strategy_versions()]
+    return [{"id": v.id, "label": v.label} for v in list_strategy_versions()] + list_rs_rotation_presets()
 
 def _next_prewarm_run(now_local: datetime) -> datetime:
     """计算下一个固定预热时间点（本地时区时间）。"""

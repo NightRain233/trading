@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
+from strategy_versions import get_strategy_version
 
 # ============================================
 # 配置常量
@@ -59,6 +60,9 @@ RESONANCE_GOLDEN_CROSS_LOOKBACK = 15
 RESONANCE_PULLBACK_LOOKBACK = 3
 RESONANCE_VOLUME_MA_WINDOW = 20
 RESONANCE_VOLUME_SHRINK_RATIO = 0.8
+RESONANCE_ESTABLISHED_TREND_LOOKBACK = 80
+RESONANCE_ATR_STOP_MULTIPLIER = 1.5
+RESONANCE_ATR_TARGET_MULTIPLIER = 3.0
 
 # RSI 阈值配置 (超买, 超卖)
 RSI_THRESHOLDS = {
@@ -926,6 +930,138 @@ def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame
     return result
 
 
+def _finite_float(value, default: Optional[float] = None) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return number
+
+
+def _risk_level_from_percent(risk_percent: Optional[float]) -> str:
+    if risk_percent is None:
+        return "unknown"
+    if risk_percent <= 2.5:
+        return "low"
+    if risk_percent <= 5.0:
+        return "medium"
+    return "high"
+
+
+def _evaluate_resonance_strategy_v2(
+    df_daily: pd.DataFrame,
+    df_weekly: pd.DataFrame,
+    strategy_version: Optional[str] = None,
+) -> dict:
+    """
+    resonance_v2:
+    - 保留 v1 的买点识别语义。
+    - 将“近期金叉”扩展为 earlyTrend，“趋势已走稳”扩展为 establishedTrend。
+    - 用 ATR 给出入场价、止损价、目标价和风险等级。
+    """
+    version = get_strategy_version(strategy_version)
+    result = {
+        "strategyVersion": version.id,
+        "inPool": False,
+        "buySignal": False,
+        "poolType": "none",
+        "entryScore": 0,
+        "riskScore": 0,
+        "riskLevel": "unknown",
+        "entryPrice": None,
+        "stopPrice": None,
+        "riskPercent": None,
+        "targetPrice": None,
+        "rewardRiskRatio": None,
+    }
+
+    required_daily = {"Close", "Low", "Volume", "EMA5", "EMA10", "EMA20", "EMA50"}
+    required_weekly = {"MACD_W", "MACD_Signal_W", "MA5_W"}
+    if (
+        df_daily is None
+        or df_daily.empty
+        or df_weekly is None
+        or df_weekly.empty
+        or not required_daily.issubset(df_daily.columns)
+        or not required_weekly.issubset(df_weekly.columns)
+    ):
+        return result
+
+    last_d = df_daily.iloc[-1]
+    prev_d = df_daily.iloc[-2] if len(df_daily) >= 2 else last_d
+    last_w = df_weekly.iloc[-1]
+
+    price = _finite_float(last_d["Close"])
+    ema20 = _finite_float(last_d["EMA20"])
+    ema50 = _finite_float(last_d["EMA50"])
+    ema20_prev = _finite_float(prev_d["EMA20"])
+    w_macd = _finite_float(last_w["MACD_W"])
+    w_signal = _finite_float(last_w["MACD_Signal_W"])
+    w_ma5 = _finite_float(last_w["MA5_W"])
+
+    if None in (price, ema20, ema50, ema20_prev, w_macd, w_signal, w_ma5):
+        return result
+
+    weekly_ok = w_macd > w_signal and price > w_ma5
+    cross_ok, bars_since_cross = _is_recent_ema20_50_golden_cross(df_daily)
+    trend_intact = ema20 > ema50 and price > ema20 and ema20 >= ema20_prev
+    established_ok = (
+        weekly_ok
+        and trend_intact
+        and bars_since_cross is not None
+        and bars_since_cross <= version.established_trend_lookback
+    )
+
+    if weekly_ok and cross_ok:
+        result["inPool"] = True
+        result["poolType"] = "earlyTrend"
+    elif established_ok:
+        result["inPool"] = True
+        result["poolType"] = "establishedTrend"
+
+    pullback_ema5, _reason_ema5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
+    pullback_ema10, _reason_ema10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
+    result["buySignal"] = bool(result["inPool"] and (pullback_ema5 or pullback_ema10))
+
+    score = 0
+    if weekly_ok:
+        score += 35
+    if result["poolType"] == "earlyTrend":
+        score += 25
+    elif result["poolType"] == "establishedTrend":
+        score += 20
+    if trend_intact:
+        score += 15
+    if pullback_ema5:
+        score += 15
+    elif pullback_ema10:
+        score += 12
+    if result["buySignal"]:
+        score += 10
+    result["entryScore"] = min(100, score)
+
+    result["entryPrice"] = price
+    atr = _finite_float(last_d["ATR"]) if "ATR" in df_daily.columns else None
+    if atr is not None and atr > 0 and price > 0:
+        stop_distance = atr * version.atr_stop_multiplier
+        target_distance = atr * version.atr_target_multiplier
+        stop_price = price - stop_distance
+        target_price = price + target_distance if target_distance > 0 else None
+        risk_percent = (stop_distance / price) * 100
+        reward_risk = target_distance / stop_distance if stop_distance > 0 and target_distance > 0 else None
+
+        result["stopPrice"] = stop_price
+        result["targetPrice"] = target_price
+        result["riskPercent"] = risk_percent
+        result["rewardRiskRatio"] = reward_risk
+        result["riskLevel"] = _risk_level_from_percent(risk_percent)
+        result["riskScore"] = max(0, min(100, round(100 - risk_percent * 12)))
+
+    return _make_json_safe(result)
+
+
 def _evaluate_resonance_exit_no_position(df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
     """
     resonance_v1 无持仓离场信号：
@@ -1363,6 +1499,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
     # 周线分析
     weekly_status = _get_weekly_status(price, df_weekly)
     resonance = _evaluate_resonance_strategy(df, df_weekly)
+    resonance_v2 = _evaluate_resonance_strategy_v2(df, df_weekly)
     resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
 
     # K线数据 (日线和周线)
@@ -1388,6 +1525,16 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "resonanceBuySignal": resonance["buySignal"],
         "resonancePoolReason": resonance["poolReason"],
         "resonanceBuyReason": resonance["buyReason"],
+        "resonanceStrategyVersion": resonance_v2["strategyVersion"],
+        "resonancePoolType": resonance_v2["poolType"],
+        "resonanceEntryScore": resonance_v2["entryScore"],
+        "resonanceRiskScore": resonance_v2["riskScore"],
+        "resonanceRiskLevel": resonance_v2["riskLevel"],
+        "resonanceEntryPrice": resonance_v2["entryPrice"],
+        "resonanceStopPrice": resonance_v2["stopPrice"],
+        "resonanceRiskPercent": resonance_v2["riskPercent"],
+        "resonanceTargetPrice": resonance_v2["targetPrice"],
+        "resonanceRewardRiskRatio": resonance_v2["rewardRiskRatio"],
         "resonanceExitSignal": resonance_exit["exitSignal"],
         "resonanceExitLevel": resonance_exit["exitLevel"],
         "resonanceExitReason": resonance_exit["exitReason"],
@@ -1678,6 +1825,7 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
 
     weekly_status = _get_weekly_status(price, df_weekly)
     resonance = _evaluate_resonance_strategy(df, df_weekly)
+    resonance_v2 = _evaluate_resonance_strategy_v2(df, df_weekly)
     resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
 
     return _make_json_safe({
@@ -1699,6 +1847,16 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
         "resonanceBuySignal": resonance["buySignal"],
         "resonancePoolReason": resonance["poolReason"],
         "resonanceBuyReason": resonance["buyReason"],
+        "resonanceStrategyVersion": resonance_v2["strategyVersion"],
+        "resonancePoolType": resonance_v2["poolType"],
+        "resonanceEntryScore": resonance_v2["entryScore"],
+        "resonanceRiskScore": resonance_v2["riskScore"],
+        "resonanceRiskLevel": resonance_v2["riskLevel"],
+        "resonanceEntryPrice": resonance_v2["entryPrice"],
+        "resonanceStopPrice": resonance_v2["stopPrice"],
+        "resonanceRiskPercent": resonance_v2["riskPercent"],
+        "resonanceTargetPrice": resonance_v2["targetPrice"],
+        "resonanceRewardRiskRatio": resonance_v2["rewardRiskRatio"],
         "resonanceExitSignal": resonance_exit["exitSignal"],
         "resonanceExitLevel": resonance_exit["exitLevel"],
         "resonanceExitReason": resonance_exit["exitReason"],

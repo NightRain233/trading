@@ -683,7 +683,20 @@ def simulate_rs_rotation_portfolio(
     market_filter_symbol: Optional[str] = None,
     market_filter_df: Optional[pd.DataFrame] = None,
     market_filter_mode: str = "ema20_slope",
+    market_filter_weekly_df: Optional[pd.DataFrame] = None,
+    min_history_bars: int = 250,
+    min_avg_volume: float = 1e8,
+    volume_lookback: int = 60,
+    # Per-asset-class market filters: {"a_share": (df, mode), "us": (df, mode), ...}
+    # Supported keys: "a_share" (.SS/.SZ), "us" (SPY/QQQ/etc), "crypto" (BTC/ETH), "commodity"
+    per_class_filters: Optional[Dict[str, tuple]] = None,
+    # Max slots per asset class, e.g. {"crypto": 1, "commodity": 1}
+    max_slots_per_class: Optional[Dict[str, int]] = None,
+    cash_yield_annual: float = 0.0,
 ) -> Dict[str, object]:
+    CASH_SYMBOL = "__CASH__"
+    daily_cash_yield = (1 + cash_yield_annual) ** (1 / 252) - 1
+
     all_dates: set = set()
     for df in daily_frames_by_symbol.values():
         if df is not None and not df.empty:
@@ -699,39 +712,83 @@ def simulate_rs_rotation_portfolio(
     if not dates:
         return {"mode": "rs_rotation", "totalReturnPct": 0.0, "maxDrawdownPct": 0.0, "equityCurve": []}
 
+    # Build legacy single market filter for backward compat
     market_df = (
         market_filter_df
         if market_filter_df is not None
         else daily_frames_by_symbol.get((market_filter_symbol or "").upper()) if market_filter_symbol else None
     )
 
-    def market_is_bullish(as_of) -> bool:
-        if market_df is None or market_df.empty:
+    # Pre-compute monthly resamples for monthly_macd filters
+    _monthly_cache: Dict[int, pd.DataFrame] = {}
+
+    def _check_bullish(fdf: Optional[pd.DataFrame], mode: str, as_of) -> bool:
+        if mode == "none" or fdf is None or fdf.empty:
             return True
-        w = market_df[market_df.index <= as_of]
+        if mode == "monthly_macd":
+            fid = id(fdf)
+            if fid not in _monthly_cache:
+                _monthly_cache[fid] = fdf.resample("ME").last()
+            src = _monthly_cache[fid]
+            w = src[src.index <= pd.Timestamp(as_of)]
+            if w.empty or "MACD_DIF" not in w.columns or "MACD_DEA" not in w.columns:
+                return True
+            return float(w.iloc[-1]["MACD_DIF"]) > float(w.iloc[-1]["MACD_DEA"])
+        if mode == "weekly_macd":
+            src = market_filter_weekly_df if market_filter_weekly_df is not None else fdf.resample("W").last()
+            w = src[src.index <= pd.Timestamp(as_of)]
+            if w.empty or "MACD_DIF" not in w.columns or "MACD_DEA" not in w.columns:
+                return True
+            return float(w.iloc[-1]["MACD_DIF"]) > float(w.iloc[-1]["MACD_DEA"])
+        w = fdf[fdf.index <= as_of]
         if w.empty or "EMA20" not in w.columns:
             return True
-        if market_filter_mode == "ema20_slope":
-            if len(w) < 11:
-                return True
-            return float(w.iloc[-1]["EMA20"]) > float(w.iloc[-11]["EMA20"])
-        if market_filter_mode == "close_above_ema50":
-            if "EMA50" not in w.columns:
-                return True
-            row = w.iloc[-1]
-            return float(row["Close"]) > float(row["EMA50"])
-        # default: bullish_ema (Close > EMA20 > EMA50)
+        if mode == "ema20_slope":
+            return len(w) >= 11 and float(w.iloc[-1]["EMA20"]) > float(w.iloc[-11]["EMA20"])
+        if mode == "close_above_ema50":
+            return "EMA50" in w.columns and float(w.iloc[-1]["Close"]) > float(w.iloc[-1]["EMA50"])
         if "EMA50" not in w.columns:
             return True
-        row = w.iloc[-1]
-        return float(row["Close"]) > float(row["EMA20"]) and float(row["EMA20"]) > float(row["EMA50"])
+        return float(w.iloc[-1]["Close"]) > float(w.iloc[-1]["EMA20"]) and float(w.iloc[-1]["EMA20"]) > float(w.iloc[-1]["EMA50"])
+
+    def _asset_class(symbol: str) -> str:
+        s = symbol.upper()
+        if s.endswith(".SS") or s.endswith(".SZ"):
+            return "a_share"
+        if s in ("SPY", "QQQ", "DIA", "IWM") or (not s.endswith("-USD") and not s.endswith("=F") and "." not in s):
+            return "us"
+        if s.endswith("-USD"):
+            return "crypto"
+        if s.endswith("=F"):
+            return "commodity"
+        return "us"
+
+    def symbol_is_allowed(symbol: str, as_of) -> bool:
+        if per_class_filters is None:
+            # legacy single filter
+            return _check_bullish(market_df, market_filter_mode, as_of)
+        cls = _asset_class(symbol)
+        if cls not in per_class_filters:
+            return True
+        fdf, mode = per_class_filters[cls]
+        return _check_bullish(fdf, mode, as_of)
 
     def rs_rank(as_of) -> List[str]:
         scores = []
+        if cash_yield_annual > 0:
+            scores.append((CASH_SYMBOL, daily_cash_yield * lookback_bars))
         for symbol, df in daily_frames_by_symbol.items():
             if df is None or df.empty or "Close" not in df.columns:
                 continue
+            if not symbol_is_allowed(symbol, as_of):
+                continue
             window = df[df.index <= as_of].dropna(subset=["Close"])
+            if len(window) < min_history_bars:
+                continue
+            if min_avg_volume > 0 and "Volume" in window.columns:
+                avg_vol = window["Volume"].tail(volume_lookback).mean()
+                if pd.isna(avg_vol) or float(avg_vol) < min_avg_volume:
+                    continue
             if len(window) <= lookback_bars:
                 continue
             cur = float(window.iloc[-1]["Close"])
@@ -739,19 +796,39 @@ def simulate_rs_rotation_portfolio(
             if prior > 0:
                 scores.append((symbol.upper(), (cur - prior) / prior))
         scores.sort(key=lambda x: x[1], reverse=True)
-        return [s for s, _ in scores[:top_n]]
+        if not max_slots_per_class:
+            return [s for s, _ in scores[:top_n]]
+        result: List[str] = []
+        class_counts: Dict[str, int] = {}
+        for sym, _ in scores:
+            if len(result) >= top_n:
+                break
+            cls = _asset_class(sym)
+            limit = max_slots_per_class.get(cls, top_n)
+            if class_counts.get(cls, 0) >= limit:
+                continue
+            result.append(sym)
+            class_counts[cls] = class_counts.get(cls, 0) + 1
+        return result
 
-    cash = 1.0
-    holdings: Dict[str, Dict] = {}  # symbol -> {shares, cost_price}
+    portfolio_cash = 1.0
+    holdings: Dict[str, Dict] = {}
     peak = 1.0
     max_drawdown = 0.0
     equity_curve = []
-    last_rebalance_idx = -rebalance_days  # force rebalance on first date
+    last_rebalance_idx = -rebalance_days
+
+    def _cash_price(as_of, cost_date) -> float:
+        days = max(0, (pd.Timestamp(as_of) - pd.Timestamp(cost_date)).days)
+        return (1 + daily_cash_yield) ** days
 
     def portfolio_value(as_of) -> float:
-        total = cash
+        total = portfolio_cash
         for sym, pos in holdings.items():
-            price = _close_on_or_before(daily_frames_by_symbol.get(sym), as_of) or pos["cost_price"]
+            if sym == CASH_SYMBOL:
+                price = _cash_price(as_of, pos["entry_date"])
+            else:
+                price = _close_on_or_before(daily_frames_by_symbol.get(sym), as_of) or pos["cost_price"]
             total += pos["shares"] * price
         return total
 
@@ -759,41 +836,49 @@ def simulate_rs_rotation_portfolio(
     slip_factor = slippage_bps / 10_000
 
     for idx, date in enumerate(dates):
+        # Accrue cash yield on CASH holdings daily
+        for sym, pos in holdings.items():
+            if sym == CASH_SYMBOL:
+                pos["cost_price"] = _cash_price(date, pos["entry_date"])
+
         if idx - last_rebalance_idx >= rebalance_days:
             last_rebalance_idx = idx
-            bullish = market_is_bullish(date)
-            target_symbols = set(rs_rank(date)) if bullish else set()
+            target_symbols = set(rs_rank(date))
             current_symbols = set(holdings.keys())
 
-            # sell positions not in target (includes full liquidation when bearish)
             for sym in list(current_symbols - target_symbols):
                 pos = holdings.pop(sym)
-                price = _close_on_or_before(daily_frames_by_symbol.get(sym), date) or pos["cost_price"]
-                sell_price = price * (1 - slip_factor)
-                proceeds = pos["shares"] * sell_price * (1 - fee_factor)
-                cash += proceeds
+                if sym == CASH_SYMBOL:
+                    price = pos["cost_price"]
+                    portfolio_cash += pos["shares"] * price  # no fee for cash
+                else:
+                    price = _close_on_or_before(daily_frames_by_symbol.get(sym), date) or pos["cost_price"]
+                    portfolio_cash += pos["shares"] * price * (1 - slip_factor) * (1 - fee_factor)
 
-            # buy new positions
             new_buys = target_symbols - set(holdings.keys())
-            slots_available = top_n - len(holdings)
-            buys = list(new_buys)[:slots_available]
+            buys = list(new_buys)[: top_n - len(holdings)]
             if buys:
                 total_val = portfolio_value(date)
                 per_slot = total_val / top_n
                 for sym in buys:
-                    price = _close_on_or_before(daily_frames_by_symbol.get(sym), date)
-                    if not price or price <= 0:
-                        continue
-                    buy_price = price * (1 + slip_factor)
-                    cost = min(cash, per_slot)
-                    if cost <= 0:
-                        continue
-                    net_cost = cost * (1 + fee_factor)
-                    if net_cost > cash:
-                        net_cost = cash
-                    shares = (net_cost / (1 + fee_factor)) / buy_price
-                    cash -= net_cost
-                    holdings[sym] = {"shares": shares, "cost_price": buy_price}
+                    if sym == CASH_SYMBOL:
+                        cost = min(portfolio_cash, per_slot)
+                        if cost <= 0:
+                            continue
+                        portfolio_cash -= cost
+                        holdings[sym] = {"shares": cost, "cost_price": 1.0, "entry_date": date}
+                    else:
+                        price = _close_on_or_before(daily_frames_by_symbol.get(sym), date)
+                        if not price or price <= 0:
+                            continue
+                        buy_price = price * (1 + slip_factor)
+                        cost = min(portfolio_cash, per_slot)
+                        if cost <= 0:
+                            continue
+                        net_cost = min(cost * (1 + fee_factor), portfolio_cash)
+                        shares = (net_cost / (1 + fee_factor)) / buy_price
+                        portfolio_cash -= net_cost
+                        holdings[sym] = {"shares": shares, "cost_price": buy_price, "entry_date": date}
 
         equity = portfolio_value(date)
         peak = max(peak, equity)
@@ -1280,6 +1365,35 @@ def main() -> None:
         "portfolioMaxPositions": args.portfolio_max_positions,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+RS_ROTATION_PRESETS: Dict[str, Dict] = {
+    "rs_rotation_a_share": {
+        "id": "rs_rotation_a_share",
+        "label": "RS轮动 · A股月MACD",
+        "universe_file": "universes/a_share_etf_core.json",
+        "extra_symbols": [],
+        "min_avg_volume": 1e8,
+        "per_class_filters": {"a_share": ("510300.SS", "monthly_macd")},
+    },
+    "rs_rotation_global": {
+        "id": "rs_rotation_global",
+        "label": "RS轮动 · 全球各自月MACD",
+        "universe_file": "universes/a_share_etf_core.json",
+        "extra_symbols": ["SPY", "QQQ", "GC=F", "BTC-USD"],
+        "min_avg_volume": 0.0,
+        "per_class_filters": {
+            "a_share":   ("510300.SS", "monthly_macd"),
+            "us":        ("SPY",       "monthly_macd"),
+            "crypto":    ("BTC-USD",   "monthly_macd"),
+            "commodity": ("GC=F",      "monthly_macd"),
+        },
+    },
+}
+
+
+def list_rs_rotation_presets() -> List[Dict]:
+    return [{"id": v["id"], "label": v["label"]} for v in RS_ROTATION_PRESETS.values()]
 
 
 if __name__ == "__main__":

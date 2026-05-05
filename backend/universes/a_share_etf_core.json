@@ -1,0 +1,161 @@
+{
+  "name": "a-share-etf-core-universe",
+  "description": "Core A-share and China-listed ETF universe for resonance backtests. Symbols use yfinance suffixes: .SS for Shanghai, .SZ for Shenzhen.",
+  "symbols": [
+    {
+      "symbol": "510050.SS",
+      "name": "上证50ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "510300.SS",
+      "name": "沪深300ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "159919.SZ",
+      "name": "沪深300ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "510500.SS",
+      "name": "中证500ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "159922.SZ",
+      "name": "中证500ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "512100.SS",
+      "name": "中证1000ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "159845.SZ",
+      "name": "中证1000ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "159915.SZ",
+      "name": "创业板ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "588000.SS",
+      "name": "科创50ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "588080.SS",
+      "name": "科创50ETF",
+      "bucket": "broad"
+    },
+    {
+      "symbol": "510880.SS",
+      "name": "红利ETF",
+      "bucket": "style"
+    },
+    {
+      "symbol": "512880.SS",
+      "name": "证券ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512000.SS",
+      "name": "券商ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512010.SS",
+      "name": "医药ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512170.SS",
+      "name": "医疗ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512760.SS",
+      "name": "芯片ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512660.SS",
+      "name": "军工ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512720.SS",
+      "name": "计算机ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "515880.SS",
+      "name": "通信ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "515790.SS",
+      "name": "光伏ETF",
+      "bucket": "sector"
+    },
+    {
+      "symbol": "512890.SS",
+      "name": "红利低波/相关ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "512040.SS",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "513010.SS",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "513120.SS",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "513910.SS",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "515070.SS",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "159201.SZ",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "159326.SZ",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "159553.SZ",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "159869.SZ",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    },
+    {
+      "symbol": "159967.SZ",
+      "name": "当前观察ETF",
+      "bucket": "watchlist"
+    }
+  ]
+}

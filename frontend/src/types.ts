@@ -52,6 +52,16 @@ export interface StockData {
   resonanceBuySignal?: boolean;
   resonancePoolReason?: string;
   resonanceBuyReason?: string;
+  resonanceStrategyVersion?: string;
+  resonancePoolType?: 'none' | 'earlyTrend' | 'establishedTrend';
+  resonanceEntryScore?: number;
+  resonanceRiskScore?: number;
+  resonanceRiskLevel?: 'unknown' | 'low' | 'medium' | 'high';
+  resonanceEntryPrice?: number | null;
+  resonanceStopPrice?: number | null;
+  resonanceRiskPercent?: number | null;
+  resonanceTargetPrice?: number | null;
+  resonanceRewardRiskRatio?: number | null;
   resonanceExitSignal?: boolean;
   resonanceExitLevel?: 'none' | 'warn' | 'hard';
   resonanceExitReason?: string;

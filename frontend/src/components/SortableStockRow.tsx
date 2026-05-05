@@ -47,6 +47,19 @@ export const SortableStockRow = memo(function SortableStockRow({
 
   const isPositive = (stock.changePercent || 0) >= 0;
   const resonanceExitLabel = stock.resonanceExitLevel === 'hard' ? '共振离场' : '离场预警';
+  const hasEntryScore = typeof stock.resonanceEntryScore === 'number' && stock.resonanceEntryScore > 0;
+  const riskLevelLabel = stock.resonanceRiskLevel === 'low'
+    ? '低风险'
+    : stock.resonanceRiskLevel === 'medium'
+      ? '中风险'
+      : stock.resonanceRiskLevel === 'high'
+        ? '高风险'
+        : '';
+  const riskTitle = [
+    stock.resonanceStopPrice ? `止损 ${stock.resonanceStopPrice.toFixed(2)}` : '',
+    stock.resonanceRiskPercent ? `风险 ${stock.resonanceRiskPercent.toFixed(1)}%` : '',
+    stock.resonanceRewardRiskRatio ? `盈亏比 ${stock.resonanceRewardRiskRatio.toFixed(1)}` : '',
+  ].filter(Boolean).join(' / ');
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -162,6 +175,27 @@ export const SortableStockRow = memo(function SortableStockRow({
                   共振买点
                 </span>
               )}
+              {hasEntryScore && (
+                <span
+                  className="px-1.5 py-0.5 rounded-md text-[10px] font-mono tabular-nums whitespace-nowrap text-cyan-300 bg-cyan-500/10 border border-cyan-500/20"
+                  title={riskTitle}
+                >
+                  Q{stock.resonanceEntryScore}
+                </span>
+              )}
+              {riskLevelLabel && (
+                <span
+                  className={clsx(
+                    "px-1.5 py-0.5 rounded-md text-[10px] font-bold whitespace-nowrap border",
+                    stock.resonanceRiskLevel === 'low' ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20" :
+                      stock.resonanceRiskLevel === 'medium' ? "text-amber-300 bg-amber-500/10 border-amber-500/20" :
+                        "text-rose-300 bg-rose-500/10 border-rose-500/20"
+                  )}
+                  title={riskTitle}
+                >
+                  {riskLevelLabel}
+                </span>
+              )}
               {stock.resonanceExitSignal && (
                 <span
                   className={clsx(
@@ -212,7 +246,7 @@ export const SortableStockRow = memo(function SortableStockRow({
           {stock._loading ? (
             <div className="h-6 w-14 bg-zinc-800/50 rounded-lg animate-pulse" />
           ) : (
-            <div className="flex flex-wrap justify-end gap-1.5 max-w-[170px]">
+            <div className="flex flex-wrap justify-end gap-1.5 max-w-[210px]">
               {stock.signal === '强烈信号' || stock.signal === '谨慎信号' ? (
                 <span className={clsx(
                   "px-2.5 py-1 rounded-lg text-xs font-bold transition-all",
@@ -229,6 +263,29 @@ export const SortableStockRow = memo(function SortableStockRow({
               {stock.resonanceBuySignal && (
                 <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-500/85 text-zinc-950">
                   共振买点
+                </span>
+              )}
+
+              {hasEntryScore && (
+                <span
+                  className="px-2 py-1 rounded-lg text-xs font-mono tabular-nums font-semibold text-cyan-300 bg-cyan-500/10 border border-cyan-500/20"
+                  title={riskTitle}
+                >
+                  Q{stock.resonanceEntryScore}
+                </span>
+              )}
+
+              {riskLevelLabel && (
+                <span
+                  className={clsx(
+                    "px-2 py-1 rounded-lg text-xs font-bold border",
+                    stock.resonanceRiskLevel === 'low' ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20" :
+                      stock.resonanceRiskLevel === 'medium' ? "text-amber-300 bg-amber-500/10 border-amber-500/20" :
+                        "text-rose-300 bg-rose-500/10 border-rose-500/20"
+                  )}
+                  title={riskTitle}
+                >
+                  {riskLevelLabel}
                 </span>
               )}
 

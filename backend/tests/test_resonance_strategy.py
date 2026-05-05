@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from analysis import _evaluate_resonance_strategy
+from analysis import _evaluate_resonance_strategy_v2
 from analysis import _evaluate_resonance_exit_no_position
 
 
@@ -21,24 +22,29 @@ def _build_daily_df(cross_index: int, final_volume: float) -> pd.DataFrame:
     ema10 = [100.5 + i * 0.05 for i in range(30)]
     ema5 = [100.8 + i * 0.06 for i in range(30)]
     close = [102.0] * 30
+    high = [103.0] * 30
     low = [101.5] * 30
     volume = [1000.0] * 29 + [final_volume]
+    atr = [2.0] * 30
 
     # Last bar forms pullback-reclaim around EMA10/EMA5 but still above EMA20.
     low[-1] = ema10[-1] - 0.3
     close[-1] = ema10[-1] + 0.2
+    high[-1] = close[-1] + 0.8
     low[-2] = ema10[-2] + 0.1
     close[-2] = ema10[-2] + 0.3
 
     return pd.DataFrame(
         {
             "Close": close,
+            "High": high,
             "Low": low,
             "EMA5": ema5,
             "EMA10": ema10,
             "EMA20": ema20,
             "EMA50": ema50,
             "Volume": volume,
+            "ATR": atr,
         },
         index=dates,
     )
@@ -122,6 +128,44 @@ class ResonanceStrategyTests(unittest.TestCase):
 
         self.assertTrue(result["inPool"])
         self.assertFalse(result["buySignal"])
+
+    def test_resonance_v2_keeps_established_trend_in_pool_after_old_cross(self):
+        daily = _build_daily_df(cross_index=2, final_volume=600.0)
+        daily.iloc[-1, daily.columns.get_loc("Close")] = daily.iloc[-1]["EMA20"] + 0.5
+        weekly = _build_weekly_df(macd_w=0.4, signal_w=0.2, ma5_w=100.0)
+
+        result = _evaluate_resonance_strategy_v2(daily, weekly)
+
+        self.assertTrue(result["inPool"])
+        self.assertEqual(result["poolType"], "establishedTrend")
+        self.assertGreaterEqual(result["entryScore"], 60)
+
+    def test_resonance_v2_returns_atr_risk_model_for_buy_setup(self):
+        daily = _build_daily_df(cross_index=20, final_volume=600.0)
+        weekly = _build_weekly_df(macd_w=0.4, signal_w=0.2, ma5_w=100.0)
+
+        result = _evaluate_resonance_strategy_v2(daily, weekly)
+
+        self.assertTrue(result["buySignal"])
+        self.assertEqual(result["poolType"], "earlyTrend")
+        self.assertAlmostEqual(result["stopPrice"], result["entryPrice"] - 3.0, places=4)
+        self.assertGreater(result["riskPercent"], 0)
+        self.assertAlmostEqual(result["rewardRiskRatio"], 2.0, places=2)
+        self.assertIn(result["riskLevel"], ("low", "medium", "high"))
+
+    def test_resonance_v2_uses_strategy_version_risk_parameters(self):
+        daily = _build_daily_df(cross_index=20, final_volume=600.0)
+        weekly = _build_weekly_df(macd_w=0.4, signal_w=0.2, ma5_w=100.0)
+
+        result = _evaluate_resonance_strategy_v2(
+            daily,
+            weekly,
+            strategy_version="resonance_v2_atr_2_0",
+        )
+
+        self.assertEqual(result["strategyVersion"], "resonance_v2_atr_2_0")
+        self.assertAlmostEqual(result["stopPrice"], result["entryPrice"] - 4.0, places=4)
+        self.assertAlmostEqual(result["rewardRiskRatio"], 2.0, places=2)
 
     def test_exit_hard_when_close_below_ema50(self):
         daily = _build_exit_daily_df(final_close=99.0, final_ema20=101.0, final_ema50=100.0)
