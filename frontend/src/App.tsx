@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } fro
 import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
 import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
+const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -97,6 +98,7 @@ const mergeGroupsWithStockMap = (
 function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
+  const [showBacktest, setShowBacktest] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -553,6 +555,7 @@ function App() {
         setChartTimeframe={setChartTimeframe}
         loading={loading}
         handleRefresh={handleManualRefresh}
+        onShowBacktest={() => setShowBacktest(true)}
       />
 
       {showNewGroupInput && (
@@ -646,6 +649,11 @@ function App() {
           </div>
         }>
           <ChartModal stock={selectedStock} onClose={() => setSelectedStock(null)} />
+        </Suspense>
+      )}
+      {showBacktest && (
+        <Suspense fallback={null}>
+          <BacktestChart onClose={() => setShowBacktest(false)} />
         </Suspense>
       )}
     </div>

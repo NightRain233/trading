@@ -34,6 +34,18 @@
       {
         "symbol": "159326.SZ",
         "alias": "电网设备ETF"
+      },
+      {
+        "symbol": "000001.SS",
+        "alias": "上证指数"
+      },
+      {
+        "symbol": "000300.SS",
+        "alias": "沪深 300"
+      },
+      {
+        "symbol": "510500.SS",
+        "alias": "中证 500"
       }
     ],
     "collapsed": false

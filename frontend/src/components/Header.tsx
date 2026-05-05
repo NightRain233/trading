@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal } from 'lucide-react';
+import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { Timeframe } from '../types';
 
@@ -21,6 +21,7 @@ interface HeaderProps {
   setChartTimeframe: (val: Timeframe) => void;
   loading: boolean;
   handleRefresh: () => void;
+  onShowBacktest: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   setChartTimeframe,
   loading,
   handleRefresh,
+  onShowBacktest,
 }) => {
   return (
     <header className="header-gradient border-b border-zinc-800/50 sticky top-0 z-20">
@@ -148,6 +150,15 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <LineChart size={13} />
             <span className="hidden sm:inline">{chartTimeframe === '1D' ? '30日' : '30周'}</span>
+          </button>
+
+          {/* Backtest */}
+          <button
+            onClick={onShowBacktest}
+            className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-amber-400"
+            title="回测"
+          >
+            <BarChart2 size={16} />
           </button>
 
           {/* Refresh */}

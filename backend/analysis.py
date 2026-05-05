@@ -36,7 +36,7 @@ EMA_SHORT_PERIOD = 20
 EMA_LONG_PERIOD = 50
 ADX_PERIOD = 14
 RSI_PERIODS = (7, 14, 21)
-
+ 
 # MACD 参数
 MACD_FAST = 12
 MACD_SLOW = 26
@@ -151,6 +151,23 @@ def _extract_ohlcv(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
     if not cols:
         return None
     return df[cols].copy()
+
+
+def _drop_incomplete_ohlcv_rows(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """
+    去掉缺失 OHLC 的不完整 K 线。
+
+    增量下载或市场未收盘时，尾部可能会出现没有 Close 的半成品行。
+    批量摘要如果直接取最后一行，price 就会变成 NaN/None。
+    """
+    if df is None or df.empty:
+        return df
+
+    clean_df = df.copy()
+    required_cols = [c for c in ("Open", "High", "Low", "Close") if c in clean_df.columns]
+    if required_cols:
+        clean_df = clean_df.dropna(subset=required_cols)
+    return clean_df
 
 
 def _market_data_changed(previous_df: Optional[pd.DataFrame], candidate_df: Optional[pd.DataFrame]) -> bool:
@@ -407,6 +424,10 @@ def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame
         if df.index.tz is not None:
             df.index = df.index.tz_localize(None)
 
+        df = _drop_incomplete_ohlcv_rows(df)
+        if df is None or df.empty:
+            return None, None
+
         last_update = df.index[-1]
         return df, last_update
 
@@ -449,7 +470,7 @@ def _fetch_new_data(symbol: str, last_update: Optional[datetime], now: datetime)
     if isinstance(new_df.columns, pd.MultiIndex):
         new_df.columns = new_df.columns.get_level_values(0)
 
-    return new_df
+    return _drop_incomplete_ohlcv_rows(new_df)
 
 
 def _merge_and_clean_data(df_local: Optional[pd.DataFrame], new_df: pd.DataFrame, now: datetime) -> pd.DataFrame:
@@ -469,6 +490,8 @@ def _merge_and_clean_data(df_local: Optional[pd.DataFrame], new_df: pd.DataFrame
         df = df[~df.index.duplicated(keep='last')]
     else:
         df = new_df
+
+    df = _drop_incomplete_ohlcv_rows(df)
 
     # 只保留指定天数内的数据
     earliest_allowed = now - timedelta(days=DATA_RETENTION_DAYS)
@@ -1315,6 +1338,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         return None
 
     df, df_weekly = data
+    df = _drop_incomplete_ohlcv_rows(df)
     if df is None or len(df) < EMA_LONG_PERIOD:
         return None
 
@@ -1633,6 +1657,7 @@ def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame
     Returns:
         摘要字典，或 None
     """
+    df = _drop_incomplete_ohlcv_rows(df)
     if df is None or len(df) < EMA_LONG_PERIOD:
         return None
 

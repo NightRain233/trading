@@ -114,6 +114,36 @@ class CacheMetadataTests(unittest.TestCase):
         self.assertIsNone(summary["weeklyMA5"])
         self.assertIsNone(summary["weeklyMacdHist"])
 
+    def test_analyze_stock_summary_ignores_incomplete_trailing_daily_row(self):
+        daily_df = _build_daily_df()
+        weekly_df = _build_weekly_df()
+
+        trailing_index = daily_df.index[-1] + pd.offsets.BDay()
+        trailing_row = pd.DataFrame(
+            {
+                "Open": [float("nan")],
+                "High": [float("nan")],
+                "Low": [float("nan")],
+                "Close": [float("nan")],
+                "Volume": [float("nan")],
+                "EMA5": [float("nan")],
+                "EMA20": [float("nan")],
+                "EMA50": [float("nan")],
+                "ADX": [float("nan")],
+            },
+            index=[trailing_index],
+        )
+        daily_df = pd.concat([daily_df, trailing_row])
+
+        summary = analysis.analyze_stock_summary("TEST", daily_df, weekly_df)
+
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["price"], daily_df.iloc[-2]["Close"])
+        try:
+            json.dumps(summary, allow_nan=False)
+        except ValueError as exc:
+            self.fail(f"summary should stay JSON-safe when trailing row is incomplete: {exc}")
+
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "TEST", "price": 1.23})
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")

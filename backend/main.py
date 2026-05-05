@@ -3,6 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Literal
+from backtest import (
+    load_universe_symbols,
+    run_backtest_for_symbol,
+    summarize_backtest_report,
+    simulate_rs_rotation_portfolio,
+    annotate_relative_strength,
+    classify_asset,
+)
+from strategy_versions import get_strategy_version, list_strategy_versions
 from analysis import (
     analyze_stock,
     batch_fetch_and_update,
@@ -135,6 +144,16 @@ class StockResponse(BaseModel):
     resonanceBuySignal: Optional[bool] = None
     resonancePoolReason: Optional[str] = None
     resonanceBuyReason: Optional[str] = None
+    resonanceStrategyVersion: Optional[str] = None
+    resonancePoolType: Optional[str] = None
+    resonanceEntryScore: Optional[int] = None
+    resonanceRiskScore: Optional[int] = None
+    resonanceRiskLevel: Optional[str] = None
+    resonanceEntryPrice: Optional[float] = None
+    resonanceStopPrice: Optional[float] = None
+    resonanceRiskPercent: Optional[float] = None
+    resonanceTargetPrice: Optional[float] = None
+    resonanceRewardRiskRatio: Optional[float] = None
     resonanceExitSignal: Optional[bool] = None
     resonanceExitLevel: Optional[str] = None
     resonanceExitReason: Optional[str] = None
@@ -407,6 +426,107 @@ def update_watchlist(request: UpdateWatchlistRequest):
     groups = [g.dict() for g in request.groups]
     save_watchlist(groups)
     return {"message": "Watchlist updated"}
+
+
+class BacktestRequest(BaseModel):
+    universe_file: str = "universes/a_share_etf_core.json"
+    strategy_version: str = "resonance_v2_atr_2_0_csi300_entry_buffer_1_0_etf_established"
+    start: Optional[str] = None
+    end: Optional[str] = None
+    max_hold_days: int = 30
+    cooldown_bars: int = 3
+    fee_bps: float = 5.0
+    slippage_bps: float = 5.0
+    portfolio_max_positions: int = 5
+    rs_top_n: int = 5
+    rs_rebalance_days: int = 20
+    rs_lookback_bars: int = 60
+
+
+@app.post("/api/backtest")
+def run_backtest(request: BacktestRequest):
+    from analysis import DATA_DIR
+    import pandas as pd
+
+    try:
+        symbols = load_universe_symbols(request.universe_file)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    version = get_strategy_version(request.strategy_version)
+    market_symbol = version.market_symbol
+    market_regime_daily = None
+    if market_symbol:
+        import os
+        mp = os.path.join(DATA_DIR, f"{market_symbol.upper()}.parquet")
+        if os.path.exists(mp):
+            import pandas as pd
+            market_regime_daily = pd.read_parquet(mp)
+
+    all_trades = []
+    benchmark_daily_frames = {}
+    missing = []
+    import os
+    for symbol in symbols:
+        daily_path = os.path.join(DATA_DIR, f"{symbol.upper()}.parquet")
+        weekly_path = os.path.join(DATA_DIR, f"{symbol.upper()}_weekly.parquet")
+        if not os.path.exists(daily_path) or not os.path.exists(weekly_path):
+            missing.append(symbol)
+            continue
+        import pandas as pd
+        daily = pd.read_parquet(daily_path)
+        weekly = pd.read_parquet(weekly_path)
+        if not version.asset_class_filter or classify_asset(symbol) == version.asset_class_filter:
+            benchmark_daily_frames[symbol.upper()] = daily
+        all_trades.extend(run_backtest_for_symbol(
+            symbol, daily, weekly,
+            strategy_version=request.strategy_version,
+            max_hold_days=request.max_hold_days,
+            cooldown_bars=request.cooldown_bars,
+            fee_bps=request.fee_bps,
+            slippage_bps=request.slippage_bps,
+            market_regime_daily=market_regime_daily,
+            market_filter=version.market_filter,
+            entry_market_filter=version.entry_market_filter,
+            entry_market_min_close_vs_ema20_pct=version.entry_market_min_close_vs_ema20_pct,
+            start=request.start,
+            end=request.end,
+        ))
+
+    if benchmark_daily_frames:
+        all_trades = annotate_relative_strength(all_trades, benchmark_daily_frames)
+
+    report = summarize_backtest_report(
+        all_trades,
+        strategy_version=request.strategy_version,
+        asset_class_filter=version.asset_class_filter,
+        pool_type_filter=version.pool_type_filter,
+        relative_strength_bucket_filter=version.relative_strength_bucket_filter,
+        portfolio_max_positions=request.portfolio_max_positions,
+        benchmark_daily_frames=benchmark_daily_frames if benchmark_daily_frames else None,
+        benchmark_start=request.start,
+        benchmark_end=request.end,
+        fee_bps=request.fee_bps,
+        slippage_bps=request.slippage_bps,
+    )
+
+    rs_rotation = simulate_rs_rotation_portfolio(
+        benchmark_daily_frames,
+        top_n=request.rs_top_n,
+        rebalance_days=request.rs_rebalance_days,
+        lookback_bars=request.rs_lookback_bars,
+        start=request.start,
+        end=request.end,
+        fee_bps=request.fee_bps,
+        slippage_bps=request.slippage_bps,
+    )
+
+    return {**report, "rsRotationPortfolio": rs_rotation, "missingSymbols": missing}
+
+
+@app.get("/api/backtest/strategies")
+def list_strategies():
+    return [{"id": v.id, "label": v.label} for v in list_strategy_versions()]
 
 def _next_prewarm_run(now_local: datetime) -> datetime:
     """计算下一个固定预热时间点（本地时区时间）。"""
