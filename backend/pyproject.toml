@@ -10,3 +10,8 @@ dependencies = [
     "uvicorn>=0.40.0",
     "yfinance>=1.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

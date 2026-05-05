@@ -9,6 +9,8 @@ from unittest.mock import patch
 import pandas as pd
 
 import analysis
+import analysis_cache
+import analysis_data
 from analysis import batch_fetch_and_update, get_cached_batch_summaries
 from main import build_cache_headers
 
@@ -92,7 +94,8 @@ class CacheMetadataTests(unittest.TestCase):
             os.utime(daily_path, (fake_mtime, fake_mtime))
             os.utime(weekly_path, (fake_mtime, fake_mtime))
 
-            with patch.object(analysis, "DATA_DIR", tmpdir):
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir):
                 result = get_cached_batch_summaries(["TEST"])
 
             expected_ts = daily_df.index[-1].to_pydatetime().replace(tzinfo=timezone.utc).timestamp()
@@ -175,7 +178,9 @@ class CacheMetadataTests(unittest.TestCase):
             mock_daily_indicators.side_effect = lambda df: daily_df.copy()
             mock_weekly_indicators.side_effect = lambda df: weekly_df.copy()
 
-            with patch.object(analysis, "DATA_DIR", tmpdir):
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir):
                 batch_fetch_and_update(["TEST"])
 
             self.assertIn("TEST", analysis._memory_cache)
