@@ -64,7 +64,14 @@ make deploy
 
 **Core Files**:
 - `main.py`: FastAPI application with REST API endpoints and watchlist management
-- `analysis.py`: Stock data fetching (yfinance), technical indicator calculation (pandas-ta), and caching logic
+- `analysis.py`: Facade module — re-exports all symbols from sub-modules and contains top-level functions (`analyze_stock`, `batch_fetch_and_update`, `analyze_stock_summary`)
+- `analysis_constants.py`: All configuration constants (cache durations, indicator periods, thresholds)
+- `analysis_cache.py`: Thread locks, in-memory cache, async/sync refresh workers, `get_cached_batch_summaries`
+- `analysis_data.py`: Data fetching (yfinance), merging, and indicator calculation (`_calculate_daily_indicators`, `_calculate_weekly_indicators`, `fetch_stock_data`)
+- `analysis_strategy.py`: Resonance strategy signals (`_evaluate_resonance_strategy_v2`, `_evaluate_resonance_exit_no_position`, etc.)
+- `analysis_candles.py`: Candlestick construction (`_build_candles`, `_build_mini_candles`)
+- `backtest.py`: Backtesting engine — single-symbol backtest, portfolio simulation, RS rotation strategy
+- `strategy_versions.py`: Strategy version registry (entry/exit parameters per version ID)
 
 **Key Features**:
 - **Watchlist Management**: Group-based organization with drag-and-drop support, symbol aliases
@@ -122,8 +129,8 @@ make deploy
 
 ### Adding New Technical Indicators
 
-1. Define parameters as constants in `analysis.py` (top section)
-2. Calculate indicator in `_calculate_indicators()` function (uses pandas-ta)
+1. Define parameters as constants in `analysis_constants.py`
+2. Calculate indicator in `_calculate_daily_indicators()` in `analysis_data.py`
 3. Add fields to `StockResponse` model in `main.py`
 4. Update TypeScript types in `frontend/src/types.ts`
 5. Render indicator in `ChartModal.tsx` (add new chart panel or overlay)
@@ -166,6 +173,28 @@ This application implements a trend-following system based on:
 - **Risk Management**: Dynamic stops using 1.5× ATR
 
 The system is designed for twice-daily monitoring (lunch: 12:00-13:00, evening: 21:00-22:00) rather than continuous intraday trading.
+
+### Backtesting
+
+Run a backtest from the command line:
+```bash
+cd backend
+uv run python backtest.py --symbols 510300.SS 510050.SS --strategy-version resonance_v2_atr_1_5 --start 2023-01-01
+```
+
+Key functions in `backtest.py`:
+- `run_backtest_for_symbol`: single-symbol long-only backtest (signal → next-bar entry → stop/target/exit)
+- `simulate_rs_rotation_portfolio`: momentum rotation — ranks symbols by `lookback_bars` return, rebalances every `rebalance_days` trading days, holds top `top_n`
+- `summarize_backtest_report`: aggregates trades into report with `byPoolType`, `byAssetClass`, `byYear`, `diagnostics`, portfolio simulation
+- `annotate_relative_strength`: adds RS rank/bucket to each trade at entry date
+
+**RS Rotation presets** (used by the frontend backtest page):
+- `rs_rotation_a_share`: A-share ETFs, monthly MACD filter on CSI300
+- `rs_rotation_global`: A-share + SPY/QQQ/BTC-USD/GC=F, per-class monthly MACD filters
+
+**Backtest results** are saved to `backend/backtest_results/` (not the repo root).
+
+**Regression tests** in `tests/test_backtest.py` (`RsRotationRegressionTests`) require local parquet data covering 2015–2022. They auto-skip when the cache only holds recent data (< 2 years history).
 
 ## Important Notes
 
