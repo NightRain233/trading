@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2, Repeat2 } from 'lucide-react';
+import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { Timeframe } from '../types';
 
@@ -22,7 +22,8 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  onShowRsHoldings: () => void;
+  activeTab: 'watchlist' | 'rs';
+  onTabChange: (tab: 'watchlist' | 'rs') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,7 +45,8 @@ export const Header: React.FC<HeaderProps> = ({
   loading,
   handleRefresh,
   onShowBacktest,
-  onShowRsHoldings,
+  activeTab,
+  onTabChange,
 }) => {
   return (
     <header className="header-gradient border-b border-zinc-800/50 sticky top-0 z-20">
@@ -163,13 +165,18 @@ export const Header: React.FC<HeaderProps> = ({
             <BarChart2 size={16} />
           </button>
 
-          {/* RS Holdings */}
+          {/* Tab: RS 轮动 */}
           <button
-            onClick={onShowRsHoldings}
-            className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-amber-400"
-            title="RS轮动持仓"
+            onClick={() => onTabChange(activeTab === 'rs' ? 'watchlist' : 'rs')}
+            className={clsx(
+              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
+              activeTab === 'rs'
+                ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
+                : "btn-glass text-zinc-400 hover:text-amber-400"
+            )}
+            title="RS 轮动"
           >
-            <Repeat2 size={16} />
+            RS轮动
           </button>
 
           {/* Refresh */}

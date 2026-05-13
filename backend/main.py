@@ -62,6 +62,7 @@ app.add_middleware(
 )
 
 WATCHLIST_FILE = "watchlist.json"
+RS_HOLDINGS_CACHE_FILE = "backtest_results/rs_holdings_cache.json"
 PREWARM_HOURS = (9, 12, 15, 21)
 PREWARM_TZ = ZoneInfo("Asia/Shanghai")
 COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
@@ -551,9 +552,47 @@ def run_backtest(request: BacktestRequest):
     return {**report, "rsRotationPortfolio": rs_rotation, "missingSymbols": missing}
 
 
+def _is_rs_holdings_cache_valid(cache: dict) -> bool:
+    """缓存有效条件：今天是交易日则当天计算过；否则上一个交易日计算过。"""
+    cached_date = cache.get("cached_date")
+    if not cached_date:
+        return False
+    tz = ZoneInfo("Asia/Shanghai")
+    now = datetime.now(tz).date()
+    cached = datetime.fromisoformat(cached_date).date()
+    # 简单判断：同一自然日内有效（非交易日也不会有新数据）
+    return cached >= now
+
+
+def _load_rs_holdings_cache() -> dict | None:
+    if not os.path.exists(RS_HOLDINGS_CACHE_FILE):
+        return None
+    try:
+        with open(RS_HOLDINGS_CACHE_FILE) as f:
+            cache = json.load(f)
+        if _is_rs_holdings_cache_valid(cache):
+            return cache.get("data")
+    except Exception:
+        pass
+    return None
+
+
+def _save_rs_holdings_cache(data: dict) -> None:
+    os.makedirs(os.path.dirname(RS_HOLDINGS_CACHE_FILE), exist_ok=True)
+    tz = ZoneInfo("Asia/Shanghai")
+    payload = {"cached_date": datetime.now(tz).isoformat(), "data": data}
+    with open(RS_HOLDINGS_CACHE_FILE, "w") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+
 @app.get("/api/rs-rotation/holdings")
-def get_rs_rotation_holdings():
-    """返回两个 RS 轮动预设当前持仓（最新 rebalance 选出的 top5）"""
+def get_rs_rotation_holdings(force: bool = False):
+    """返回两个 RS 轮动预设当前持仓（最新 rebalance 选出的 top5），结果按天缓存。"""
+    if not force:
+        cached = _load_rs_holdings_cache()
+        if cached is not None:
+            return cached
+
     from analysis import DATA_DIR
     import pandas as pd
 
@@ -588,6 +627,8 @@ def get_rs_rotation_holdings():
             "holdings": last.get("holdings", []),
             "date": last.get("date"),
         }
+
+    _save_rs_holdings_cache(result)
     return result
 
 

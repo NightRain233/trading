@@ -13,17 +13,7 @@
       "bucket": "broad"
     },
     {
-      "symbol": "159919.SZ",
-      "name": "沪深300ETF",
-      "bucket": "broad"
-    },
-    {
       "symbol": "510500.SS",
-      "name": "中证500ETF",
-      "bucket": "broad"
-    },
-    {
-      "symbol": "159922.SZ",
       "name": "中证500ETF",
       "bucket": "broad"
     },
@@ -33,8 +23,8 @@
       "bucket": "broad"
     },
     {
-      "symbol": "159845.SZ",
-      "name": "中证1000ETF",
+      "symbol": "159552.SZ",
+      "name": "中证2000ETF增强",
       "bucket": "broad"
     },
     {
@@ -104,57 +94,52 @@
     },
     {
       "symbol": "512890.SS",
-      "name": "红利低波/相关ETF",
+      "name": "红利低波ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "512040.SS",
-      "name": "当前观察ETF",
+      "name": "价值100ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "513010.SS",
-      "name": "当前观察ETF",
+      "name": "恒生科技ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "513120.SS",
-      "name": "当前观察ETF",
+      "name": "港股创新药ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "513910.SS",
-      "name": "当前观察ETF",
+      "name": "港股通央企红利ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "515070.SS",
-      "name": "当前观察ETF",
+      "name": "人工智能ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "159201.SZ",
-      "name": "当前观察ETF",
+      "name": "自由现金流ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "159326.SZ",
-      "name": "当前观察ETF",
-      "bucket": "watchlist"
-    },
-    {
-      "symbol": "159553.SZ",
-      "name": "当前观察ETF",
+      "name": "电网设备ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "159869.SZ",
-      "name": "当前观察ETF",
+      "name": "游戏ETF",
       "bucket": "watchlist"
     },
     {
       "symbol": "159967.SZ",
-      "name": "当前观察ETF",
+      "name": "创成长ETF",
       "bucket": "watchlist"
     }
   ]

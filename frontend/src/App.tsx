@@ -3,7 +3,7 @@ import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, 
 import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
-const RsHoldingsPanel = lazy(() => import('./components/RsHoldingsPanel').then(m => ({ default: m.RsHoldingsPanel })));
+const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -100,7 +100,7 @@ function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
-  const [showRsHoldings, setShowRsHoldings] = useState(false);
+  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs'>('watchlist');
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -558,7 +558,8 @@ function App() {
         loading={loading}
         handleRefresh={handleManualRefresh}
         onShowBacktest={() => setShowBacktest(true)}
-        onShowRsHoldings={() => setShowRsHoldings(true)}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
 
       {showNewGroupInput && (
@@ -581,6 +582,11 @@ function App() {
       )}
 
       {/* Main Content */}
+      {activeTab === 'rs' ? (
+        <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
+          <RsRotationPage />
+        </Suspense>
+      ) : (
       <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
         {/* Data timestamp */}
         <div className="mb-4 flex items-center gap-2">
@@ -640,6 +646,7 @@ function App() {
           </div>
         )}
       </main>
+      )}
 
       {/* Detail Modal */}
       {selectedStock && (
@@ -657,11 +664,6 @@ function App() {
       {showBacktest && (
         <Suspense fallback={null}>
           <BacktestChart onClose={() => setShowBacktest(false)} />
-        </Suspense>
-      )}
-      {showRsHoldings && (
-        <Suspense fallback={null}>
-          <RsHoldingsPanel onClose={() => setShowRsHoldings(false)} />
         </Suspense>
       )}
     </div>
