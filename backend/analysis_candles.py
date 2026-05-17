@@ -91,6 +91,8 @@ def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> li
     cols = {'time': 'time', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'}
     optional_cols = {
         'EMA5': 'ema5', 'EMA10': 'ema10', 'EMA20': 'ema20', 'EMA50': 'ema50',
+        'MA30': 'ma30',
+        'BOLL_Upper': 'boll_upper', 'BOLL_Lower': 'boll_lower',
         'MACD_DIF': 'macd_dif', 'MACD_DEA': 'macd_dea', 'MACD_Hist': 'macd_hist',
     }
     for src, dst in optional_cols.items():

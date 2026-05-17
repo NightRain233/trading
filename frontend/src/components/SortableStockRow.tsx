@@ -14,7 +14,7 @@ interface SortableStockRowProps {
   onEditAlias: (stock: StockData) => void;
   miniCandles?: Candle[];
   chartTimeframe: Timeframe;
-  emaMode: 'long' | 'short';
+  emaMode: 'long' | 'short' | 'boll';
   showCharts: boolean;
   index?: number;
 }

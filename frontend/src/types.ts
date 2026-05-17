@@ -9,6 +9,7 @@ export interface Candle {
   ema10?: number;
   ema20?: number;
   ema50?: number;
+  ma30?: number;
   rsi?: number;
   boll_upper?: number;
   boll_mid?: number;

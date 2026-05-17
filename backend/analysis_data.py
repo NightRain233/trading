@@ -77,6 +77,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['EMA10'] = ta.ema(df['Close'], length=EMA_FAST_10)
         df['EMA20'] = ta.ema(df['Close'], length=EMA_SHORT_PERIOD)
         df['EMA50'] = ta.ema(df['Close'], length=EMA_LONG_PERIOD)
+        df['MA30'] = ta.sma(df['Close'], length=30)
 
         adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=ADX_PERIOD)
         adx_col = next((c for c in (adx_df.columns if adx_df is not None and not adx_df.empty else []) if c.startswith('ADX_')), None)
@@ -148,6 +149,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df_weekly['EMA10'] = ta.ema(df_weekly['Close'], length=EMA_FAST_10)
         df_weekly['EMA20'] = ta.ema(df_weekly['Close'], length=EMA_SHORT_PERIOD)
         df_weekly['EMA50'] = ta.ema(df_weekly['Close'], length=EMA_LONG_PERIOD)
+        df_weekly['MA30'] = ta.sma(df_weekly['Close'], length=30)
 
         macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
         if macd_w is not None and not macd_w.empty:

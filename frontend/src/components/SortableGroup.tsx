@@ -19,7 +19,7 @@ interface SortableGroupProps {
   onEditAlias: (stock: StockData) => void;
   chartData: Record<string, Candle[]>;
   chartTimeframe: Timeframe;
-  emaMode: 'long' | 'short';
+  emaMode: 'long' | 'short' | 'boll';
   showCharts: boolean;
 }
 

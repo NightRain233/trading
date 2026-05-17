@@ -8,7 +8,7 @@ import { TrendingUp, TrendingDown, Calendar, Activity } from 'lucide-react';
 interface MiniChartProps {
   candles: Candle[];
   timeframe: Timeframe;
-  emaMode: 'long' | 'short';
+  emaMode: 'long' | 'short' | 'boll';
   height?: number;
 }
 
@@ -36,6 +36,17 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
   const mainChartRef = useRef<IChartApi | null>(null);
   const macdChartRef = useRef<IChartApi | null>(null);
 
+  // Stabilize candles reference — only update when content actually changes
+  const candlesRef = useRef(candles);
+  const stableCandles = useMemo(() => {
+    const prev = candlesRef.current;
+    if (prev.length === candles.length && prev[0]?.time === candles[0]?.time && prev[prev.length - 1]?.close === candles[candles.length - 1]?.close) {
+      return prev;
+    }
+    candlesRef.current = candles;
+    return candles;
+  }, [candles]);
+
   // Local state for EMA mode to allow per-stock overrides
   const [internalEmaMode, setInternalEmaMode] = useState(propsEmaMode);
 
@@ -47,6 +58,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     low: number;
     ema1?: number;
     ema2?: number;
+    bollUpper?: number;
+    bollLower?: number;
+    ma30?: number;
     macdDif?: number;
     macdDea?: number;
     macdHist?: number;
@@ -79,8 +93,8 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     isFiniteNumber(c.low) &&
     isFiniteNumber(c.close);
 
-  const ema1Key = internalEmaMode === 'long' ? 'ema20' : 'ema5';
-  const ema2Key = internalEmaMode === 'long' ? 'ema50' : 'ema10';
+  const ema1Key = internalEmaMode === 'long' ? 'ema20' : internalEmaMode === 'short' ? 'ema5' : null;
+  const ema2Key = internalEmaMode === 'long' ? 'ema50' : internalEmaMode === 'short' ? 'ema10' : null;
 
   // Sync with global mode whenever it changes
   useEffect(() => {
@@ -96,6 +110,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     candleData,
     ema1Data,
     ema2Data,
+    bollUpperData,
+    bollLowerData,
+    ma30Data,
     macdHistData,
     macdDifData,
     macdDeaData,
@@ -106,13 +123,16 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     minPrice,
     changePercent,
   } = useMemo(() => {
-    const validCandles = candles.filter(isValidCandle);
+    const validCandles = stableCandles.filter(isValidCandle);
 
     if (validCandles.length === 0) {
       return {
         candleData: [],
         ema1Data: [],
         ema2Data: [],
+        bollUpperData: [],
+        bollLowerData: [],
+        ma30Data: [],
         macdHistData: [],
         macdDifData: [],
         macdDeaData: [],
@@ -133,13 +153,25 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       close: c.close,
     }));
 
-    const e1Data = validCandles
-      .filter(c => isFiniteNumber(c[ema1Key]))
-      .map(c => ({ time: c.time as Time, value: c[ema1Key]! }));
+    const e1Data = ema1Key
+      ? validCandles.filter(c => isFiniteNumber(c[ema1Key])).map(c => ({ time: c.time as Time, value: c[ema1Key]! }))
+      : [];
 
-    const e2Data = validCandles
-      .filter(c => isFiniteNumber(c[ema2Key]))
-      .map(c => ({ time: c.time as Time, value: c[ema2Key]! }));
+    const e2Data = ema2Key
+      ? validCandles.filter(c => isFiniteNumber(c[ema2Key])).map(c => ({ time: c.time as Time, value: c[ema2Key]! }))
+      : [];
+
+    const bUpperData = validCandles
+      .filter(c => isFiniteNumber(c.boll_upper))
+      .map(c => ({ time: c.time as Time, value: c.boll_upper! }));
+
+    const bLowerData = validCandles
+      .filter(c => isFiniteNumber(c.boll_lower))
+      .map(c => ({ time: c.time as Time, value: c.boll_lower! }));
+
+    const m30Data = validCandles
+      .filter(c => isFiniteNumber(c.ma30))
+      .map(c => ({ time: c.time as Time, value: c.ma30! }));
 
     const mHistData = validCandles
       .filter(c => isFiniteNumber(c.macd_hist))
@@ -184,6 +216,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       candleData: cData,
       ema1Data: e1Data,
       ema2Data: e2Data,
+      bollUpperData: bUpperData,
+      bollLowerData: bLowerData,
+      ma30Data: m30Data,
       macdHistData: mHistData,
       macdDifData: mDifData,
       macdDeaData: mDeaData,
@@ -194,7 +229,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       maxPrice: Math.max(...prices),
       minPrice: Math.min(...prices),
     };
-  }, [candles, ema1Key, ema2Key]);
+  }, [stableCandles, ema1Key, ema2Key]);
 
   useEffect(() => {
     if (!mainContainerRef.current || !macdContainerRef.current || !wrapperRef.current || candleData.length === 0) return;
@@ -287,34 +322,44 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       borderDownColor: '#22c55e',
       wickUpColor: '#ef4444',
       wickDownColor: '#22c55e',
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     candleSeries.setData(candleData);
 
     const ema1Color = internalEmaMode === 'long' ? '#f59e0b' : '#38bdf8';
     const ema2Color = internalEmaMode === 'long' ? '#8b5cf6' : '#fb923c';
 
-    let line1: any = null;
-    if (ema1Data.length > 0) {
-      line1 = mainChart.addSeries(LineSeries, {
-        color: ema1Color,
-        lineWidth: 2,
+    if (internalEmaMode === 'boll') {
+      const bollOpts = {
+        lineWidth: 1 as const,
+        lineStyle: 2,
         crosshairMarkerVisible: false,
         priceLineVisible: false,
         lastValueVisible: false,
-      });
-      line1.setData(ema1Data);
-    }
-
-    let line2: any = null;
-    if (ema2Data.length > 0) {
-      line2 = mainChart.addSeries(LineSeries, {
-        color: ema2Color,
-        lineWidth: 2,
-        crosshairMarkerVisible: false,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      line2.setData(ema2Data);
+        autoscaleInfoProvider: () => null,
+      };
+      if (bollUpperData.length > 0) {
+        const bUp = mainChart.addSeries(LineSeries, { ...bollOpts, color: '#f87171' });
+        bUp.setData(bollUpperData);
+      }
+      if (bollLowerData.length > 0) {
+        const bLow = mainChart.addSeries(LineSeries, { ...bollOpts, color: '#34d399' });
+        bLow.setData(bollLowerData);
+      }
+      if (ma30Data.length > 0) {
+        const m30 = mainChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+        m30.setData(ma30Data);
+      }
+    } else {
+      if (ema1Data.length > 0) {
+        const line1 = mainChart.addSeries(LineSeries, { color: ema1Color, lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+        line1.setData(ema1Data);
+      }
+      if (ema2Data.length > 0) {
+        const line2 = mainChart.addSeries(LineSeries, { color: ema2Color, lineWidth: 2, crosshairMarkerVisible: false, priceLineVisible: false, lastValueVisible: false });
+        line2.setData(ema2Data);
+      }
     }
 
     const macdHistSeries = macdChart.addSeries(HistogramSeries, {
@@ -387,8 +432,11 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
         open: dataPoint.open,
         high: dataPoint.high,
         low: dataPoint.low,
-        ema1: isFiniteNumber(dataPoint[ema1Key]) ? dataPoint[ema1Key] : undefined,
-        ema2: isFiniteNumber(dataPoint[ema2Key]) ? dataPoint[ema2Key] : undefined,
+        ema1: ema1Key && isFiniteNumber(dataPoint[ema1Key]) ? dataPoint[ema1Key] : undefined,
+        ema2: ema2Key && isFiniteNumber(dataPoint[ema2Key]) ? dataPoint[ema2Key] : undefined,
+        bollUpper: isFiniteNumber(dataPoint.boll_upper) ? dataPoint.boll_upper : undefined,
+        bollLower: isFiniteNumber(dataPoint.boll_lower) ? dataPoint.boll_lower : undefined,
+        ma30: isFiniteNumber(dataPoint.ma30) ? dataPoint.ma30 : undefined,
         macdDif: isFiniteNumber(dataPoint.macd_dif) ? dataPoint.macd_dif : undefined,
         macdDea: isFiniteNumber(dataPoint.macd_dea) ? dataPoint.macd_dea : undefined,
         macdHist: isFiniteNumber(dataPoint.macd_hist) ? dataPoint.macd_hist : undefined,
@@ -429,6 +477,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     candleData,
     ema1Data,
     ema2Data,
+    bollUpperData,
+    bollLowerData,
+    ma30Data,
     macdHistData,
     macdDifData,
     macdDeaData,
@@ -468,13 +519,13 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setInternalEmaMode(prev => (prev === 'long' ? 'short' : 'long'));
+              setInternalEmaMode(prev => prev === 'long' ? 'short' : prev === 'short' ? 'boll' : 'long');
             }}
             className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-zinc-700/50 bg-zinc-800/20 text-[10px] text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 hover:bg-zinc-800/50 transition-all group/ema"
             title="点击切换当前股票均线模式"
           >
             <Activity size={10} className="text-zinc-600 group-hover/ema:text-emerald-500 transition-colors" />
-            <span className="font-mono tracking-tighter">{internalEmaMode === 'long' ? '20/50' : '5/10'}</span>
+            <span className="font-mono tracking-tighter">{internalEmaMode === 'long' ? '20/50' : internalEmaMode === 'short' ? '5/10' : 'BOLL'}</span>
           </button>
         </div>
 
@@ -576,6 +627,36 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
                         {internalEmaMode === 'long' ? 'EMA50' : 'EMA10'}
                       </span>
                       <span className="font-mono text-zinc-300">{hoverData.ema2.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {internalEmaMode === 'boll' && hoverData.bollUpper !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5" style={{ color: '#f87171' }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        上轨
+                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.bollUpper.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {internalEmaMode === 'boll' && hoverData.bollLower !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5" style={{ color: '#34d399' }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        下轨
+                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.bollLower.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {internalEmaMode === 'boll' && hoverData.ma30 !== undefined && (
+                    <div className="flex justify-between items-center">
+                      <span className="flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        MA30
+                      </span>
+                      <span className="font-mono text-zinc-300">{hoverData.ma30.toFixed(2)}</span>
                     </div>
                   )}
 
