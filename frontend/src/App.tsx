@@ -129,7 +129,7 @@ function App() {
     '1W': {},
   });
   const [chartTimeframe, setChartTimeframe] = useState<Timeframe>('1D');
-  const [emaMode, setEmaMode] = useState<'long' | 'short'>('long');
+  const [emaMode, setEmaMode] = useState<'long' | 'short' | 'boll'>('long');
   const [showCharts, setShowCharts] = useState(false);
   const [lastDataUpdatedAt, setLastDataUpdatedAt] = useState<string | null>(null);
   const [dataStale, setDataStale] = useState(false);
@@ -183,6 +183,8 @@ function App() {
   );
 
   const currentChartData = chartDataByTimeframe[chartTimeframe] || {};
+  const currentChartDataRef = useRef(currentChartData);
+  currentChartDataRef.current = currentChartData;
 
   const loadCharts = useCallback(async (symbols: string[], timeframe: Timeframe) => {
     if (symbols.length === 0) return;
@@ -200,12 +202,12 @@ function App() {
 
   useEffect(() => {
     if (!showCharts) return;
-    const missingSymbols = allSymbols.filter(s => !currentChartData[s]);
+    const missingSymbols = allSymbols.filter(s => !currentChartDataRef.current[s]);
     if (missingSymbols.length === 0) return;
     scheduleIdle(() => {
       loadCharts(missingSymbols, chartTimeframe);
     });
-  }, [showCharts, allSymbols, currentChartData, chartTimeframe, loadCharts]);
+  }, [showCharts, allSymbols, chartTimeframe, loadCharts]);
 
   useEffect(() => {
     etagRef.current = null;

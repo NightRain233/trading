@@ -13,8 +13,8 @@ interface HeaderProps {
   showFilters: boolean;
   setShowFilters: (val: boolean) => void;
   activeFilters: string[];
-  emaMode: 'long' | 'short';
-  setEmaMode: (val: 'long' | 'short' | ((prev: 'long' | 'short') => 'long' | 'short')) => void;
+  emaMode: 'long' | 'short' | 'boll';
+  setEmaMode: (val: 'long' | 'short' | 'boll' | ((prev: 'long' | 'short' | 'boll') => 'long' | 'short' | 'boll')) => void;
   showCharts: boolean;
   setShowCharts: (val: boolean) => void;
   chartTimeframe: Timeframe;
@@ -125,11 +125,11 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* EMA Toggle */}
           <button
-            onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : 'long')}
+            onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : prev === 'short' ? 'boll' : 'long')}
             className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
-            title="切换 EMA 均线"
+            title="切换均线模式"
           >
-            {emaMode === 'long' ? 'EMA 20/50' : 'EMA 5/10'}
+            {emaMode === 'long' ? 'EMA 20/50' : emaMode === 'short' ? 'EMA 5/10' : 'BOLL'}
           </button>
 
           {/* Timeframe Toggle */}
