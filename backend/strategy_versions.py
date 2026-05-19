@@ -17,6 +17,7 @@ class StrategyVersion:
     pool_type_filter: Optional[str] = None
     exit_mode: str = "fixed_target"
     relative_strength_bucket_filter: Optional[str] = None
+    signal_type: str = "resonance"  # "resonance" | "weekly_bb_breakout"
 
 
 DEFAULT_STRATEGY_VERSION_ID = "resonance_v2_atr_1_5"
@@ -138,6 +139,15 @@ STRATEGY_VERSIONS = {
         asset_class_filter="etf",
         pool_type_filter="establishedTrend",
         relative_strength_bucket_filter="top20,top50",
+    ),
+    "weekly_bb_breakout_ma30": StrategyVersion(
+        id="weekly_bb_breakout_ma30",
+        label="周线BB突破 · MA30趋势过滤",
+        established_trend_lookback=30,
+        atr_stop_multiplier=0.0,
+        atr_target_multiplier=0.0,
+        exit_mode="warn_exit",
+        signal_type="weekly_bb_breakout",
     ),
 }
 

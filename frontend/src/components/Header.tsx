@@ -22,8 +22,8 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  activeTab: 'watchlist' | 'rs';
-  onTabChange: (tab: 'watchlist' | 'rs') => void;
+  activeTab: 'watchlist' | 'rs' | 'wbb';
+  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -177,6 +177,20 @@ export const Header: React.FC<HeaderProps> = ({
             title="RS 轮动"
           >
             RS轮动
+          </button>
+
+          {/* Tab: 周线BB突破 */}
+          <button
+            onClick={() => onTabChange(activeTab === 'wbb' ? 'watchlist' : 'wbb')}
+            className={clsx(
+              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
+              activeTab === 'wbb'
+                ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-400"
+                : "btn-glass text-zinc-400 hover:text-indigo-400"
+            )}
+            title="周线BB突破"
+          >
+            周线BB
           </button>
 
           {/* Refresh */}

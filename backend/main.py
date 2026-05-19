@@ -12,6 +12,8 @@ from backtest import (
     classify_asset,
     RS_ROTATION_PRESETS,
     list_rs_rotation_presets,
+    evaluate_weekly_bb_breakout,
+    evaluate_weekly_bb_exit,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from analysis import (
@@ -635,6 +637,92 @@ def get_rs_rotation_holdings(force: bool = False):
 @app.get("/api/backtest/strategies")
 def list_strategies():
     return [{"id": v.id, "label": v.label} for v in list_strategy_versions()] + list_rs_rotation_presets()
+
+
+@app.get("/api/weekly-breakout/scan")
+def weekly_breakout_scan():
+    """扫描所有 watchlist 标的的周线BB突破状态，返回九宫格所需数据。"""
+    import pandas as pd
+    from analysis import DATA_DIR
+
+    groups = load_watchlist()
+    symbols = []
+    alias_map = {}
+    for g in groups:
+        for item in g.get("symbols", []):
+            sym = item["symbol"] if isinstance(item, dict) else item
+            if sym not in symbols:
+                symbols.append(sym)
+                alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
+
+    results = []
+    for sym in symbols:
+        daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+        weekly_path = os.path.join(DATA_DIR, f"{sym.upper()}_weekly.parquet")
+        if not os.path.exists(weekly_path):
+            if not os.path.exists(daily_path):
+                continue
+            daily = pd.read_parquet(daily_path)
+            from analysis_data import _calculate_weekly_indicators
+            weekly = _calculate_weekly_indicators(daily.copy())
+        else:
+            weekly = pd.read_parquet(weekly_path)
+
+        required = {"Close", "BOLL_Upper", "BOLL_Lower", "BOLL_Mid", "MA30"}
+        if not required.issubset(weekly.columns):
+            from analysis_data import _calculate_weekly_indicators
+            if os.path.exists(daily_path):
+                daily = pd.read_parquet(daily_path)
+                weekly = _calculate_weekly_indicators(daily.copy())
+
+        signal = evaluate_weekly_bb_breakout(weekly)
+        exit_sig = evaluate_weekly_bb_exit(weekly)
+
+        w = weekly.dropna(subset=["Close"]) if not weekly.empty else weekly
+        last = w.iloc[-1] if not w.empty else None
+
+        # Build last 52 weekly candles for mini chart
+        chart_rows = w.tail(52)
+        candles = []
+        for ts, row in chart_rows.iterrows():
+            candles.append({
+                "time": pd.Timestamp(ts).date().isoformat(),
+                "open": float(row["Open"]) if "Open" in row and pd.notna(row["Open"]) else float(row["Close"]),
+                "high": float(row["High"]) if "High" in row and pd.notna(row["High"]) else float(row["Close"]),
+                "low": float(row["Low"]) if "Low" in row and pd.notna(row["Low"]) else float(row["Close"]),
+                "close": float(row["Close"]),
+                "boll_upper": float(row["BOLL_Upper"]) if "BOLL_Upper" in row and pd.notna(row["BOLL_Upper"]) else None,
+                "boll_mid": float(row["BOLL_Mid"]) if "BOLL_Mid" in row and pd.notna(row["BOLL_Mid"]) else None,
+                "boll_lower": float(row["BOLL_Lower"]) if "BOLL_Lower" in row and pd.notna(row["BOLL_Lower"]) else None,
+                "ma30": float(row["MA30"]) if "MA30" in row and pd.notna(row["MA30"]) else None,
+                "ma5": float(row["MA5_W"]) if "MA5_W" in row and pd.notna(row["MA5_W"]) else None,
+                "macd_dif": float(row["MACD_DIF"]) if "MACD_DIF" in row and pd.notna(row["MACD_DIF"]) else None,
+                "macd_dea": float(row["MACD_DEA"]) if "MACD_DEA" in row and pd.notna(row["MACD_DEA"]) else None,
+                "macd_hist": float(row["MACD_Hist"]) if "MACD_Hist" in row and pd.notna(row["MACD_Hist"]) else None,
+            })
+
+        # Determine signal state
+        if signal.get("buySignal"):
+            state = "breakout"
+        elif exit_sig.get("exitSignal"):
+            state = "exit"
+        elif last is not None and "BOLL_Upper" in last and "BOLL_Lower" in last and "BOLL_Mid" in last and pd.notna(last.get("BOLL_Upper")):
+            bw = (float(last["BOLL_Upper"]) - float(last["BOLL_Lower"])) / float(last["BOLL_Mid"]) if float(last["BOLL_Mid"]) != 0 else 0
+            # Check if squeezing: compare current bw to 20-week mean
+            recent_bw = (w.tail(20)["BOLL_Upper"] - w.tail(20)["BOLL_Lower"]) / w.tail(20)["BOLL_Mid"].replace(0, float("nan"))
+            state = "squeeze" if bool(bw < recent_bw.mean() * 0.85) else "neutral"
+        else:
+            state = "neutral"
+
+        results.append({
+            "symbol": sym.upper(),
+            "alias": alias_map.get(sym, ""),
+            "state": state,
+            "stopPrice": signal.get("stopPrice"),
+            "candles": candles,
+        })
+
+    return results
 
 def _next_prewarm_run(now_local: datetime) -> datetime:
     """计算下一个固定预热时间点（本地时区时间）。"""
