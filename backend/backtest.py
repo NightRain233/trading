@@ -13,6 +13,74 @@ from strategy_versions import DEFAULT_STRATEGY_VERSION_ID
 from strategy_versions import get_strategy_version
 
 
+def evaluate_weekly_bb_breakout(df_weekly: pd.DataFrame, lookback: int = 8) -> Dict[str, object]:
+    """
+    周线BB(20,2)突破策略信号。
+    入场：收盘突破上轨 + 近lookback周有过挤压（带宽收窄）+ 收盘在MA30之上。
+    离场信号：收盘回到上轨内且上轨走平，或跌破MA30。
+    """
+    required = {"Close", "BOLL_Upper", "BOLL_Lower", "BOLL_Mid", "MA30"}
+    if df_weekly is None or df_weekly.empty or not required.issubset(df_weekly.columns):
+        return {"buySignal": False}
+    w = df_weekly.dropna(subset=list(required))
+    if len(w) < max(20, lookback + 1):
+        return {"buySignal": False}
+
+    last = w.iloc[-1]
+    close = float(last["Close"])
+    upper = float(last["BOLL_Upper"])
+    lower = float(last["BOLL_Lower"])
+    ma30 = float(last["MA30"])
+
+    # 趋势过滤：收盘在MA30之上
+    if close <= ma30:
+        return {"buySignal": False}
+
+    # 突破上轨
+    if close <= upper:
+        return {"buySignal": False}
+
+    # 近lookback周内有挤压（带宽低于近期均值的80%）
+    recent = w.iloc[-(lookback + 1):-1]
+    bw = (recent["BOLL_Upper"] - recent["BOLL_Lower"]) / recent["BOLL_Mid"].replace(0, float("nan"))
+    bw_mean = bw.mean()
+    current_bw = (upper - lower) / float(last["BOLL_Mid"]) if float(last["BOLL_Mid"]) != 0 else 0
+    had_squeeze = bw.min() < bw_mean * 0.8 if not bw.empty else False
+
+    if not had_squeeze:
+        return {"buySignal": False}
+
+    return {
+        "buySignal": True,
+        "stopPrice": float(ma30),
+        "targetPrice": None,
+        "strategyVersion": "weekly_bb_breakout_ma30",
+        "poolType": "weeklyBBBreakout",
+    }
+
+
+def evaluate_weekly_bb_exit(df_weekly: pd.DataFrame) -> Dict[str, object]:
+    """离场：收盘回到上轨内且上轨走平（斜率<=0），或跌破MA30。"""
+    required = {"Close", "BOLL_Upper", "MA30"}
+    if df_weekly is None or df_weekly.empty or not required.issubset(df_weekly.columns):
+        return {"exitSignal": False}
+    w = df_weekly.dropna(subset=list(required))
+    if len(w) < 2:
+        return {"exitSignal": False}
+    last = w.iloc[-1]
+    prev = w.iloc[-2]
+    close = float(last["Close"])
+    upper = float(last["BOLL_Upper"])
+    ma30 = float(last["MA30"])
+
+    if close < ma30:
+        return {"exitSignal": True, "exitReason": "below_ma30"}
+    upper_slope = float(last["BOLL_Upper"]) - float(prev["BOLL_Upper"])
+    if close < upper and upper_slope <= 0:
+        return {"exitSignal": True, "exitReason": "bb_upper_flat_reentry"}
+    return {"exitSignal": False}
+
+
 def _date_str(value) -> str:
     return pd.Timestamp(value).date().isoformat()
 
@@ -149,6 +217,7 @@ def _pick_exit(
     max_hold_days: int,
     slippage_bps: float,
     exit_mode: str = "fixed_target",
+    is_weekly_bb: bool = False,
 ) -> Dict[str, object]:
     last_allowed_idx = min(len(df_daily) - 1, entry_idx + max_hold_days - 1)
 
@@ -172,19 +241,28 @@ def _pick_exit(
             }
 
         weekly_window = _weekly_until(df_weekly, df_daily.index[idx])
-        exit_signal = _evaluate_resonance_exit_no_position(df_daily.iloc[: idx + 1], weekly_window)
-        if exit_signal.get("exitLevel") == "hard":
-            return {
-                "exitIdx": idx,
-                "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
-                "exitReason": "hard_exit",
-            }
-        if exit_mode == "warn_exit" and exit_signal.get("exitLevel") == "warn":
-            return {
-                "exitIdx": idx,
-                "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
-                "exitReason": "warn_exit",
-            }
+        if is_weekly_bb:
+            bb_exit = evaluate_weekly_bb_exit(weekly_window)
+            if bb_exit.get("exitSignal"):
+                return {
+                    "exitIdx": idx,
+                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitReason": bb_exit.get("exitReason", "bb_exit"),
+                }
+        else:
+            exit_signal = _evaluate_resonance_exit_no_position(df_daily.iloc[: idx + 1], weekly_window)
+            if exit_signal.get("exitLevel") == "hard":
+                return {
+                    "exitIdx": idx,
+                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitReason": "hard_exit",
+                }
+            if exit_mode == "warn_exit" and exit_signal.get("exitLevel") == "warn":
+                return {
+                    "exitIdx": idx,
+                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitReason": "warn_exit",
+                }
 
     final_row = df_daily.iloc[last_allowed_idx]
     reason = "max_hold" if last_allowed_idx < len(df_daily) - 1 else "end_of_data"
@@ -231,14 +309,19 @@ def run_backtest_for_symbol(
     start_ts = pd.Timestamp(start) if start else None
     end_ts = pd.Timestamp(end) if end else None
 
+    is_weekly_bb = getattr(version, "signal_type", "resonance") == "weekly_bb_breakout"
+
     while signal_idx < len(daily) - 1:
         signal_date = daily.index[signal_idx]
         weekly_window = _weekly_until(weekly, signal_date)
-        signal = _evaluate_resonance_strategy_v2(
-            daily.iloc[: signal_idx + 1],
-            weekly_window,
-            strategy_version=strategy_version,
-        )
+        if is_weekly_bb:
+            signal = evaluate_weekly_bb_breakout(weekly_window)
+        else:
+            signal = _evaluate_resonance_strategy_v2(
+                daily.iloc[: signal_idx + 1],
+                weekly_window,
+                strategy_version=strategy_version,
+            )
 
         if not signal.get("buySignal"):
             signal_idx += 1
@@ -281,6 +364,7 @@ def run_backtest_for_symbol(
             max_hold_days=max_hold_days,
             slippage_bps=slippage_bps,
             exit_mode=version.exit_mode,
+            is_weekly_bb=is_weekly_bb,
         )
 
         exit_idx = int(exit_info["exitIdx"])

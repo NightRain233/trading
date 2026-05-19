@@ -4,6 +4,7 @@ import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
 const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
+const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').then(m => ({ default: m.WeeklyBreakoutPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -100,7 +101,7 @@ function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
-  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs'>('watchlist');
+  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs' | 'wbb'>('watchlist');
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -587,6 +588,10 @@ function App() {
       {activeTab === 'rs' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
           <RsRotationPage />
+        </Suspense>
+      ) : activeTab === 'wbb' ? (
+        <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
+          <WeeklyBreakoutPage />
         </Suspense>
       ) : (
       <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
