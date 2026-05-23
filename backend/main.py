@@ -13,6 +13,7 @@ from backtest import (
     RS_ROTATION_PRESETS,
     list_rs_rotation_presets,
     evaluate_weekly_bb_breakout,
+    evaluate_weekly_bb_pullback,
     evaluate_weekly_bb_exit,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
@@ -659,10 +660,10 @@ def weekly_breakout_scan():
     for sym in symbols:
         daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
         weekly_path = os.path.join(DATA_DIR, f"{sym.upper()}_weekly.parquet")
+        daily = pd.read_parquet(daily_path) if os.path.exists(daily_path) else None
         if not os.path.exists(weekly_path):
-            if not os.path.exists(daily_path):
+            if daily is None:
                 continue
-            daily = pd.read_parquet(daily_path)
             from analysis_data import _calculate_weekly_indicators
             weekly = _calculate_weekly_indicators(daily.copy())
         else:
@@ -671,11 +672,16 @@ def weekly_breakout_scan():
         required = {"Close", "BOLL_Upper", "BOLL_Lower", "BOLL_Mid", "MA30"}
         if not required.issubset(weekly.columns):
             from analysis_data import _calculate_weekly_indicators
-            if os.path.exists(daily_path):
-                daily = pd.read_parquet(daily_path)
+            if daily is not None:
                 weekly = _calculate_weekly_indicators(daily.copy())
 
+        daily_required = {"Close", "EMA20", "MA30"}
+        if daily is not None and not daily_required.issubset(daily.columns):
+            from analysis_data import _calculate_daily_indicators
+            daily = _calculate_daily_indicators(daily.copy())
+
         signal = evaluate_weekly_bb_breakout(weekly)
+        pullback_signal = evaluate_weekly_bb_pullback(weekly, daily)
         exit_sig = evaluate_weekly_bb_exit(weekly)
 
         w = weekly.dropna(subset=["Close"]) if not weekly.empty else weekly
@@ -704,21 +710,29 @@ def weekly_breakout_scan():
         # Determine signal state
         if signal.get("buySignal"):
             state = "breakout"
+            active_signal = signal
+        elif pullback_signal.get("buySignal"):
+            state = "pullback"
+            active_signal = pullback_signal
         elif exit_sig.get("exitSignal"):
             state = "exit"
+            active_signal = {}
         elif last is not None and "BOLL_Upper" in last and "BOLL_Lower" in last and "BOLL_Mid" in last and pd.notna(last.get("BOLL_Upper")):
             bw = (float(last["BOLL_Upper"]) - float(last["BOLL_Lower"])) / float(last["BOLL_Mid"]) if float(last["BOLL_Mid"]) != 0 else 0
             # Check if squeezing: compare current bw to 20-week mean
             recent_bw = (w.tail(20)["BOLL_Upper"] - w.tail(20)["BOLL_Lower"]) / w.tail(20)["BOLL_Mid"].replace(0, float("nan"))
             state = "squeeze" if bool(bw < recent_bw.mean() * 0.85) else "neutral"
+            active_signal = {}
         else:
             state = "neutral"
+            active_signal = {}
 
         results.append({
             "symbol": sym.upper(),
             "alias": alias_map.get(sym, ""),
             "state": state,
-            "stopPrice": signal.get("stopPrice"),
+            "stopPrice": active_signal.get("stopPrice"),
+            "entryType": active_signal.get("entryType"),
             "candles": candles,
         })
 
