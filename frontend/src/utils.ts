@@ -230,16 +230,3 @@ export async function updateAlias(symbol: string, alias: string): Promise<boolea
     return false;
   }
 }
-
-// Helper for calculated EMA (kept for chart interactions if needed)
-export function calculateEMA(candles: any[], period: number) {
-    const k = 2 / (period + 1);
-    let ema = candles[0].close;
-    const result = [{ time: candles[0].time, value: ema }];
-  
-    for (let i = 1; i < candles.length; i++) {
-      ema = candles[i].close * k + ema * (1 - k);
-      result.push({ time: candles[i].time, value: ema });
-    }
-    return result;
-}

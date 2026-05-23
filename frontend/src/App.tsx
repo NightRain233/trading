@@ -28,6 +28,11 @@ import {
 
 const SortableContextAny = SortableContext as any;
 
+const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '周线熊市'];
+const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
+const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
+const trendOrder = ['强势多头', '回调多头', '震荡', '潜在转空', '反弹空头', '强势空头', '潜在转多'];
+
 const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
   const symbols = new Set<string>();
   groupsData.forEach(g => {
@@ -119,10 +124,6 @@ function App() {
   }>({ key: 'price', direction: null });
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-
-  const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '周线熊市'];
-  const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
-  const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 
   // 迷你图状态
   const [chartDataByTimeframe, setChartDataByTimeframe] = useState<Record<Timeframe, Record<string, Candle[]>>>({
@@ -489,15 +490,6 @@ function App() {
             valA = a.weeklyMacdStatus || '';
             valB = b.weeklyMacdStatus || '';
           } else if (sortConfig.key === 'trend') {
-            const trendOrder = [
-              '强势多头',
-              '回调多头',
-              '震荡',
-              '潜在转空',
-              '反弹空头',
-              '强势空头',
-              '潜在转多',
-            ];
             const idxA = trendOrder.indexOf(a.trend);
             const idxB = trendOrder.indexOf(b.trend);
             valA = idxA === -1 ? Number.POSITIVE_INFINITY : idxA;

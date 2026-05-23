@@ -44,10 +44,7 @@ export interface StockData {
   alias?: string;
   _loading?: boolean;
   // Weekly Statuses
-  weeklyMA5?: number;
   weeklyMacdStatus?: '周线牛市' | '周线反弹' | '周线回调' | '周线熊市';
-  weeklyPriceVsMA5?: '线上' | '线下';
-  weeklyMacdHist?: number;
   // Resonance Strategy
   resonanceInPool?: boolean;
   resonanceBuySignal?: boolean;

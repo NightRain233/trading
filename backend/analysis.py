@@ -28,7 +28,7 @@ from analysis_constants import (  # noqa: F401
 )
 from analysis_cache import (  # noqa: F401
     get_symbol_lock, global_download_lock, ta_calculation_lock,
-    symbol_locks, _memory_cache, _memory_cache_lock,
+    symbol_locks, _memory_cache, _memory_cache_lock, _cache_put,
     _normalize_symbols, _extract_ohlcv, _drop_incomplete_ohlcv_rows,
     _market_data_changed, _get_latest_data_timestamp,
     get_cached_batch_summaries, refresh_symbols_async, refresh_symbols_sync_with_timeout,
@@ -56,12 +56,7 @@ logger = logging.getLogger(__name__)
 # 主分析函数
 # ============================================
 
-def analyze_stock(symbol: str) -> Optional[dict]:
-    data = fetch_stock_data(symbol)
-    if data is None:
-        return None
-
-    df, df_weekly = data
+def _build_summary_dict(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) -> Optional[dict]:
     df = _drop_incomplete_ohlcv_rows(df)
     if df is None or len(df) < EMA_LONG_PERIOD:
         return None
@@ -84,9 +79,6 @@ def analyze_stock(symbol: str) -> Optional[dict]:
     resonance = _evaluate_resonance_strategy(df, df_weekly)
     resonance_v2 = _evaluate_resonance_strategy_v2(df, df_weekly)
     resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
-
-    candles = _build_candles(df, rsi_period)
-    weekly_candles = _build_candles(df_weekly, rsi_period=14)
 
     return _make_json_safe({
         "symbol": symbol, "name": symbol,
@@ -112,9 +104,25 @@ def analyze_stock(symbol: str) -> Optional[dict]:
         "resonanceExitSignal": resonance_exit["exitSignal"],
         "resonanceExitLevel": resonance_exit["exitLevel"],
         "resonanceExitReason": resonance_exit["exitReason"],
-        "candles": candles, "weekly_candles": weekly_candles,
-        **weekly_status
+        "_rsi_period": rsi_period,
+        **weekly_status,
     })
+
+
+def analyze_stock(symbol: str) -> Optional[dict]:
+    data = fetch_stock_data(symbol)
+    if data is None:
+        return None
+
+    df, df_weekly = data
+    result = _build_summary_dict(symbol, df, df_weekly)
+    if result is None:
+        return None
+
+    rsi_period = result.pop("_rsi_period", 14)
+    result["candles"] = _build_candles(df, rsi_period)
+    result["weekly_candles"] = _build_candles(df_weekly, rsi_period=14)
+    return result
 
 
 # ============================================
@@ -157,12 +165,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 df_weekly, _ = _load_local_data(weekly_file_path, symbol)
                 if df_weekly is not None and 'MACD_W' in df_weekly.columns:
                     summary = analyze_stock_summary(symbol, df_local, df_weekly)
-                    with _memory_cache_lock:
-                        _memory_cache[symbol] = {
-                            "df": df_local, "df_weekly": df_weekly, "summary": summary,
-                            "timestamp": file_mod_time,
-                            "data_timestamp": _get_latest_data_timestamp(df_local),
-                        }
+                    _cache_put(symbol, {
+                        "df": df_local, "df_weekly": df_weekly, "summary": summary,
+                        "timestamp": file_mod_time,
+                        "data_timestamp": _get_latest_data_timestamp(df_local),
+                    })
                     res_data = (df_local, df_weekly, summary)
                     if is_fresh:
                         return symbol, res_data, load_time, True, "disk_hit"
@@ -177,14 +184,8 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 results[sym] = res
                 if "mem" in hit_type: count_mem_hit += 1
                 else: count_disk_hit += 1
-                if not is_fresh:
-                    file_path = os.path.join(DATA_DIR, f"{sym}.parquet")
-                    df_l, last_u = _load_local_data(file_path, sym)
-                    symbols_to_fetch.append((sym, df_l, last_u))
-                    count_to_fetch += 1
-            else:
-                file_path = os.path.join(DATA_DIR, f"{sym}.parquet")
-                df_l, last_u = _load_local_data(file_path, sym)
+            if not is_fresh:
+                df_l, last_u = (res[0], res[0].index[-1]) if res else (None, None)
                 symbols_to_fetch.append((sym, df_l, last_u))
                 count_to_fetch += 1
 
@@ -266,12 +267,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
         df_weekly.to_parquet(weekly_file_path)
 
         summary = analyze_stock_summary(symbol, df, df_weekly)
-        with _memory_cache_lock:
-            _memory_cache[symbol] = {
-                "df": df, "df_weekly": df_weekly, "summary": summary,
-                "timestamp": time.time(),
-                "data_timestamp": _get_latest_data_timestamp(df),
-            }
+        _cache_put(symbol, {
+            "df": df, "df_weekly": df_weekly, "summary": summary,
+            "timestamp": time.time(),
+            "data_timestamp": _get_latest_data_timestamp(df),
+        })
         return symbol, (df, df_weekly, summary)
 
     process_start = time.time()
@@ -286,53 +286,10 @@ def batch_fetch_and_update(symbols: list) -> dict:
 
 
 def analyze_stock_summary(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) -> Optional[dict]:
-    df = _drop_incomplete_ohlcv_rows(df)
-    if df is None or len(df) < EMA_LONG_PERIOD:
+    result = _build_summary_dict(symbol, df, df_weekly)
+    if result is None:
         return None
-
-    last_row = df.iloc[-1]
-    price = float(last_row['Close'])
-    ema20 = float(last_row['EMA20'])
-    ema50 = float(last_row['EMA50'])
-    adx = float(last_row['ADX']) if 'ADX' in last_row else 0
-
-    rsi_period, rsi = _get_dynamic_rsi(adx, last_row)
-    trend = _analyze_trend(price, ema20, ema50)
-    signal = _get_signal(adx, trend)
-    rsi_status, rsi_overbought, rsi_oversold = _get_rsi_status(rsi, adx, trend)
-
-    prev_close = float(df.iloc[-2]['Close'])
-    change_percent = ((price - prev_close) / prev_close) * 100
-
-    weekly_status = _get_weekly_status(price, df_weekly)
-    resonance = _evaluate_resonance_strategy(df, df_weekly)
-    resonance_v2 = _evaluate_resonance_strategy_v2(df, df_weekly)
-    resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
-
-    return _make_json_safe({
-        "symbol": symbol, "name": symbol,
-        "price": price, "changePercent": change_percent,
-        "ema20": ema20, "ema50": ema50, "adx": adx,
-        "rsi": rsi, "rsiPeriod": rsi_period, "rsiStatus": rsi_status,
-        "rsiOverbought": rsi_overbought, "rsiOversold": rsi_oversold,
-        "trend": trend, "signal": signal,
-        "resonanceInPool": resonance["inPool"],
-        "resonanceBuySignal": resonance["buySignal"],
-        "resonancePoolReason": resonance["poolReason"],
-        "resonanceBuyReason": resonance["buyReason"],
-        "resonanceStrategyVersion": resonance_v2["strategyVersion"],
-        "resonancePoolType": resonance_v2["poolType"],
-        "resonanceEntryScore": resonance_v2["entryScore"],
-        "resonanceRiskScore": resonance_v2["riskScore"],
-        "resonanceRiskLevel": resonance_v2["riskLevel"],
-        "resonanceEntryPrice": resonance_v2["entryPrice"],
-        "resonanceStopPrice": resonance_v2["stopPrice"],
-        "resonanceRiskPercent": resonance_v2["riskPercent"],
-        "resonanceTargetPrice": resonance_v2["targetPrice"],
-        "resonanceRewardRiskRatio": resonance_v2["rewardRiskRatio"],
-        "resonanceExitSignal": resonance_exit["exitSignal"],
-        "resonanceExitLevel": resonance_exit["exitLevel"],
-        "resonanceExitReason": resonance_exit["exitReason"],
-        "candles": [], "weekly_candles": [],
-        **weekly_status
-    })
+    result.pop("_rsi_period", None)
+    result["candles"] = []
+    result["weekly_candles"] = []
+    return result

@@ -14,38 +14,49 @@ interface ChartModalProps {
 type MainInd = 'EMA' | 'BOLL';
 type TFrame = 'D' | 'W';
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const isValidDateString = (value: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+
+const isBusinessDay = (value: unknown): value is Time =>
+  typeof value === 'object' &&
+  value !== null &&
+  isFiniteNumber((value as any).year) &&
+  isFiniteNumber((value as any).month) &&
+  isFiniteNumber((value as any).day);
+
+const isValidTime = (value: unknown): value is Time =>
+  (typeof value === 'string' && isValidDateString(value)) ||
+  (typeof value === 'number' && Number.isFinite(value)) ||
+  isBusinessDay(value);
+
+const isValidCandle = (c: Candle) =>
+  isValidTime(c.time) &&
+  isFiniteNumber(c.open) &&
+  isFiniteNumber(c.high) &&
+  isFiniteNumber(c.low) &&
+  isFiniteNumber(c.close) &&
+  c.close > 0;
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-semibold transition-all duration-200 ${active ? 'bg-zinc-100 text-zinc-950 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   const [stock, setStock] = useState<StockData | null>(initialStock);
   const [timeframe, setTimeframe] = useState<TFrame>('D');
   const [mainInd, setMainInd] = useState<MainInd>('EMA');
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
-
-  const isFiniteNumber = (value: unknown): value is number =>
-    typeof value === 'number' && Number.isFinite(value);
-
-  const isValidDateString = (value: string) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
-
-  const isBusinessDay = (value: unknown): value is Time =>
-    typeof value === 'object' &&
-    value !== null &&
-    isFiniteNumber((value as any).year) &&
-    isFiniteNumber((value as any).month) &&
-    isFiniteNumber((value as any).day);
-
-  const isValidTime = (value: unknown): value is Time =>
-    (typeof value === 'string' && isValidDateString(value)) ||
-    (typeof value === 'number' && Number.isFinite(value)) ||
-    isBusinessDay(value);
-
-  const isValidCandle = (c: Candle) =>
-    isValidTime(c.time) &&
-    isFiniteNumber(c.open) &&
-    isFiniteNumber(c.high) &&
-    isFiniteNumber(c.low) &&
-    isFiniteNumber(c.close) &&
-    c.close > 0;
 
   // Container refs
   const priceRef = useRef<HTMLDivElement>(null);
@@ -259,16 +270,6 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
   }, [stock, timeframe, mainInd, isMobile]);
 
   if (!stock) return null;
-
-  const TabButton = ({ active, onClick, children }: { active: boolean, onClick: () => void, children: React.ReactNode }) => (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-semibold transition-all duration-200 ${active ? 'bg-zinc-100 text-zinc-950 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-        }`}
-    >
-      {children}
-    </button>
-  );
 
   return (
     <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center sm:p-4 animate-fade-in-scale">
