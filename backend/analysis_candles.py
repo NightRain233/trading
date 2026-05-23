@@ -88,7 +88,7 @@ def _build_mini_candles(df: pd.DataFrame, num_days: int = MINI_CHART_DAYS) -> li
     date_col = chart_df.columns[0]
     chart_df['time'] = pd.to_datetime(chart_df[date_col]).dt.strftime('%Y-%m-%d')
 
-    cols = {'time': 'time', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'}
+    cols = {'time': 'time', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}
     optional_cols = {
         'EMA5': 'ema5', 'EMA10': 'ema10', 'EMA20': 'ema20', 'EMA50': 'ema50',
         'MA30': 'ma30',

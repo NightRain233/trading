@@ -2,7 +2,7 @@ import logging
 import os
 import time
 import threading
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from datetime import timezone
 from typing import Optional, Dict, List
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -20,7 +20,8 @@ global_download_lock = threading.Lock()
 # pandas_ta 调用 numba 时有并发冲突，需要全局锁
 ta_calculation_lock = threading.Lock()
 
-_memory_cache = {}
+_MEMORY_CACHE_MAX = 200
+_memory_cache: OrderedDict = OrderedDict()
 _memory_cache_lock = threading.Lock()
 
 _refresh_state_lock = threading.Lock()
@@ -30,6 +31,15 @@ _refresh_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="swr-re
 
 
 def get_symbol_lock(symbol: str) -> threading.Lock:
+    return symbol_locks[symbol.upper()]
+
+
+def _cache_put(symbol: str, entry: dict) -> None:
+    with _memory_cache_lock:
+        _memory_cache.pop(symbol, None)
+        _memory_cache[symbol] = entry
+        if len(_memory_cache) > _MEMORY_CACHE_MAX:
+            _memory_cache.popitem(last=False)
     return symbol_locks[symbol.upper()]
 
 
@@ -174,57 +184,53 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
     latest_mtime: Optional[float] = None
     latest_data_ts: Optional[float] = None
 
+    mem_hits = []
+    disk_needed = []
+
     for symbol in normalized:
         with _memory_cache_lock:
             entry = _memory_cache.get(symbol)
-
         if entry:
             summary = entry.get("summary")
             timestamp = entry.get("timestamp")
             data_timestamp = entry.get("data_timestamp") or _get_latest_data_timestamp(entry.get("df"))
             if summary and timestamp is not None:
-                results[symbol] = summary
-                latest_mtime = _max_timestamp(latest_mtime, float(timestamp))
-                latest_data_ts = _max_timestamp(latest_data_ts, data_timestamp)
-                age = now_ts - float(timestamp)
-                if age < CACHE_DURATION_SECONDS:
-                    fresh_symbols.append(symbol)
-                else:
-                    stale_symbols.append(symbol)
-                    if age > ALLOW_STALE_SECONDS:
-                        very_stale_symbols.append(symbol)
+                mem_hits.append((symbol, summary, float(timestamp), data_timestamp))
                 continue
+        disk_needed.append(symbol)
 
+    def _load_from_disk(symbol):
         file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
         weekly_file_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
-
         from analysis_data import _load_local_data
         df_local, _ = _load_local_data(file_path, symbol)
         if df_local is None or df_local.empty:
-            missing_symbols.append(symbol)
-            continue
+            return symbol, None
         if "EMA20" not in df_local.columns or "EMA5" not in df_local.columns:
-            missing_symbols.append(symbol)
-            continue
-
+            return symbol, None
         df_weekly, _ = _load_local_data(weekly_file_path, symbol)
         if df_weekly is None or df_weekly.empty or "MACD_W" not in df_weekly.columns:
-            missing_symbols.append(symbol)
-            continue
-
+            return symbol, None
         from analysis import analyze_stock_summary
         summary = analyze_stock_summary(symbol, df_local, df_weekly)
         if not summary:
-            missing_symbols.append(symbol)
-            continue
-
+            return symbol, None
         file_mod_time = os.path.getmtime(file_path) if os.path.exists(file_path) else now_ts
         data_timestamp = _get_latest_data_timestamp(df_local)
-        results[symbol] = summary
-        latest_mtime = _max_timestamp(latest_mtime, float(file_mod_time))
-        latest_data_ts = _max_timestamp(latest_data_ts, data_timestamp)
+        _cache_put(symbol, {
+            "df": df_local, "df_weekly": df_weekly, "summary": summary,
+            "timestamp": float(file_mod_time), "data_timestamp": data_timestamp,
+        })
+        return symbol, (summary, float(file_mod_time), data_timestamp)
 
-        age = now_ts - float(file_mod_time)
+    with ThreadPoolExecutor(max_workers=min(8, len(disk_needed) or 1)) as ex:
+        disk_results = list(ex.map(_load_from_disk, disk_needed))
+
+    def _classify(symbol, timestamp, data_timestamp):
+        nonlocal latest_mtime, latest_data_ts
+        latest_mtime = _max_timestamp(latest_mtime, timestamp)
+        latest_data_ts = _max_timestamp(latest_data_ts, data_timestamp)
+        age = now_ts - timestamp
         if age < CACHE_DURATION_SECONDS:
             fresh_symbols.append(symbol)
         else:
@@ -232,11 +238,17 @@ def get_cached_batch_summaries(symbols: List[str]) -> dict:
             if age > ALLOW_STALE_SECONDS:
                 very_stale_symbols.append(symbol)
 
-        with _memory_cache_lock:
-            _memory_cache[symbol] = {
-                "df": df_local, "df_weekly": df_weekly, "summary": summary,
-                "timestamp": float(file_mod_time), "data_timestamp": data_timestamp,
-            }
+    for symbol, summary, timestamp, data_timestamp in mem_hits:
+        results[symbol] = summary
+        _classify(symbol, timestamp, data_timestamp)
+
+    for symbol, payload in disk_results:
+        if payload is None:
+            missing_symbols.append(symbol)
+        else:
+            summary, file_mod_time, data_timestamp = payload
+            results[symbol] = summary
+            _classify(symbol, file_mod_time, data_timestamp)
 
     return {
         "results": results,

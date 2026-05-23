@@ -22,6 +22,13 @@ from analysis_cache import (
 logger = logging.getLogger(__name__)
 
 
+def _find_col(columns, prefix: str, exclude_prefixes=()) -> str | None:
+    for c in columns:
+        if c.startswith(prefix) and not any(c.startswith(e) for e in exclude_prefixes):
+            return c
+    return None
+
+
 def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame], Optional[datetime]]:
     if not os.path.exists(file_path):
         return None, None
@@ -80,7 +87,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['MA30'] = ta.sma(df['Close'], length=30)
 
         adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=ADX_PERIOD)
-        adx_col = next((c for c in (adx_df.columns if adx_df is not None and not adx_df.empty else []) if c.startswith('ADX_')), None)
+        adx_col = _find_col(adx_df.columns if adx_df is not None and not adx_df.empty else [], 'ADX_')
         df['ADX'] = adx_df[adx_col] if adx_col else 0
 
         for period in RSI_PERIODS:
@@ -91,9 +98,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         bbands = ta.bbands(df['Close'], length=BOLL_PERIOD, std=BOLL_STD)
         if bbands is not None and not bbands.empty:
-            upper = next((c for c in bbands.columns if c.startswith('BBU_')), None)
-            mid = next((c for c in bbands.columns if c.startswith('BBM_')), None)
-            lower = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+            upper, mid, lower = _find_col(bbands.columns, 'BBU_'), _find_col(bbands.columns, 'BBM_'), _find_col(bbands.columns, 'BBL_')
             if upper and mid and lower:
                 df['BOLL_Upper'] = bbands[upper]
                 df['BOLL_Mid'] = bbands[mid]
@@ -105,8 +110,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
         if stoch is not None and not stoch.empty:
-            k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
-            d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+            k_col, d_col = _find_col(stoch.columns, 'STOCHk_'), _find_col(stoch.columns, 'STOCHd_')
             if k_col and d_col:
                 df['K'] = stoch[k_col]
                 df['D'] = stoch[d_col]
@@ -118,9 +122,9 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         macd_df = ta.macd(df['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
         if macd_df is not None and not macd_df.empty:
-            dif = next((c for c in macd_df.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
-            dea = next((c for c in macd_df.columns if c.startswith('MACDs_')), None)
-            hist = next((c for c in macd_df.columns if c.startswith('MACDh_')), None)
+            dif = _find_col(macd_df.columns, 'MACD_', exclude_prefixes=('MACDs_', 'MACDh_'))
+            dea = _find_col(macd_df.columns, 'MACDs_')
+            hist = _find_col(macd_df.columns, 'MACDh_')
             if dif and dea and hist:
                 df['MACD_DIF'] = macd_df[dif]
                 df['MACD_DEA'] = macd_df[dea]
@@ -143,7 +147,6 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
             'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
         }).dropna(subset=['Open', 'High', 'Low', 'Close'])
 
-        from analysis_constants import EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD
         df_weekly['MA5_W'] = ta.sma(df_weekly['Close'], length=5)
         df_weekly['EMA5'] = ta.ema(df_weekly['Close'], length=EMA_FAST_5)
         df_weekly['EMA10'] = ta.ema(df_weekly['Close'], length=EMA_FAST_10)
@@ -153,9 +156,9 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         macd_w = ta.macd(df_weekly['Close'], fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL)
         if macd_w is not None and not macd_w.empty:
-            dif = next((c for c in macd_w.columns if c.startswith('MACD_') and not c.startswith('MACDs_') and not c.startswith('MACDh_')), None)
-            dea = next((c for c in macd_w.columns if c.startswith('MACDs_')), None)
-            hist = next((c for c in macd_w.columns if c.startswith('MACDh_')), None)
+            dif = _find_col(macd_w.columns, 'MACD_', exclude_prefixes=('MACDs_', 'MACDh_'))
+            dea = _find_col(macd_w.columns, 'MACDs_')
+            hist = _find_col(macd_w.columns, 'MACDh_')
             if dif and dea and hist:
                 df_weekly['MACD_W'] = macd_w[dif]
                 df_weekly['MACD_Signal_W'] = macd_w[dea]
@@ -172,9 +175,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
         bbands = ta.bbands(df_weekly['Close'], length=BOLL_PERIOD, std=BOLL_STD)
         if bbands is not None and not bbands.empty:
-            upper = next((c for c in bbands.columns if c.startswith('BBU_')), None)
-            mid = next((c for c in bbands.columns if c.startswith('BBM_')), None)
-            lower = next((c for c in bbands.columns if c.startswith('BBL_')), None)
+            upper, mid, lower = _find_col(bbands.columns, 'BBU_'), _find_col(bbands.columns, 'BBM_'), _find_col(bbands.columns, 'BBL_')
             if upper and mid and lower:
                 df_weekly['BOLL_Upper'] = bbands[upper]
                 df_weekly['BOLL_Mid'] = bbands[mid]
@@ -187,8 +188,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         stoch = ta.stoch(df_weekly['High'], df_weekly['Low'], df_weekly['Close'],
                          k=KDJ_PERIOD, d=KDJ_SIGNAL_K, smooth_k=KDJ_SIGNAL_D)
         if stoch is not None and not stoch.empty:
-            k_col = next((c for c in stoch.columns if c.startswith('STOCHk_')), None)
-            d_col = next((c for c in stoch.columns if c.startswith('STOCHd_')), None)
+            k_col, d_col = _find_col(stoch.columns, 'STOCHk_'), _find_col(stoch.columns, 'STOCHd_')
             if k_col and d_col:
                 df_weekly['K'] = stoch[k_col]
                 df_weekly['D'] = stoch[d_col]
