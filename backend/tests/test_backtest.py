@@ -6,6 +6,7 @@ import pandas as pd
 
 from backtest import load_universe_symbols
 from backtest import annotate_relative_strength
+from backtest import evaluate_weekly_bb_pullback
 from backtest import run_backtest_for_symbol
 from backtest import resolve_market_settings
 from backtest import simulate_closed_trade_portfolio
@@ -94,6 +95,52 @@ def _build_backtest_weekly_df() -> pd.DataFrame:
     )
 
 
+def _build_weekly_bb_pullback_df(latest_low: float = 101.0, latest_close: float = 103.0) -> pd.DataFrame:
+    dates = pd.date_range("2025-01-05", periods=12, freq="W")
+    close = [100.0] * len(dates)
+    low = [99.0] * len(dates)
+    upper = [110.0] * len(dates)
+    mid = [100.0] * len(dates)
+    lower = [90.0] * len(dates)
+    ma30 = [95.0] * len(dates)
+
+    close[-4] = 112.0
+    low[-1] = latest_low
+    close[-1] = latest_close
+
+    return pd.DataFrame(
+        {
+            "Open": close,
+            "High": [max(c, u) for c, u in zip(close, upper)],
+            "Low": low,
+            "Close": close,
+            "BOLL_Upper": upper,
+            "BOLL_Mid": mid,
+            "BOLL_Lower": lower,
+            "MA30": ma30,
+        },
+        index=dates,
+    )
+
+
+def _build_daily_pullback_confirmation_df(close: float = 105.0, pullback_low: float | None = None) -> pd.DataFrame:
+    dates = pd.date_range("2025-03-17", periods=5, freq="B")
+    lows = [close - 1.0] * len(dates)
+    if pullback_low is not None:
+        lows[-2] = pullback_low
+    return pd.DataFrame(
+        {
+            "Open": [close] * len(dates),
+            "High": [close + 1.0] * len(dates),
+            "Low": lows,
+            "Close": [close] * len(dates),
+            "EMA20": [103.0] * len(dates),
+            "MA30": [102.0] * len(dates),
+        },
+        index=dates,
+    )
+
+
 def _build_market_regime_df(bullish: bool = True) -> pd.DataFrame:
     dates = pd.date_range("2025-01-01", periods=36, freq="B")
     if bullish:
@@ -115,6 +162,36 @@ def _build_market_regime_df(bullish: bool = True) -> pd.DataFrame:
 
 
 class BacktestTests(unittest.TestCase):
+    def test_weekly_bb_pullback_confirms_after_prior_breakout(self):
+        weekly = _build_weekly_bb_pullback_df()
+        daily = _build_daily_pullback_confirmation_df()
+
+        signal = evaluate_weekly_bb_pullback(weekly, daily)
+
+        self.assertTrue(signal["buySignal"])
+        self.assertEqual(signal["poolType"], "weeklyBBPullback")
+        self.assertEqual(signal["strategyVersion"], "weekly_bb_breakout_ma30")
+        self.assertEqual(signal["entryType"], "weeklyPullback")
+        self.assertAlmostEqual(signal["stopPrice"], 95.0)
+
+    def test_weekly_bb_pullback_accepts_daily_ema20_pullback_after_prior_breakout(self):
+        weekly = _build_weekly_bb_pullback_df(latest_low=108.0, latest_close=108.0)
+        daily = _build_daily_pullback_confirmation_df(close=105.0, pullback_low=103.5)
+
+        signal = evaluate_weekly_bb_pullback(weekly, daily)
+
+        self.assertTrue(signal["buySignal"])
+        self.assertEqual(signal["entryType"], "dailyPullback")
+        self.assertEqual(signal["poolType"], "weeklyBBPullback")
+
+    def test_weekly_bb_pullback_rejects_without_daily_reclaim(self):
+        weekly = _build_weekly_bb_pullback_df()
+        daily = _build_daily_pullback_confirmation_df(close=101.0)
+
+        signal = evaluate_weekly_bb_pullback(weekly, daily)
+
+        self.assertFalse(signal["buySignal"])
+
     def test_backtest_enters_next_bar_and_exits_on_target(self):
         daily = _build_backtest_daily_df()
         weekly = _build_backtest_weekly_df()

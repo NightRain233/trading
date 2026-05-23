@@ -59,6 +59,77 @@ def evaluate_weekly_bb_breakout(df_weekly: pd.DataFrame, lookback: int = 8) -> D
     }
 
 
+def evaluate_weekly_bb_pullback(
+    df_weekly: pd.DataFrame,
+    df_daily: Optional[pd.DataFrame] = None,
+    breakout_lookback: int = 8,
+    pullback_tolerance_pct: float = 3.0,
+    daily_pullback_lookback: int = 10,
+    daily_pullback_tolerance_pct: float = 1.0,
+) -> Dict[str, object]:
+    """
+    周线BB突破后的回踩确认入场。
+    资格：最近breakout_lookback周出现过上轨突破，当前仍在MA30上方。
+    触发：周线回踩周BB中轨/MA20附近后收回，或日线回踩EMA20后收回。
+    """
+    required_weekly = {"Close", "Low", "BOLL_Upper", "BOLL_Lower", "BOLL_Mid", "MA30"}
+    if df_weekly is None or df_weekly.empty or not required_weekly.issubset(df_weekly.columns):
+        return {"buySignal": False}
+    w = df_weekly.dropna(subset=list(required_weekly))
+    if len(w) < breakout_lookback + 1:
+        return {"buySignal": False}
+
+    last = w.iloc[-1]
+    close = float(last["Close"])
+    low = float(last["Low"])
+    mid = float(last["BOLL_Mid"])
+    ma30 = float(last["MA30"])
+    if mid <= 0 or close <= ma30:
+        return {"buySignal": False}
+
+    recent = w.iloc[-(breakout_lookback + 1):-1]
+    had_prior_breakout = bool(
+        ((recent["Close"] > recent["BOLL_Upper"]) & (recent["Close"] > recent["MA30"])).any()
+    )
+    if not had_prior_breakout:
+        return {"buySignal": False}
+
+    pullback_limit = mid * (1 + pullback_tolerance_pct / 100)
+    touched_mid_zone = low <= pullback_limit
+    reclaimed_mid = close >= mid
+    weekly_pullback_confirmed = touched_mid_zone and reclaimed_mid
+    daily_pullback_confirmed = False
+
+    if df_daily is not None:
+        required_daily = {"Close", "EMA20", "MA30"}
+        if df_daily.empty or not required_daily.issubset(df_daily.columns):
+            return {"buySignal": False}
+        d = df_daily.dropna(subset=list(required_daily))
+        if d.empty:
+            return {"buySignal": False}
+        latest_daily = d.iloc[-1]
+        daily_close = float(latest_daily["Close"])
+        if daily_close <= float(latest_daily["EMA20"]) or daily_close <= float(latest_daily["MA30"]):
+            return {"buySignal": False}
+        recent_daily = d.tail(daily_pullback_lookback)
+        daily_pullback_limit = recent_daily["EMA20"] * (1 + daily_pullback_tolerance_pct / 100)
+        daily_pullback_confirmed = bool((recent_daily["Low"] <= daily_pullback_limit).any())
+    elif not weekly_pullback_confirmed:
+        return {"buySignal": False}
+
+    if not (weekly_pullback_confirmed or daily_pullback_confirmed):
+        return {"buySignal": False}
+
+    return {
+        "buySignal": True,
+        "stopPrice": float(ma30),
+        "targetPrice": None,
+        "strategyVersion": "weekly_bb_breakout_ma30",
+        "poolType": "weeklyBBPullback",
+        "entryType": "weeklyPullback" if weekly_pullback_confirmed else "dailyPullback",
+    }
+
+
 def evaluate_weekly_bb_exit(df_weekly: pd.DataFrame) -> Dict[str, object]:
     """离场：收盘回到上轨内且上轨走平（斜率<=0），或跌破MA30。"""
     required = {"Close", "BOLL_Upper", "MA30"}
@@ -314,11 +385,14 @@ def run_backtest_for_symbol(
     while signal_idx < len(daily) - 1:
         signal_date = daily.index[signal_idx]
         weekly_window = _weekly_until(weekly, signal_date)
+        daily_window = daily.iloc[: signal_idx + 1]
         if is_weekly_bb:
             signal = evaluate_weekly_bb_breakout(weekly_window)
+            if not signal.get("buySignal"):
+                signal = evaluate_weekly_bb_pullback(weekly_window, daily_window)
         else:
             signal = _evaluate_resonance_strategy_v2(
-                daily.iloc[: signal_idx + 1],
+                daily_window,
                 weekly_window,
                 strategy_version=strategy_version,
             )

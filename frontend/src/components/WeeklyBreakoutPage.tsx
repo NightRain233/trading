@@ -24,19 +24,25 @@ interface WeeklyCandle {
 interface BreakoutItem {
   symbol: string;
   alias: string;
-  state: 'breakout' | 'squeeze' | 'exit' | 'neutral';
+  state: 'breakout' | 'pullback' | 'squeeze' | 'exit' | 'neutral';
   stopPrice: number | null;
+  entryType?: 'weeklyPullback' | 'dailyPullback' | null;
   candles: WeeklyCandle[];
 }
 
 const STATE_LABEL: Record<string, string> = {
-  breakout: '突破', squeeze: '挤压', exit: '离场', neutral: '观望',
+  breakout: '突破', pullback: '回踩', squeeze: '挤压', exit: '离场', neutral: '观望',
 };
 const STATE_COLOR: Record<string, string> = {
   breakout: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+  pullback: 'text-sky-400 border-sky-500/40 bg-sky-500/10',
   squeeze: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
   exit: 'text-red-400 border-red-500/40 bg-red-500/10',
   neutral: 'text-zinc-500 border-zinc-700 bg-zinc-800/30',
+};
+const ENTRY_TYPE_LABEL: Record<string, string> = {
+  weeklyPullback: '周回踩',
+  dailyPullback: '日回踩',
 };
 
 function MiniWeeklyChart({ candles, showMid, showMacd, showMa5 }: { candles: WeeklyCandle[]; showMid: boolean; showMacd: boolean; showMa5: boolean }) {
@@ -150,7 +156,7 @@ export function WeeklyBreakoutPage() {
   const [showMid, setShowMid] = useState(false);
   const [showMacd, setShowMacd] = useState(false);
   const [showMa5, setShowMa5] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'breakout' | 'squeeze' | 'exit'>('all');
+  const [filter, setFilter] = useState<'all' | 'breakout' | 'pullback' | 'squeeze' | 'exit'>('all');
 
   async function load() {
     setLoading(true);
@@ -164,7 +170,7 @@ export function WeeklyBreakoutPage() {
 
   useEffect(() => { load(); }, []);
 
-  const ORDER: BreakoutItem['state'][] = ['breakout', 'squeeze', 'exit', 'neutral'];
+  const ORDER: BreakoutItem['state'][] = ['breakout', 'pullback', 'squeeze', 'exit', 'neutral'];
   const displayed = items
     .filter(i => filter === 'all' || i.state === filter)
     .sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state));
@@ -172,9 +178,9 @@ export function WeeklyBreakoutPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <span className="text-sm font-semibold text-zinc-300">周线BB突破扫描</span>
+        <span className="text-sm font-semibold text-zinc-300">周线BB突破/回踩扫描</span>
         <div className="flex gap-1.5">
-          {(['all', 'breakout', 'squeeze', 'exit'] as const).map(f => (
+          {(['all', 'breakout', 'pullback', 'squeeze', 'exit'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -235,6 +241,11 @@ export function WeeklyBreakoutPage() {
               <div className="flex items-center gap-2">
                 {item.stopPrice != null && (
                   <span className="text-[10px] text-zinc-500 font-mono">止损 {item.stopPrice.toFixed(3)}</span>
+                )}
+                {item.entryType && (
+                  <span className="text-[10px] text-sky-400/80 font-medium">
+                    {ENTRY_TYPE_LABEL[item.entryType]}
+                  </span>
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${STATE_COLOR[item.state]}`}>
                   {STATE_LABEL[item.state]}
