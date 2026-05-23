@@ -29,3 +29,9 @@ backend/cache.pkl
 # --- Docker ---
 .docker/
 backend/tests/__pycache__/
+
+# --- Personal Data ---
+backend/watchlist.json
+backend/backtest_results/
+outputs/
+data/
