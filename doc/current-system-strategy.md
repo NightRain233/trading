@@ -16,12 +16,13 @@
 
 ## 2. 策略结构
 
-当前代码里有两层核心逻辑：
+当前代码里有三层核心逻辑：
 
 1. 通用趋势分析层
-2. `resonance_v1` 共振策略层
+2. `resonance_v1` 共振策略层（基础版，固定参数）
+3. `resonance_v2` 共振策略层（当前主力，支持多版本配置、评分系统、ATR 风险管理）
 
-前者描述市场状态，后者更接近“筛池 + 买点 + 风险提示”。
+前者描述市场状态，后两者更接近”筛池 + 买点 + 风险提示”。v2 详细说明见 `docs/resonance-v2-strategy.md`。
 
 ## 3. 通用趋势分析层
 
@@ -99,9 +100,30 @@
 
 这层主要承担中周期背景过滤作用。
 
-## 5. `resonance_v1` 共振策略
+## 5. 共振策略层
 
-这是当前系统中最接近“可操作策略”的部分，核心输出三类状态：
+系统同时实现了 v1 和 v2 两个版本，实时行情页使用 v2（默认版本 `resonance_v2_atr_1_5`）。
+
+### 5.0 v2 新增字段
+
+v2 在 v1 基础上新增：
+
+- `resonanceStrategyVersion`：当前使用的策略版本 ID
+- `resonancePoolType`：入池类型，`earlyTrend`（早期趋势）/ `establishedTrend`（成熟趋势）/ `none`
+- `resonanceEntryScore`：入场质量分（0-100）
+- `resonanceRiskScore`：风险评分（0-100，越高越低风险）
+- `resonanceRiskLevel`：风险等级，`low` / `medium` / `high`
+- `resonanceEntryPrice`：建议入场价（当前收盘）
+- `resonanceStopPrice`：ATR 止损价
+- `resonanceRiskPercent`：止损距离占入场价的百分比
+- `resonanceTargetPrice`：ATR 目标价（无固定目标时为 null）
+- `resonanceRewardRiskRatio`：盈亏比
+
+v2 完整逻辑见 `docs/resonance-v2-strategy.md`。
+
+### 5.1 `resonance_v1` 共振策略
+
+这是基础版本，核心输出三类状态：
 
 1. 是否进入观察池
 2. 是否出现买点

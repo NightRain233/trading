@@ -8,8 +8,10 @@
 
 后端 API：
 ```
-GET /api/backtest/rs-rotation/holdings?preset=rs_rotation_a_share
+GET /api/rs-rotation/holdings
 ```
+
+注：`preset` 参数当前不生效，接口固定返回 `rs_rotation_a_share` 预设的持仓。
 
 返回当前再平衡日的 top5 持仓及各标的 RS 分数。
 
