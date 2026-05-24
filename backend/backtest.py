@@ -4,6 +4,8 @@ import os
 from collections import Counter
 from typing import Dict, List, Optional
 
+import pandas_ta as ta
+
 import pandas as pd
 
 from analysis import DATA_DIR
@@ -130,6 +132,42 @@ def evaluate_weekly_bb_pullback(
     }
 
 
+def evaluate_weekly_bb_pullback_atr_stop(
+    df_weekly: pd.DataFrame,
+    df_daily: Optional[pd.DataFrame] = None,
+    atr_stop_multiplier: float = 1.5,
+    breakout_lookback: int = 8,
+    pullback_tolerance_pct: float = 3.0,
+    daily_pullback_lookback: int = 10,
+    daily_pullback_tolerance_pct: float = 1.0,
+) -> Dict[str, object]:
+    """Pullback-only variant: same as evaluate_weekly_bb_pullback but stop = entry - atr_stop_multiplier * ATR."""
+    sig = evaluate_weekly_bb_pullback(
+        df_weekly, df_daily,
+        breakout_lookback=breakout_lookback,
+        pullback_tolerance_pct=pullback_tolerance_pct,
+        daily_pullback_lookback=daily_pullback_lookback,
+        daily_pullback_tolerance_pct=daily_pullback_tolerance_pct,
+    )
+    if not sig.get("buySignal"):
+        return sig
+    # ATR stop: use daily ATR if available, else fall back to MA30
+    atr_stop = None
+    if df_daily is not None and not df_daily.empty and "ATR" in df_daily.columns and "Close" in df_daily.columns:
+        d = df_daily.dropna(subset=["ATR", "Close"])
+        if not d.empty:
+            close = float(d.iloc[-1]["Close"])
+            atr = float(d.iloc[-1]["ATR"])
+            if atr > 0:
+                atr_stop = close - atr_stop_multiplier * atr
+    return {
+        **sig,
+        "stopPrice": atr_stop if atr_stop is not None else sig.get("stopPrice"),
+        "strategyVersion": "weekly_bb_pullback_atr_stop",
+        "poolType": "weeklyBBPullback",
+    }
+
+
 def evaluate_weekly_bb_exit(df_weekly: pd.DataFrame) -> Dict[str, object]:
     """离场：收盘回到上轨内且上轨走平（斜率<=0），或跌破MA30。"""
     required = {"Close", "BOLL_Upper", "MA30"}
@@ -179,6 +217,96 @@ def replay_weekly_bb_markers(df_weekly: pd.DataFrame) -> List[Dict[str, object]]
                 markers.append({"time": ts, "type": "sell_ma30" if reason == "below_ma30" else "sell_bb_flat", "price": close})
                 in_position = False
     return markers
+
+
+def run_supertrend_backtest(
+    symbol: str,
+    df_daily: pd.DataFrame,
+    length: int = 7,
+    multiplier: float = 3.0,
+    fee_bps: float = 5.0,
+    slippage_bps: float = 5.0,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    filter_weekly_df: Optional[pd.DataFrame] = None,
+) -> List[Dict[str, object]]:
+    if df_daily is None or df_daily.empty:
+        return []
+    daily = df_daily.sort_index().copy()
+    st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=length, multiplier=multiplier)
+    if st is None or st.empty:
+        return []
+    dir_col = [c for c in st.columns if c.startswith("SUPERTd_")]
+    val_col = [c for c in st.columns if c.startswith("SUPERT_") and not c.startswith("SUPERTd_") and not c.startswith("SUPERTs_") and not c.startswith("SUPERTl_") and not c.startswith("SUPERTu_")]
+    if not dir_col or not val_col:
+        return []
+    daily["_st_dir"] = st[dir_col[0]]
+    daily["_st_val"] = st[val_col[0]]
+
+    # 周线 SuperTrend 方向（用于共振过滤）
+    weekly_dir: Optional[pd.Series] = None
+    if filter_weekly_df is not None and not filter_weekly_df.empty:
+        wst = ta.supertrend(filter_weekly_df["High"], filter_weekly_df["Low"], filter_weekly_df["Close"], length=length, multiplier=multiplier)
+        if wst is not None and not wst.empty:
+            wdir_col = [c for c in wst.columns if c.startswith("SUPERTd_")]
+            if wdir_col:
+                weekly_dir = wst[wdir_col[0]].sort_index()
+
+    def _weekly_bullish(date) -> bool:
+        if weekly_dir is None:
+            return True
+        w = weekly_dir[weekly_dir.index <= date]
+        return not w.empty and float(w.iloc[-1]) == 1
+
+    start_ts = pd.Timestamp(start) if start else None
+    end_ts = pd.Timestamp(end) if end else None
+    trades: List[Dict[str, object]] = []
+    in_position = False
+    entry_idx = None
+    entry_price = None
+    stop_price = None
+
+    for idx in range(1, len(daily)):
+        row = daily.iloc[idx]
+        prev = daily.iloc[idx - 1]
+        date = daily.index[idx]
+
+        if in_position:
+            # 止损：当日 low 触及 supertrend 线
+            cur_stop = float(row["_st_val"]) if pd.notna(row["_st_val"]) else stop_price
+            if float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1:
+                exit_price = _price_with_bps(min(float(row["Open"]), cur_stop), slippage_bps, "sell")
+                gross = (exit_price - entry_price) / entry_price * 100
+                trades.append({
+                    "symbol": symbol.upper(),
+                    "assetClass": classify_asset(symbol),
+                    "entryDate": _date_str(daily.index[entry_idx]),
+                    "exitDate": _date_str(date),
+                    "entryPrice": entry_price,
+                    "exitPrice": exit_price,
+                    "stopPrice": cur_stop,
+                    "returnPct": gross - fee_bps * 2 / 100,
+                    "holdingDays": idx - entry_idx + 1,
+                    "exitReason": "st_flip" if float(row["_st_dir"]) == -1 else "stop",
+                    "strategyVersion": "supertrend",
+                    "poolType": "supertrend",
+                })
+                in_position = False
+        else:
+            # 买入：方向从 -1 翻 +1，且周线方向为多（共振过滤）
+            if float(prev["_st_dir"]) == -1 and float(row["_st_dir"]) == 1 and _weekly_bullish(date):
+                entry_date = date
+                if start_ts and entry_date < start_ts:
+                    continue
+                if end_ts and entry_date > end_ts:
+                    break
+                raw_entry = float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"])
+                entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
+                stop_price = float(row["_st_val"]) if pd.notna(row["_st_val"]) else raw_entry * 0.95
+                entry_idx = idx
+                in_position = True
+
+    return trades
 
 
 def _date_str(value) -> str:
@@ -243,18 +371,25 @@ def _market_regime_allows_entry(
 ) -> bool:
     if market_filter == "none":
         return True
-    if market_filter != "bullish_ema":
-        raise ValueError(f"Unknown market filter: {market_filter}")
     if market_regime_daily is None or market_regime_daily.empty:
-        return True
-
-    required_cols = {"Close", "EMA20", "EMA50"}
-    if not required_cols.issubset(market_regime_daily.columns):
         return True
 
     market_window = market_regime_daily.sort_index()
     market_window = market_window[market_window.index <= signal_date]
     if market_window.empty:
+        return True
+
+    if market_filter == "monthly_macd":
+        monthly = market_window.resample("ME").last()
+        if monthly.empty or "MACD_DIF" not in monthly.columns or "MACD_DEA" not in monthly.columns:
+            return True
+        return float(monthly.iloc[-1]["MACD_DIF"]) > float(monthly.iloc[-1]["MACD_DEA"])
+
+    if market_filter != "bullish_ema":
+        raise ValueError(f"Unknown market filter: {market_filter}")
+
+    required_cols = {"Close", "EMA20", "EMA50"}
+    if not required_cols.issubset(market_regime_daily.columns):
         return True
 
     row = market_window.iloc[-1]
@@ -410,12 +545,15 @@ def run_backtest_for_symbol(
     end_ts = pd.Timestamp(end) if end else None
 
     is_weekly_bb = getattr(version, "signal_type", "resonance") == "weekly_bb_breakout"
+    is_weekly_bb_pullback_atr = getattr(version, "signal_type", "resonance") == "weekly_bb_pullback_atr"
 
     while signal_idx < len(daily) - 1:
         signal_date = daily.index[signal_idx]
         weekly_window = _weekly_until(weekly, signal_date)
         daily_window = daily.iloc[: signal_idx + 1]
-        if is_weekly_bb:
+        if is_weekly_bb_pullback_atr:
+            signal = evaluate_weekly_bb_pullback_atr_stop(weekly_window, daily_window, atr_stop_multiplier=version.atr_stop_multiplier)
+        elif is_weekly_bb:
             signal = evaluate_weekly_bb_breakout(weekly_window)
             if not signal.get("buySignal"):
                 signal = evaluate_weekly_bb_pullback(weekly_window, daily_window)
@@ -467,7 +605,7 @@ def run_backtest_for_symbol(
             max_hold_days=max_hold_days,
             slippage_bps=slippage_bps,
             exit_mode=version.exit_mode,
-            is_weekly_bb=is_weekly_bb,
+            is_weekly_bb=is_weekly_bb or is_weekly_bb_pullback_atr,
         )
 
         exit_idx = int(exit_info["exitIdx"])
@@ -1594,7 +1732,7 @@ def main() -> None:
         "symbols": symbols,
         "start": args.start,
         "end": args.end,
-        "benchmarkSymbolCount": benchmark.get("symbolCount"),
+        "benchmarkSymbolCount": report.get("benchmark", {}).get("symbolCount"),
         "portfolioMaxPositions": args.portfolio_max_positions,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))

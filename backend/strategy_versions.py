@@ -17,7 +17,7 @@ class StrategyVersion:
     pool_type_filter: Optional[str] = None
     exit_mode: str = "fixed_target"
     relative_strength_bucket_filter: Optional[str] = None
-    signal_type: str = "resonance"  # "resonance" | "weekly_bb_breakout"
+    signal_type: str = "resonance"  # "resonance" | "weekly_bb_breakout" | "weekly_bb_pullback_atr"
 
 
 DEFAULT_STRATEGY_VERSION_ID = "resonance_v2_atr_1_5"
@@ -139,6 +139,26 @@ STRATEGY_VERSIONS = {
         asset_class_filter="etf",
         pool_type_filter="establishedTrend",
         relative_strength_bucket_filter="top20,top50",
+    ),
+    "weekly_bb_pullback_atr_spy_monthly_macd": StrategyVersion(
+        id="weekly_bb_pullback_atr_spy_monthly_macd",
+        label="周线BB回踩 · ATR止损 · SPY月MACD过滤",
+        established_trend_lookback=30,
+        atr_stop_multiplier=1.5,
+        atr_target_multiplier=0.0,
+        exit_mode="warn_exit",
+        signal_type="weekly_bb_pullback_atr",
+        market_filter="monthly_macd",
+        market_symbol="SPY",
+    ),
+    "weekly_bb_pullback_atr_stop": StrategyVersion(
+        id="weekly_bb_pullback_atr_stop",
+        label="周线BB回踩 · ATR动态止损",
+        established_trend_lookback=30,
+        atr_stop_multiplier=1.5,
+        atr_target_multiplier=0.0,
+        exit_mode="warn_exit",
+        signal_type="weekly_bb_pullback_atr",
     ),
     "weekly_bb_breakout_ma30": StrategyVersion(
         id="weekly_bb_breakout_ma30",
