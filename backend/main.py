@@ -16,6 +16,7 @@ from backtest import (
     evaluate_weekly_bb_pullback,
     evaluate_weekly_bb_exit,
     replay_weekly_bb_markers,
+    run_supertrend_backtest,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from analysis import (
@@ -685,29 +686,81 @@ def weekly_breakout_scan():
         pullback_signal = evaluate_weekly_bb_pullback(weekly, daily)
         exit_sig = evaluate_weekly_bb_exit(weekly)
 
+        # Ensure weekly ST fields exist
+        if "ST_Val" not in weekly.columns or "ST_Dir" not in weekly.columns:
+            from analysis_constants import ST_LENGTH, ST_MULTIPLIER
+            import pandas_ta as ta
+            st = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+            if st is not None:
+                st_val_col = next((c for c in st.columns if "SUPERT_" in c and "d" not in c.lower() and "l" not in c.lower()), None)
+                st_dir_col = next((c for c in st.columns if "SUPERTd_" in c), None)
+                if st_val_col:
+                    weekly["ST_Val"] = st[st_val_col]
+                if st_dir_col:
+                    weekly["ST_Dir"] = st[st_dir_col]
+
         w = weekly.dropna(subset=["Close"]) if not weekly.empty else weekly
         last = w.iloc[-1] if not w.empty else None
 
-        # Build last 52 weekly candles for mini chart
-        chart_rows = w.tail(52)
+        def _fv(row, col):
+            return float(row[col]) if col in row and pd.notna(row[col]) else None
+
+        # Build last 26 weekly candles for mini chart
+        chart_rows = w.tail(26)
         markers = replay_weekly_bb_markers(chart_rows)
         candles = []
         for ts, row in chart_rows.iterrows():
             candles.append({
                 "time": pd.Timestamp(ts).date().isoformat(),
-                "open": float(row["Open"]) if "Open" in row and pd.notna(row["Open"]) else float(row["Close"]),
-                "high": float(row["High"]) if "High" in row and pd.notna(row["High"]) else float(row["Close"]),
-                "low": float(row["Low"]) if "Low" in row and pd.notna(row["Low"]) else float(row["Close"]),
+                "open": _fv(row, "Open") or float(row["Close"]),
+                "high": _fv(row, "High") or float(row["Close"]),
+                "low": _fv(row, "Low") or float(row["Close"]),
                 "close": float(row["Close"]),
-                "boll_upper": float(row["BOLL_Upper"]) if "BOLL_Upper" in row and pd.notna(row["BOLL_Upper"]) else None,
-                "boll_mid": float(row["BOLL_Mid"]) if "BOLL_Mid" in row and pd.notna(row["BOLL_Mid"]) else None,
-                "boll_lower": float(row["BOLL_Lower"]) if "BOLL_Lower" in row and pd.notna(row["BOLL_Lower"]) else None,
-                "ma30": float(row["MA30"]) if "MA30" in row and pd.notna(row["MA30"]) else None,
-                "ma5": float(row["MA5_W"]) if "MA5_W" in row and pd.notna(row["MA5_W"]) else None,
-                "macd_dif": float(row["MACD_DIF"]) if "MACD_DIF" in row and pd.notna(row["MACD_DIF"]) else None,
-                "macd_dea": float(row["MACD_DEA"]) if "MACD_DEA" in row and pd.notna(row["MACD_DEA"]) else None,
-                "macd_hist": float(row["MACD_Hist"]) if "MACD_Hist" in row and pd.notna(row["MACD_Hist"]) else None,
+                "boll_upper": _fv(row, "BOLL_Upper"),
+                "boll_mid": _fv(row, "BOLL_Mid"),
+                "boll_lower": _fv(row, "BOLL_Lower"),
+                "ma30": _fv(row, "MA30"),
+                "ma5": _fv(row, "MA5_W"),
+                "macd_dif": _fv(row, "MACD_DIF"),
+                "macd_dea": _fv(row, "MACD_DEA"),
+                "macd_hist": _fv(row, "MACD_Hist"),
+                "st_val": _fv(row, "ST_Val"),
+                "st_dir": int(row["ST_Dir"]) if "ST_Dir" in row and pd.notna(row["ST_Dir"]) else None,
             })
+
+        # Build last 260 daily candles
+        daily_candles = []
+        if daily is not None:
+            if "ST_Val" not in daily.columns or "ST_Dir" not in daily.columns:
+                from analysis_constants import ST_LENGTH, ST_MULTIPLIER
+                import pandas_ta as ta
+                st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+                if st is not None:
+                    st_val_col = next((c for c in st.columns if "SUPERT_" in c and "d" not in c.lower() and "l" not in c.lower()), None)
+                    st_dir_col = next((c for c in st.columns if "SUPERTd_" in c), None)
+                    if st_val_col:
+                        daily["ST_Val"] = st[st_val_col]
+                    if st_dir_col:
+                        daily["ST_Dir"] = st[st_dir_col]
+            d = daily.dropna(subset=["Close"])
+            for ts, row in d.tail(65).iterrows():
+                daily_candles.append({
+                    "time": pd.Timestamp(ts).date().isoformat(),
+                    "open": _fv(row, "Open") or float(row["Close"]),
+                    "high": _fv(row, "High") or float(row["Close"]),
+                    "low": _fv(row, "Low") or float(row["Close"]),
+                    "close": float(row["Close"]),
+                    "boll_upper": _fv(row, "BOLL_Upper"),
+                    "boll_mid": _fv(row, "BOLL_Mid"),
+                    "boll_lower": _fv(row, "BOLL_Lower"),
+                    "ma30": _fv(row, "MA30"),
+                    "ma5": _fv(row, "MA5") if "MA5" in row else None,
+                    "macd_dif": _fv(row, "MACD_DIF"),
+                    "macd_dea": _fv(row, "MACD_DEA"),
+                    "macd_hist": _fv(row, "MACD_Hist"),
+                    "st_val": _fv(row, "ST_Val"),
+                    "st_dir": int(row["ST_Dir"]) if "ST_Dir" in row and pd.notna(row["ST_Dir"]) else None,
+                })
 
         # Determine signal state
         if signal.get("buySignal"):
@@ -736,10 +789,137 @@ def weekly_breakout_scan():
             "stopPrice": active_signal.get("stopPrice"),
             "entryType": active_signal.get("entryType"),
             "candles": candles,
+            "daily_candles": daily_candles,
             "markers": markers,
         })
 
     return results
+
+
+_st_scan_cache: dict = {"data": None, "ts": 0.0}
+
+@app.get("/api/supertrend/scan")
+def supertrend_scan():
+    """扫描所有 watchlist 标的的 SuperTrend 状态，返回九宫格所需数据。"""
+    import pandas as pd
+    from analysis import DATA_DIR
+    from analysis_constants import ST_LENGTH, ST_MULTIPLIER
+
+    if _st_scan_cache["data"] is not None and time.time() - _st_scan_cache["ts"] < 3600:
+        return _st_scan_cache["data"]
+    import pandas_ta as ta
+
+    groups = load_watchlist()
+    symbols, alias_map = [], {}
+    for g in groups:
+        for item in g.get("symbols", []):
+            sym = item["symbol"] if isinstance(item, dict) else item
+            if sym not in symbols:
+                symbols.append(sym)
+                alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
+
+    def _process_sym(sym):
+        daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+        if not os.path.exists(daily_path):
+            return None
+        daily = pd.read_parquet(daily_path)
+        if daily.empty:
+            return None
+
+        st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+        if st is None or st.empty:
+            return None
+        val_col = next((c for c in st.columns if c.startswith("SUPERT_") and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))), None)
+        dir_col = next((c for c in st.columns if c.startswith("SUPERTd_")), None)
+        if not val_col or not dir_col:
+            return None
+
+        daily["_st_val"] = st[val_col]
+        daily["_st_dir"] = st[dir_col]
+
+        last = daily.dropna(subset=["Close"]).iloc[-1]
+        cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
+        dir_rows = daily.dropna(subset=["_st_dir"])
+        # flipped if direction changed within last 5 bars
+        recent_dirs = [int(r) for r in dir_rows["_st_dir"].iloc[-5:]]
+        just_flipped = len(recent_dirs) >= 2 and recent_dirs[-1] != recent_dirs[0]
+        if just_flipped and cur_dir == 1:
+            state = "bull_flip"
+        elif just_flipped and cur_dir == -1:
+            state = "bear_flip"
+        elif cur_dir == 1:
+            state = "bull"
+        else:
+            state = "bear"
+
+        def _to_candles(df, val_key, dir_key, n):
+            rows = []
+            for ts, row in df.tail(n).iterrows():
+                rows.append({
+                    "time": pd.Timestamp(ts).date().isoformat(),
+                    "open": float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"]),
+                    "high": float(row["High"]) if pd.notna(row.get("High")) else float(row["Close"]),
+                    "low": float(row["Low"]) if pd.notna(row.get("Low")) else float(row["Close"]),
+                    "close": float(row["Close"]),
+                    "st_val": float(row[val_key]) if pd.notna(row.get(val_key)) else None,
+                    "st_dir": int(row[dir_key]) if pd.notna(row.get(dir_key)) else None,
+                })
+            return rows
+
+        candles = _to_candles(daily, "_st_val", "_st_dir", 60)
+
+        weekly_state = None
+        weekly_st_val = None
+        weekly_candles = []
+        weekly_just_flipped = False
+        weekly_path = os.path.join(DATA_DIR, f"{sym.upper()}_weekly.parquet")
+        if os.path.exists(weekly_path):
+            weekly = pd.read_parquet(weekly_path)
+            if not weekly.empty:
+                wst = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+                if wst is not None and not wst.empty:
+                    wval_col = next((c for c in wst.columns if c.startswith("SUPERT_") and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))), None)
+                    wdir_col = next((c for c in wst.columns if c.startswith("SUPERTd_")), None)
+                    if wval_col and wdir_col:
+                        weekly["_wst_val"] = wst[wval_col]
+                        weekly["_wst_dir"] = wst[wdir_col]
+                        wlast = weekly.dropna(subset=["Close"]).iloc[-1]
+                        wcur_dir = int(wlast["_wst_dir"]) if pd.notna(wlast.get("_wst_dir")) else 0
+                        wprev_rows = weekly.dropna(subset=["_wst_dir"])
+                        wrecent_dirs = [int(r) for r in wprev_rows["_wst_dir"].iloc[-5:]]
+                        wjust_flipped = len(wrecent_dirs) >= 2 and wrecent_dirs[-1] != wrecent_dirs[0]
+                        if wjust_flipped and wcur_dir == 1:
+                            weekly_state, weekly_just_flipped = "bull_flip", True
+                        elif wjust_flipped and wcur_dir == -1:
+                            weekly_state, weekly_just_flipped = "bear_flip", True
+                        elif wcur_dir == 1:
+                            weekly_state = "bull"
+                        else:
+                            weekly_state = "bear"
+                        weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
+                        weekly_candles = _to_candles(weekly, "_wst_val", "_wst_dir", 30)
+
+        return {
+            "symbol": sym.upper(),
+            "alias": alias_map.get(sym, ""),
+            "state": state,
+            "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
+            "candles": candles,
+            "weeklyState": weekly_state,
+            "weeklyStVal": weekly_st_val,
+            "weeklyCandles": weekly_candles,
+            "justFlipped": state in ("bull_flip", "bear_flip"),
+            "weeklyJustFlipped": weekly_just_flipped,
+        }
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = [r for r in executor.map(_process_sym, symbols) if r is not None]
+
+    _st_scan_cache["data"] = results
+    _st_scan_cache["ts"] = time.time()
+    return results
+
 
 def _next_prewarm_run(now_local: datetime) -> datetime:
     """计算下一个固定预热时间点（本地时区时间）。"""

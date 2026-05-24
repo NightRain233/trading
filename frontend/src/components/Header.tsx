@@ -22,8 +22,8 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  activeTab: 'watchlist' | 'rs' | 'wbb';
-  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb') => void;
+  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st';
+  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -191,6 +191,20 @@ export const Header: React.FC<HeaderProps> = ({
             title="周线BB突破"
           >
             周线BB
+          </button>
+
+          {/* Tab: SuperTrend */}
+          <button
+            onClick={() => onTabChange(activeTab === 'st' ? 'watchlist' : 'st')}
+            className={clsx(
+              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
+              activeTab === 'st'
+                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                : "btn-glass text-zinc-400 hover:text-emerald-400"
+            )}
+            title="SuperTrend"
+          >
+            ST
           </button>
 
           {/* Refresh */}

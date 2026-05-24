@@ -11,7 +11,7 @@ interface ChartModalProps {
   onClose: () => void;
 }
 
-type MainInd = 'EMA' | 'BOLL';
+type MainInd = 'EMA' | 'BOLL' | 'ST';
 type TFrame = 'D' | 'W';
 
 const isFiniteNumber = (value: unknown): value is number =>
@@ -177,13 +177,33 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
       const e50 = charts[0].addSeries(LineSeries, { color: '#eab308', lineWidth: 1 as LineWidth, priceLineVisible: false });
       e20.setData(validCandles.filter(c => isFiniteNumber(c.ema20) && c.ema20 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema20! })));
       e50.setData(validCandles.filter(c => isFiniteNumber(c.ema50) && c.ema50 > 0).map((c: Candle) => ({ time: c.time as Time, value: c.ema50! })));
-    } else {
+    } else if (mainInd === 'BOLL') {
       const bup = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
       const bmid = charts[0].addSeries(LineSeries, { color: '#71717a', lineWidth: 1 as LineWidth, lineStyle: LineStyle.Dashed, priceLineVisible: false });
       const blow = charts[0].addSeries(LineSeries, { color: '#a855f7', lineWidth: 1 as LineWidth, priceLineVisible: false });
       bup.setData(validCandles.filter(c => isFiniteNumber(c.boll_upper) && c.boll_upper > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_upper! })));
       bmid.setData(validCandles.filter(c => isFiniteNumber(c.boll_mid) && c.boll_mid > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_mid! })));
       blow.setData(validCandles.filter(c => isFiniteNumber(c.boll_lower) && c.boll_lower > 0).map((c: Candle) => ({ time: c.time as Time, value: c.boll_lower! })));
+    } else {
+      const stCandles = validCandles.filter(c => isFiniteNumber(c.st_val) && c.st_val! > 0);
+      const segments: { dir: number; pts: { time: Time; value: number }[] }[] = [];
+      for (const c of stCandles) {
+        const pt = { time: c.time as Time, value: c.st_val! };
+        const last = segments[segments.length - 1];
+        if (!last || last.dir !== c.st_dir) {
+          segments.push({ dir: c.st_dir ?? 1, pts: [pt] });
+        } else {
+          last.pts.push(pt);
+        }
+      }
+      for (let si = 0; si < segments.length; si++) {
+        const seg = segments[si];
+        const pts = si > 0
+          ? [segments[si - 1].pts[segments[si - 1].pts.length - 1], ...seg.pts]
+          : seg.pts;
+        const s = charts[0].addSeries(LineSeries, { color: seg.dir === 1 ? '#22c55e' : '#ef4444', lineWidth: 2 as LineWidth, priceLineVisible: false, lastValueVisible: false });
+        s.setData(pts);
+      }
     }
 
     // RSI
@@ -319,6 +339,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
               <div className="flex p-0.5 bg-zinc-950/50 rounded-lg">
                 <TabButton onClick={() => setMainInd('EMA')} active={mainInd === 'EMA'}>EMA</TabButton>
                 <TabButton onClick={() => setMainInd('BOLL')} active={mainInd === 'BOLL'}>BOLL</TabButton>
+                <TabButton onClick={() => setMainInd('ST')} active={mainInd === 'ST'}>ST</TabButton>
               </div>
             </div>
 
