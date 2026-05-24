@@ -16,6 +16,10 @@
 - `PUT /api/watchlist/{symbol}/alias`
 - `POST /api/groups`
 - `PUT /api/watchlist`
+- `GET /api/weekly-breakout/scan`
+- `GET /api/rs-rotation/holdings`
+- `POST /api/backtest`
+- `GET /api/strategy-versions`
 
 ## 2. 健康检查
 
@@ -341,6 +345,8 @@
 
 ### 5.5 共振字段
 
+v1 基础字段：
+
 - `resonanceInPool`: 是否进入共振观察池
 - `resonanceBuySignal`: 是否出现共振买点
 - `resonancePoolReason`: 入池或未入池原因
@@ -348,6 +354,21 @@
 - `resonanceExitSignal`: 是否出现离场提示
 - `resonanceExitLevel`: `none | warn | hard`
 - `resonanceExitReason`: 离场原因
+
+v2 新增字段（实时行情页使用）：
+
+- `resonanceStrategyVersion`: 当前策略版本 ID（如 `resonance_v2_atr_1_5`）
+- `resonancePoolType`: 入池类型，`earlyTrend | establishedTrend | none`
+- `resonanceEntryScore`: 入场质量分，0-100
+- `resonanceRiskScore`: 风险评分，0-100（越高越低风险）
+- `resonanceRiskLevel`: 风险等级，`low | medium | high`
+- `resonanceEntryPrice`: 建议入场价（当前收盘）
+- `resonanceStopPrice`: ATR 止损价
+- `resonanceRiskPercent`: 止损距离占入场价的百分比
+- `resonanceTargetPrice`: ATR 目标价（无固定目标时为 `null`）
+- `resonanceRewardRiskRatio`: 盈亏比（无目标时为 `null`）
+
+v2 策略逻辑详见 `docs/resonance-v2-strategy.md`。
 
 ### 5.6 图表字段
 
