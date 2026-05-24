@@ -81,12 +81,12 @@ def _has_pullback_reclaim_signal(
     lookback_bars: int = RESONANCE_PULLBACK_LOOKBACK,
     volume_ma_window: int = RESONANCE_VOLUME_MA_WINDOW,
     volume_shrink_ratio: float = RESONANCE_VOLUME_SHRINK_RATIO,
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, bool]:
     required_cols = {"Low", "Close", "Volume", "EMA20", ema_col}
     if df_daily is None or df_daily.empty or not required_cols.issubset(df_daily.columns):
-        return False, ""
+        return False, "", False
     if len(df_daily) < max(volume_ma_window, 2):
-        return False, ""
+        return False, "", False
 
     volume_ma = df_daily["Volume"].rolling(window=volume_ma_window).mean()
     start_idx = max(1, len(df_daily) - lookback_bars)
@@ -104,11 +104,11 @@ def _has_pullback_reclaim_signal(
             low <= ema and close >= ema
             and low >= ema20
             and ema > ema_prev
-            and pd.notna(vol_ma) and float(vol_ma) > 0 and vol <= float(vol_ma) * volume_shrink_ratio
         ):
-            return True, f"{ema_col}回踩确认"
+            vol_confirmed = pd.notna(vol_ma) and float(vol_ma) > 0 and vol <= float(vol_ma) * volume_shrink_ratio
+            return True, f"{ema_col}回踩确认", vol_confirmed
 
-    return False, ""
+    return False, "", False
 
 
 def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
@@ -144,8 +144,8 @@ def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame
     if not result["inPool"]:
         return result
 
-    pullback_ema5, reason_ema5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
-    pullback_ema10, reason_ema10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
+    pullback_ema5, reason_ema5, _ = _has_pullback_reclaim_signal(df_daily, "EMA5")
+    pullback_ema10, reason_ema10, _ = _has_pullback_reclaim_signal(df_daily, "EMA10")
     result["buySignal"] = pullback_ema5 or pullback_ema10
     result["buyReason"] = (reason_ema5 or reason_ema10) if result["buySignal"] else "最近未出现有效回踩确认"
     return result
@@ -213,18 +213,22 @@ def _evaluate_resonance_strategy_v2(
         result["inPool"] = True
         result["poolType"] = "establishedTrend"
 
-    pullback_ema5, _ = _has_pullback_reclaim_signal(df_daily, "EMA5")
-    pullback_ema10, _ = _has_pullback_reclaim_signal(df_daily, "EMA10")
+    pullback_ema5, _, vol5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
+    pullback_ema10, _, vol10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
     result["buySignal"] = bool(result["inPool"] and (pullback_ema5 or pullback_ema10))
 
     score = 0
     if weekly_ok: score += 35
-    if result["poolType"] == "earlyTrend": score += 25
-    elif result["poolType"] == "establishedTrend": score += 20
+    if result["poolType"] != "none" and bars_since_cross is not None:
+        max_score = 25 if result["poolType"] == "earlyTrend" else 20
+        lookback = version.established_trend_lookback
+        decay = max(0.0, 1.0 - bars_since_cross / lookback)
+        score += round(5 + (max_score - 5) * decay)
     if trend_intact: score += 15
     if pullback_ema5: score += 15
     elif pullback_ema10: score += 12
     if result["buySignal"]: score += 10
+    if result["buySignal"] and (vol5 or vol10): score += 5
     result["entryScore"] = min(100, score)
 
     result["entryPrice"] = price

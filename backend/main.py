@@ -15,6 +15,7 @@ from backtest import (
     evaluate_weekly_bb_breakout,
     evaluate_weekly_bb_pullback,
     evaluate_weekly_bb_exit,
+    replay_weekly_bb_markers,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from analysis import (
@@ -689,6 +690,7 @@ def weekly_breakout_scan():
 
         # Build last 52 weekly candles for mini chart
         chart_rows = w.tail(52)
+        markers = replay_weekly_bb_markers(chart_rows)
         candles = []
         for ts, row in chart_rows.iterrows():
             candles.append({
@@ -734,6 +736,7 @@ def weekly_breakout_scan():
             "stopPrice": active_signal.get("stopPrice"),
             "entryType": active_signal.get("entryType"),
             "candles": candles,
+            "markers": markers,
         })
 
     return results
