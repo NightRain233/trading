@@ -19,6 +19,8 @@ interface WeeklyCandle {
   macd_dif: number | null;
   macd_dea: number | null;
   macd_hist: number | null;
+  st_val: number | null;
+  st_dir: number | null;
 }
 
 interface TradeMarker {
@@ -34,6 +36,7 @@ interface BreakoutItem {
   stopPrice: number | null;
   entryType?: 'weeklyPullback' | 'dailyPullback' | null;
   candles: WeeklyCandle[];
+  daily_candles: WeeklyCandle[];
   markers: TradeMarker[];
 }
 
@@ -52,19 +55,22 @@ const ENTRY_TYPE_LABEL: Record<string, string> = {
   dailyPullback: '日回踩',
 };
 
-function MiniWeeklyChart({ candles, showMid, showMacd, showMa5, showMarkers, markers }: { candles: WeeklyCandle[]; showMid: boolean; showMacd: boolean; showMa5: boolean; showMarkers: boolean; markers: TradeMarker[] }) {
+function MiniWeeklyChart({ candles, showMid, showMacd, showMa5, showMarkers, showSt, markers }: { candles: WeeklyCandle[]; showMid: boolean; showMacd: boolean; showMa5: boolean; showMarkers: boolean; showSt: boolean; markers: TradeMarker[] }) {
   const priceRef = useRef<HTMLDivElement>(null);
   const macdRef = useRef<HTMLDivElement>(null);
+  const stRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!priceRef.current || candles.length === 0) return;
+
+    const hasSubChart = showMacd || showSt;
 
     const priceChart = createChart(priceRef.current, {
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#71717a' },
       grid: { vertLines: { color: '#27272a' }, horzLines: { color: '#27272a' } },
       width: priceRef.current.clientWidth,
       height: 160,
-      timeScale: { borderColor: '#3f3f46', timeVisible: false, visible: !showMacd },
+      timeScale: { borderColor: '#3f3f46', timeVisible: false, visible: !hasSubChart },
       rightPriceScale: { borderColor: '#3f3f46', scaleMargins: { top: 0.1, bottom: 0.1 } },
       crosshair: { mode: 0 },
       handleScroll: false,
@@ -93,7 +99,6 @@ function MiniWeeklyChart({ candles, showMid, showMacd, showMa5, showMarkers, mar
 
     const upperS = priceChart.addSeries(LineSeries, { color: '#6366f1', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     upperS.setData(candles.filter(c => c.boll_upper != null).map(c => ({ time: c.time as Time, value: c.boll_upper! })));
-
     const lowerS = priceChart.addSeries(LineSeries, { color: '#6366f1', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     lowerS.setData(candles.filter(c => c.boll_lower != null).map(c => ({ time: c.time as Time, value: c.boll_lower! })));
 
@@ -117,55 +122,78 @@ function MiniWeeklyChart({ candles, showMid, showMacd, showMa5, showMarkers, mar
     });
     ro.observe(priceRef.current);
 
-    // MACD chart
-    let macdChart: ReturnType<typeof createChart> | null = null;
-    let macdRo: ResizeObserver | null = null;
-    if (showMacd && macdRef.current) {
-      macdChart = createChart(macdRef.current, {
+    const subCharts: ReturnType<typeof createChart>[] = [];
+    const subRos: ResizeObserver[] = [];
+
+    const makeSubChart = (el: HTMLDivElement, isLast: boolean) => {
+      const c = createChart(el, {
         layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#71717a' },
         grid: { vertLines: { color: '#27272a' }, horzLines: { color: '#27272a' } },
-        width: macdRef.current.clientWidth,
+        width: el.clientWidth,
         height: 70,
-        timeScale: { borderColor: '#3f3f46', timeVisible: false },
+        timeScale: { borderColor: '#3f3f46', timeVisible: isLast },
         rightPriceScale: { borderColor: '#3f3f46', scaleMargins: { top: 0.1, bottom: 0.1 } },
         crosshair: { mode: 0 },
         handleScroll: false,
         handleScale: false,
       });
+      const obs = new ResizeObserver(() => { if (el) c.applyOptions({ width: el.clientWidth }); });
+      obs.observe(el);
+      subCharts.push(c);
+      subRos.push(obs);
+      return c;
+    };
 
+    if (showMacd && macdRef.current) {
+      const macdChart = makeSubChart(macdRef.current, !showSt);
       const histS = macdChart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false });
-      histS.setData(
-        candles
-          .filter(c => c.macd_hist != null)
-          .map(c => ({ time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b981' : '#ef4444' }))
-      );
-
+      histS.setData(candles.filter(c => c.macd_hist != null).map(c => ({ time: c.time as Time, value: c.macd_hist!, color: c.macd_hist! >= 0 ? '#10b981' : '#ef4444' })));
       const difS = macdChart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       difS.setData(candles.filter(c => c.macd_dif != null).map(c => ({ time: c.time as Time, value: c.macd_dif! })));
-
       const deaS = macdChart.addSeries(LineSeries, { color: '#f97316', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       deaS.setData(candles.filter(c => c.macd_dea != null).map(c => ({ time: c.time as Time, value: c.macd_dea! })));
-
       macdChart.timeScale().fitContent();
+    }
 
-      macdRo = new ResizeObserver(() => {
-        if (macdRef.current && macdChart) macdChart.applyOptions({ width: macdRef.current.clientWidth });
-      });
-      macdRo.observe(macdRef.current);
+    if (showSt && stRef.current) {
+      const stChart = makeSubChart(stRef.current, true);
+      const stCandles = candles.filter(c => c.st_val != null);
+      const segments: { dir: number; pts: { time: Time; value: number }[] }[] = [];
+      for (let i = 0; i < stCandles.length; i++) {
+        const c = stCandles[i];
+        const pt = { time: c.time as Time, value: c.st_val! };
+        const last = segments[segments.length - 1];
+        if (!last || last.dir !== c.st_dir) {
+          segments.push({ dir: c.st_dir ?? 1, pts: [pt] });
+        } else {
+          last.pts.push(pt);
+        }
+      }
+      for (let si = 0; si < segments.length; si++) {
+        const seg = segments[si];
+        // Prepend last point of previous segment (different time) for visual bridge
+        const pts = si > 0
+          ? [segments[si - 1].pts[segments[si - 1].pts.length - 1], ...seg.pts]
+          : seg.pts;
+        const s = stChart.addSeries(LineSeries, { color: seg.dir === 1 ? '#22c55e' : '#ef4444', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+        s.setData(pts);
+      }
+      stChart.timeScale().fitContent();
     }
 
     return () => {
       ro.disconnect();
       priceChart.remove();
-      macdRo?.disconnect();
-      macdChart?.remove();
+      subRos.forEach(o => o.disconnect());
+      subCharts.forEach(c => c.remove());
     };
-  }, [candles, showMid, showMacd, showMa5, showMarkers, markers]);
+  }, [candles, showMid, showMacd, showMa5, showMarkers, showSt, markers]);
 
   return (
     <div className="w-full">
       <div ref={priceRef} className="w-full" />
-      {showMacd && <div ref={macdRef} className="w-full border-t border-zinc-800/60" />}
+      <div ref={macdRef} className="w-full" />
+      <div ref={stRef} className="w-full" />
     </div>
   );
 }
@@ -177,6 +205,8 @@ export function WeeklyBreakoutPage() {
   const [showMacd, setShowMacd] = useState(false);
   const [showMa5, setShowMa5] = useState(false);
   const [showMarkers, setShowMarkers] = useState(false);
+  const [showSt, setShowSt] = useState(false);
+  const [timeframe, setTimeframe] = useState<'W' | 'D'>('W');
   const [filter, setFilter] = useState<'all' | 'breakout' | 'pullback' | 'squeeze' | 'exit'>('all');
 
   async function load() {
@@ -215,6 +245,17 @@ export function WeeklyBreakoutPage() {
             </button>
           ))}
         </div>
+        <div className="flex gap-1 bg-zinc-900/50 p-0.5 rounded-lg border border-zinc-800/50">
+          {(['W', 'D'] as const).map(tf => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              className={`px-2.5 py-1 text-xs rounded-md font-semibold transition-all ${timeframe === tf ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              {tf === 'W' ? '周' : '日'}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setShowMid(v => !v)}
           className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all ${
@@ -246,6 +287,14 @@ export function WeeklyBreakoutPage() {
           }`}
         >
           买卖点
+        </button>
+        <button
+          onClick={() => setShowSt(v => !v)}
+          className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all ${
+            showSt ? 'bg-green-500/10 border-green-500/40 text-green-400' : 'btn-glass text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          ST
         </button>
         <button
           onClick={load}
@@ -283,7 +332,7 @@ export function WeeklyBreakoutPage() {
             </div>
             <div className="px-1 py-1">
               {item.candles.length > 0
-                ? <MiniWeeklyChart candles={item.candles} showMid={showMid} showMacd={showMacd} showMa5={showMa5} showMarkers={showMarkers} markers={item.markers ?? []} />
+                ? <MiniWeeklyChart candles={timeframe === 'W' ? item.candles : (item.daily_candles ?? item.candles)} showMid={showMid} showMacd={showMacd} showMa5={showMa5} showMarkers={showMarkers} showSt={showSt} markers={item.markers ?? []} />
                 : <div className="h-40 flex items-center justify-center text-zinc-600 text-xs">无数据</div>
               }
             </div>

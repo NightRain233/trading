@@ -72,6 +72,7 @@ def _build_candles(df: pd.DataFrame, rsi_period: int = 14, num_days: int = CHART
         'K': 'k', 'D': 'd', 'J': 'j',
         'MACD_DIF': 'macd_dif', 'MACD_DEA': 'macd_dea', 'MACD_Hist': 'macd_hist',
         'ATR': 'atr',
+        'ST_Val': 'st_val', 'ST_Dir': 'st_dir',
     }
     for src, dst in optional_cols.items():
         if src in chart_df.columns:

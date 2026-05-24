@@ -13,6 +13,7 @@ from analysis_constants import (
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     ADX_PERIOD, RSI_PERIODS, MACD_FAST, MACD_SLOW, MACD_SIGNAL,
     BOLL_PERIOD, BOLL_STD, KDJ_PERIOD, KDJ_SIGNAL_K, KDJ_SIGNAL_D, ATR_PERIOD,
+    ST_LENGTH, ST_MULTIPLIER,
 )
 from analysis_cache import (
     get_symbol_lock, global_download_lock, ta_calculation_lock,
@@ -137,6 +138,15 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=ATR_PERIOD)
         if 'ATR' not in df.columns or df['ATR'].isnull().all():
             df['ATR'] = 0
+
+        st = ta.supertrend(df['High'], df['Low'], df['Close'], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+        if st is not None and not st.empty:
+            val_col = next((c for c in st.columns if c.startswith('SUPERT_') and not any(c.startswith(p) for p in ('SUPERTd_', 'SUPERTs_', 'SUPERTl_', 'SUPERTu_'))), None)
+            dir_col = next((c for c in st.columns if c.startswith('SUPERTd_')), None)
+            df['ST_Val'] = st[val_col] if val_col else None
+            df['ST_Dir'] = st[dir_col] if dir_col else None
+        else:
+            df['ST_Val'] = df['ST_Dir'] = None
 
         return df
 

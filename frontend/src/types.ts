@@ -21,6 +21,8 @@ export interface Candle {
   macd_dea?: number;
   macd_hist?: number;
   atr?: number;
+  st_val?: number;
+  st_dir?: number;
 }
 
 export interface StockData {
