@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts';
-import type { Time } from 'lightweight-charts';
+import { createChart, createSeriesMarkers, ColorType, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts';
+import type { Time, SeriesMarker } from 'lightweight-charts';
 import { RefreshCw } from 'lucide-react';
 
 const API_BASE = '/api';
@@ -21,6 +21,12 @@ interface WeeklyCandle {
   macd_hist: number | null;
 }
 
+interface TradeMarker {
+  time: string;
+  type: 'buy_breakout' | 'buy_pullback' | 'sell_ma30' | 'sell_bb_flat';
+  price: number;
+}
+
 interface BreakoutItem {
   symbol: string;
   alias: string;
@@ -28,6 +34,7 @@ interface BreakoutItem {
   stopPrice: number | null;
   entryType?: 'weeklyPullback' | 'dailyPullback' | null;
   candles: WeeklyCandle[];
+  markers: TradeMarker[];
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -45,7 +52,7 @@ const ENTRY_TYPE_LABEL: Record<string, string> = {
   dailyPullback: '日回踩',
 };
 
-function MiniWeeklyChart({ candles, showMid, showMacd, showMa5 }: { candles: WeeklyCandle[]; showMid: boolean; showMacd: boolean; showMa5: boolean }) {
+function MiniWeeklyChart({ candles, showMid, showMacd, showMa5, showMarkers, markers }: { candles: WeeklyCandle[]; showMid: boolean; showMacd: boolean; showMa5: boolean; showMarkers: boolean; markers: TradeMarker[] }) {
   const priceRef = useRef<HTMLDivElement>(null);
   const macdRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +77,19 @@ function MiniWeeklyChart({ candles, showMid, showMacd, showMa5 }: { candles: Wee
       wickUpColor: '#10b981', wickDownColor: '#ef4444',
     });
     candleSeries.setData(candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })));
+
+    if (showMarkers && markers.length > 0) {
+      createSeriesMarkers(candleSeries, markers.map(m => {
+        const isBuy = m.type === 'buy_breakout' || m.type === 'buy_pullback';
+        return {
+          time: m.time as Time,
+          position: isBuy ? 'belowBar' : 'aboveBar',
+          color: m.type === 'buy_breakout' ? '#10b981' : m.type === 'buy_pullback' ? '#38bdf8' : m.type === 'sell_ma30' ? '#ef4444' : '#f97316',
+          shape: isBuy ? 'arrowUp' : 'arrowDown',
+          text: m.type === 'buy_breakout' ? 'B' : m.type === 'buy_pullback' ? 'P' : 'S',
+        } as SeriesMarker<Time>;
+      }));
+    }
 
     const upperS = priceChart.addSeries(LineSeries, { color: '#6366f1', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     upperS.setData(candles.filter(c => c.boll_upper != null).map(c => ({ time: c.time as Time, value: c.boll_upper! })));
@@ -140,7 +160,7 @@ function MiniWeeklyChart({ candles, showMid, showMacd, showMa5 }: { candles: Wee
       macdRo?.disconnect();
       macdChart?.remove();
     };
-  }, [candles, showMid, showMacd, showMa5]);
+  }, [candles, showMid, showMacd, showMa5, showMarkers, markers]);
 
   return (
     <div className="w-full">
@@ -156,6 +176,7 @@ export function WeeklyBreakoutPage() {
   const [showMid, setShowMid] = useState(false);
   const [showMacd, setShowMacd] = useState(false);
   const [showMa5, setShowMa5] = useState(false);
+  const [showMarkers, setShowMarkers] = useState(false);
   const [filter, setFilter] = useState<'all' | 'breakout' | 'pullback' | 'squeeze' | 'exit'>('all');
 
   async function load() {
@@ -219,6 +240,14 @@ export function WeeklyBreakoutPage() {
           MACD
         </button>
         <button
+          onClick={() => setShowMarkers(v => !v)}
+          className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all ${
+            showMarkers ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'btn-glass text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          买卖点
+        </button>
+        <button
           onClick={load}
           className={`ml-auto p-2 rounded-xl text-zinc-500 hover:text-emerald-400 btn-glass ${loading ? 'animate-spin' : ''}`}
         >
@@ -254,7 +283,7 @@ export function WeeklyBreakoutPage() {
             </div>
             <div className="px-1 py-1">
               {item.candles.length > 0
-                ? <MiniWeeklyChart candles={item.candles} showMid={showMid} showMacd={showMacd} showMa5={showMa5} />
+                ? <MiniWeeklyChart candles={item.candles} showMid={showMid} showMacd={showMacd} showMa5={showMa5} showMarkers={showMarkers} markers={item.markers ?? []} />
                 : <div className="h-40 flex items-center justify-center text-zinc-600 text-xs">无数据</div>
               }
             </div>

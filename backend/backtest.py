@@ -152,6 +152,35 @@ def evaluate_weekly_bb_exit(df_weekly: pd.DataFrame) -> Dict[str, object]:
     return {"exitSignal": False}
 
 
+def replay_weekly_bb_markers(df_weekly: pd.DataFrame) -> List[Dict[str, object]]:
+    markers = []
+    in_position = False
+    for i in range(1, len(df_weekly)):
+        prefix = df_weekly.iloc[: i + 1]
+        ts = pd.Timestamp(df_weekly.index[i]).date().isoformat()
+        last = prefix.iloc[-1]
+        close = float(last["Close"]) if pd.notna(last.get("Close")) else None
+        if close is None:
+            continue
+        if not in_position:
+            sig = evaluate_weekly_bb_breakout(prefix)
+            if sig.get("buySignal"):
+                markers.append({"time": ts, "type": "buy_breakout", "price": close})
+                in_position = True
+                continue
+            sig = evaluate_weekly_bb_pullback(prefix)
+            if sig.get("buySignal"):
+                markers.append({"time": ts, "type": "buy_pullback", "price": close})
+                in_position = True
+        else:
+            exit_sig = evaluate_weekly_bb_exit(prefix)
+            if exit_sig.get("exitSignal"):
+                reason = exit_sig.get("exitReason", "")
+                markers.append({"time": ts, "type": "sell_ma30" if reason == "below_ma30" else "sell_bb_flat", "price": close})
+                in_position = False
+    return markers
+
+
 def _date_str(value) -> str:
     return pd.Timestamp(value).date().isoformat()
 
