@@ -19,6 +19,7 @@ from backtest import (
     run_supertrend_backtest,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
+from supertrend_alerts import classify_supertrend_alert
 from analysis import (
     analyze_stock,
     batch_fetch_and_update,
@@ -836,6 +837,8 @@ def supertrend_scan():
 
         daily["_st_val"] = st[val_col]
         daily["_st_dir"] = st[dir_col]
+        if "ATR" not in daily.columns or daily["ATR"].isnull().all():
+            daily["ATR"] = ta.atr(daily["High"], daily["Low"], daily["Close"], length=14)
 
         last = daily.dropna(subset=["Close"]).iloc[-1]
         cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
@@ -899,10 +902,20 @@ def supertrend_scan():
                         weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
                         weekly_candles = _to_candles(weekly, "_wst_val", "_wst_dir", 30)
 
+        alert = classify_supertrend_alert(
+            state=state,
+            weekly_state=weekly_state,
+            close=float(last["Close"]) if pd.notna(last.get("Close")) else None,
+            st_val=float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
+            atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None,
+            just_flipped=state in ("bull_flip", "bear_flip"),
+        )
+
         return {
             "symbol": sym.upper(),
             "alias": alias_map.get(sym, ""),
             "state": state,
+            "close": float(last["Close"]) if pd.notna(last.get("Close")) else None,
             "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
             "candles": candles,
             "weeklyState": weekly_state,
@@ -910,6 +923,7 @@ def supertrend_scan():
             "weeklyCandles": weekly_candles,
             "justFlipped": state in ("bull_flip", "bear_flip"),
             "weeklyJustFlipped": weekly_just_flipped,
+            **alert,
         }
 
     from concurrent.futures import ThreadPoolExecutor
