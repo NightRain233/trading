@@ -32,12 +32,32 @@ make dev
 
 ### Docker 部署
 
+**本地运行：**
+
 ```bash
 make docker-build
 make up
 # 查看日志
 make logs
 ```
+
+**部署到远程服务器（无服务器端构建）：**
+
+服务器端无需 Dockerfile / 编译工具，在本地 Apple Silicon 机器上交叉编译 linux/amd64 镜像后上传。
+
+```bash
+# 首次配置：复制部署模板，填入服务器信息
+cp Makefile.local.example Makefile.local
+# 编辑 Makefile.local，填写你的 DEPLOY_HOST / DEPLOY_PATH
+
+# 一键部署（交叉编译 + 同步代码 + 上传镜像 + 重启）
+make deploy-full
+
+# 仅上传镜像并重启（代码未变、镜像已本地构建时）
+make deploy-images
+```
+
+`Makefile.local` 已被 `.gitignore` 忽略，不会提交到仓库。
 
 ## 项目结构
 
