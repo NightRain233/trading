@@ -48,28 +48,58 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onTabChange,
 }) => {
+  const isWatchlist = activeTab === 'watchlist';
+  const tabClass = (tab: HeaderProps['activeTab']) => clsx(
+    "shrink-0 px-2.5 py-1.5 text-[10px] sm:text-xs rounded-lg border font-semibold transition-all duration-200 active:scale-[0.98]",
+    activeTab === tab
+      ? tab === 'st'
+        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
+        : tab === 'rs'
+          ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
+          : tab === 'wbb'
+            ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-300"
+            : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
+      : "btn-glass text-zinc-400 hover:text-zinc-200"
+  );
+
   return (
     <header className="header-gradient border-b border-zinc-800/50 sticky top-0 z-20">
       {/* Subtle top accent line */}
       <div className="h-[1px] bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
 
-      <div className="max-w-6xl mx-auto px-4 py-2.5 sm:h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:min-h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2.5 sm:gap-3">
           <div className="relative">
-            <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 p-2 rounded-xl border border-emerald-500/20 shadow-[0_0_20px_-5px_rgba(16,185,129,0.2)]">
-              <TrendingUp className="text-emerald-400" size={20} />
+            <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 p-1.5 sm:p-2 rounded-xl border border-emerald-500/20 shadow-[0_0_20px_-5px_rgba(16,185,129,0.2)]">
+              <TrendingUp className="text-emerald-400" size={18} />
             </div>
             <div className="absolute -inset-1 bg-emerald-500/5 rounded-xl blur-md -z-10" />
           </div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-br from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent select-none">
+          <h1 className="text-lg sm:text-2xl font-black tracking-tight bg-gradient-to-br from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent select-none">
             TrendMaster
           </h1>
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-1 justify-end sm:flex-none">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-1 justify-end sm:flex-none min-w-0">
+          <nav className="order-2 sm:order-none basis-full sm:basis-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1 sm:pt-0">
+            <button onClick={() => onTabChange('watchlist')} className={tabClass('watchlist')} title="自选">
+              自选
+            </button>
+            <button onClick={() => onTabChange('st')} className={tabClass('st')} title="SuperTrend">
+              ST
+            </button>
+            <button onClick={() => onTabChange('rs')} className={tabClass('rs')} title="RS 轮动">
+              RS轮动
+            </button>
+            <button onClick={() => onTabChange('wbb')} className={tabClass('wbb')} title="周线BB突破">
+              周线BB
+            </button>
+          </nav>
+
           {/* Add Symbol Form */}
+          {isWatchlist && (
           <form onSubmit={handleAddStock} className="flex items-center gap-1.5">
             <input
               type="text"
@@ -86,7 +116,9 @@ export const Header: React.FC<HeaderProps> = ({
               <Plus size={16} />
             </button>
           </form>
+          )}
 
+          {isWatchlist && (
           <button
             onClick={() => setShowNewGroupInput(true)}
             className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-emerald-400"
@@ -94,10 +126,12 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <FolderPlus size={16} />
           </button>
+          )}
 
-          <div className="w-px h-5 bg-zinc-800/50 mx-0.5 hidden sm:block" />
+          {isWatchlist && <div className="w-px h-5 bg-zinc-800/50 mx-0.5 hidden sm:block" />}
 
           {/* Search (Desktop) */}
+          {isWatchlist && (
           <div className="relative hidden md:block">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
             <input
@@ -108,8 +142,10 @@ export const Header: React.FC<HeaderProps> = ({
               className="input-glass rounded-full pl-9 pr-4 py-2 text-sm focus:outline-none w-28 lg:w-44 placeholder:text-zinc-600"
             />
           </div>
+          )}
 
           {/* Filter toggle */}
+          {isWatchlist && (
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={clsx(
@@ -122,8 +158,10 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <SlidersHorizontal size={15} className={clsx(showFilters && "rotate-90", "transition-transform duration-200")} />
           </button>
+          )}
 
           {/* EMA Toggle */}
+          {isWatchlist && (
           <button
             onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : prev === 'short' ? 'boll' : 'long')}
             className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
@@ -131,8 +169,10 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {emaMode === 'long' ? 'EMA 20/50' : emaMode === 'short' ? 'EMA 5/10' : 'BOLL'}
           </button>
+          )}
 
           {/* Timeframe Toggle */}
+          {isWatchlist && (
           <button
             onClick={() => setChartTimeframe(chartTimeframe === '1D' ? '1W' : '1D')}
             className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
@@ -140,8 +180,10 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {chartTimeframe === '1D' ? '日线' : '周线'}
           </button>
+          )}
 
           {/* Chart Toggle */}
+          {isWatchlist && (
           <button
             onClick={() => setShowCharts(!showCharts)}
             className={clsx(
@@ -155,8 +197,10 @@ export const Header: React.FC<HeaderProps> = ({
             <LineChart size={13} />
             <span className="hidden sm:inline">{chartTimeframe === '1D' ? '30日' : '30周'}</span>
           </button>
+          )}
 
           {/* Backtest */}
+          {isWatchlist && (
           <button
             onClick={onShowBacktest}
             className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-amber-400"
@@ -164,48 +208,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <BarChart2 size={16} />
           </button>
-
-          {/* Tab: RS 轮动 */}
-          <button
-            onClick={() => onTabChange(activeTab === 'rs' ? 'watchlist' : 'rs')}
-            className={clsx(
-              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
-              activeTab === 'rs'
-                ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
-                : "btn-glass text-zinc-400 hover:text-amber-400"
-            )}
-            title="RS 轮动"
-          >
-            RS轮动
-          </button>
-
-          {/* Tab: 周线BB突破 */}
-          <button
-            onClick={() => onTabChange(activeTab === 'wbb' ? 'watchlist' : 'wbb')}
-            className={clsx(
-              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
-              activeTab === 'wbb'
-                ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-400"
-                : "btn-glass text-zinc-400 hover:text-indigo-400"
-            )}
-            title="周线BB突破"
-          >
-            周线BB
-          </button>
-
-          {/* Tab: SuperTrend */}
-          <button
-            onClick={() => onTabChange(activeTab === 'st' ? 'watchlist' : 'st')}
-            className={clsx(
-              "px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl border font-semibold transition-all duration-200",
-              activeTab === 'st'
-                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
-                : "btn-glass text-zinc-400 hover:text-emerald-400"
-            )}
-            title="SuperTrend"
-          >
-            ST
-          </button>
+          )}
 
           {/* Refresh */}
           <button

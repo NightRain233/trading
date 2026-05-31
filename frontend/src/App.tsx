@@ -107,7 +107,7 @@ function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
-  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs' | 'wbb' | 'st'>('watchlist');
+  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs' | 'wbb' | 'st'>('st');
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
