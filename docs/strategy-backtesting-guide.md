@@ -123,7 +123,41 @@ PYTHONPATH=. uv run python strategy_comparison.py \
 - 返回交易列表、买卖点 marker、回撤曲线、每笔收益。
 - 前端在图表上叠加 SuperTrend 线和买卖点，并允许切换策略。
 
-HTML 报告可以保留一个“怎么看买卖点”的入口说明和一两个示意图，但不应该替代交互式复盘页。
+HTML 报告可以保留一个”怎么看买卖点”的入口说明和一两个示意图，但不应该替代交互式复盘页。
+
+### 预计算历史交易复盘缓存
+
+前端复盘页依赖后端 SQLite 缓存。可以用以下命令对观察池全部标的预计算 SuperTrend 历史交易（默认近 5 年），避免打开页面时逐个标的实时计算：
+
+```bash
+cd /Users/zz/Downloads/trading/backend
+PYTHONPATH=. uv run python main.py --precompute-history-trades
+```
+
+常用选项：
+
+```bash
+# 只计算指定标的
+PYTHONPATH=. uv run python main.py --precompute-history-trades --symbol 510500.SS
+
+# 启用周线过滤
+PYTHONPATH=. uv run python main.py --precompute-history-trades --weekly-filter
+
+# 设置最小 ADX 入场过滤
+PYTHONPATH=. uv run python main.py --precompute-history-trades --min-adx-for-entry 25
+
+# 强制重新计算（默认跳过已有缓存）
+PYTHONPATH=. uv run python main.py --precompute-history-trades --force
+
+# 自定义时间区间
+PYTHONPATH=. uv run python main.py --precompute-history-trades --start 2022-01-01 --end 2026-05-31
+```
+
+也可以通过 API 触发：
+
+```bash
+curl -X POST http://localhost:8000/api/history-trades/precompute
+```
 
 ## ST 标的太多怎么办
 
