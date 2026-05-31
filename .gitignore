@@ -15,6 +15,7 @@ backend/.python-version
 backend/data/
 backend/cache.pkl
 *.log
+*.pyc
 
 # --- IDE & System ---
 .vscode/
