@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { createChart, createSeriesMarkers, ColorType, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import type { SeriesMarker, Time } from 'lightweight-charts';
 import { CalendarDays, RefreshCw, Search, ShieldCheck, TrendingUp } from 'lucide-react';
-import { fetchHistoryTrades } from '../utils';
-import type { Candle, HistorySupertrendPoint, HistoryTradesResponse } from '../types';
+import { fetchHistoryTrades, fetchHistoryTradeSymbols } from '../utils';
+import type { Candle, HistorySupertrendPoint, HistoryTradeSymbolOption, HistoryTradesResponse } from '../types';
 
 const STRATEGIES = [
   { id: 'supertrend', label: 'SuperTrend' },
@@ -144,7 +144,8 @@ function HistoryTradesChart({ result }: { result: HistoryTradesResponse | null }
 }
 
 export function HistoryTradesPage() {
-  const [symbol, setSymbol] = useState('510300.SS');
+  const [symbol, setSymbol] = useState('');
+  const [symbolOptions, setSymbolOptions] = useState<HistoryTradeSymbolOption[]>([]);
   const [strategy, setStrategy] = useState('supertrend');
   const [start, setStart] = useState('2023-01-01');
   const [end, setEnd] = useState('');
@@ -160,8 +161,8 @@ export function HistoryTradesPage() {
     return Object.entries(summary.exitReasonCounts);
   }, [summary]);
 
-  async function load() {
-    if (!symbol.trim()) {
+  async function load(targetSymbol = symbol) {
+    if (!targetSymbol.trim()) {
       setError('请输入标的代码');
       return;
     }
@@ -169,7 +170,7 @@ export function HistoryTradesPage() {
     setError(null);
     try {
       const payload = await fetchHistoryTrades({
-        symbol,
+        symbol: targetSymbol,
         strategy,
         start,
         end,
@@ -186,8 +187,24 @@ export function HistoryTradesPage() {
   }
 
   useEffect(() => {
-    void load();
-    // Run once with the default form values.
+    let disposed = false;
+    async function loadSymbols() {
+      const options = await fetchHistoryTradeSymbols();
+      if (disposed) return;
+      setSymbolOptions(options);
+      const preferred =
+        options.find(option => option.symbol === '510500.SS' && option.hasCache)
+        || options.find(option => option.hasCache)
+        || options.find(option => option.hasData)
+        || options[0];
+      if (preferred) {
+        setSymbol(preferred.symbol);
+        await load(preferred.symbol);
+      }
+    }
+    void loadSymbols();
+    return () => { disposed = true; };
+    // The initial symbol catalog chooses the first cached symbol once on page entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -211,12 +228,18 @@ export function HistoryTradesPage() {
         >
           <label className="flex flex-col gap-1 col-span-2 md:col-span-1">
             <span className="text-[10px] text-zinc-500">标的</span>
-            <input
+            <select
               value={symbol}
-              onChange={e => setSymbol(e.target.value.toUpperCase())}
-              className="input-glass rounded-lg px-3 py-2 text-sm font-mono text-zinc-100 focus:outline-none"
-              placeholder="510300.SS"
-            />
+              onChange={e => setSymbol(e.target.value)}
+              className="input-glass rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none"
+            >
+              {symbolOptions.length === 0 && <option value="">加载中...</option>}
+              {symbolOptions.map(option => (
+                <option key={option.symbol} value={option.symbol}>
+                  {option.displayName}{option.hasCache ? '' : option.hasData ? ' · 未预计算' : ' · 无数据'}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] text-zinc-500">策略</span>
