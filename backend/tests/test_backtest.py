@@ -338,6 +338,54 @@ class BacktestTests(unittest.TestCase):
                 entry_signal_mode="unknown_mode",
             )
 
+    def test_supertrend_history_review_returns_chart_payload(self):
+        from backtest import build_supertrend_history_review
+
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        st = _build_supertrend_indicator(daily.index)
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            review = build_supertrend_history_review(
+                "test",
+                daily,
+                fee_bps=0,
+                slippage_bps=0,
+            )
+
+        self.assertEqual(review["symbol"], "TEST")
+        self.assertEqual(review["strategy"], "supertrend")
+        self.assertEqual([c["time"] for c in review["candles"]], sorted(c["time"] for c in review["candles"]))
+        self.assertEqual(review["supertrend"][2]["direction"], 1)
+        self.assertEqual([m["type"] for m in review["markers"]], ["buy", "sell"])
+        self.assertEqual(len(review["trades"]), 1)
+        trade = review["trades"][0]
+        self.assertEqual(trade["tradeIndex"], 1)
+        self.assertEqual(trade["entryDate"], str(daily.index[2].date()))
+        self.assertEqual(trade["exitDate"], str(daily.index[4].date()))
+        self.assertEqual(trade["holdingDays"], 3)
+        self.assertEqual(trade["exitReason"], "st_flip")
+        self.assertIn("returnPct", trade)
+        self.assertEqual(review["summary"]["tradeCount"], 1)
+
+    def test_supertrend_history_review_applies_date_filter(self):
+        from backtest import build_supertrend_history_review
+
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        st = _build_supertrend_indicator(daily.index)
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            review = build_supertrend_history_review(
+                "TEST",
+                daily,
+                start="2025-01-06",
+                fee_bps=0,
+                slippage_bps=0,
+            )
+
+        self.assertEqual(review["trades"], [])
+        self.assertEqual(review["markers"], [])
+        self.assertGreaterEqual(review["candles"][0]["time"], "2025-01-06")
+
     def test_weekly_bb_pullback_confirms_after_prior_breakout(self):
         weekly = _build_weekly_bb_pullback_df()
         daily = _build_daily_pullback_confirmation_df()

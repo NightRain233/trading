@@ -16,11 +16,13 @@ from backtest import (
     evaluate_weekly_bb_pullback,
     evaluate_weekly_bb_exit,
     replay_weekly_bb_markers,
+    build_supertrend_history_review,
     run_supertrend_backtest,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from supertrend_alerts import classify_supertrend_alert
 from analysis import (
+    DATA_DIR,
     analyze_stock,
     batch_fetch_and_update,
     _build_mini_candles,
@@ -641,6 +643,45 @@ def get_rs_rotation_holdings(force: bool = False):
 @app.get("/api/backtest/strategies")
 def list_strategies():
     return [{"id": v.id, "label": v.label} for v in list_strategy_versions()] + list_rs_rotation_presets()
+
+
+@app.get("/api/history-trades")
+def get_history_trades(
+    symbol: str,
+    strategy: str = "supertrend",
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    min_adx_for_entry: Optional[float] = None,
+    weekly_filter: bool = False,
+):
+    normalized_symbol = symbol.strip().upper()
+    if not normalized_symbol:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+
+    if strategy != "supertrend":
+        raise HTTPException(status_code=400, detail=f"Unsupported strategy: {strategy}")
+
+    import pandas as pd
+
+    daily_path = os.path.join(DATA_DIR, f"{normalized_symbol}.parquet")
+    if not os.path.exists(daily_path):
+        raise HTTPException(status_code=404, detail=f"No cached data for symbol: {normalized_symbol}")
+
+    daily = pd.read_parquet(daily_path)
+    weekly = None
+    if weekly_filter:
+        weekly_path = os.path.join(DATA_DIR, f"{normalized_symbol}_weekly.parquet")
+        if os.path.exists(weekly_path):
+            weekly = pd.read_parquet(weekly_path)
+
+    return build_supertrend_history_review(
+        normalized_symbol,
+        daily,
+        start=start,
+        end=end,
+        filter_weekly_df=weekly,
+        min_adx_for_entry=min_adx_for_entry,
+    )
 
 
 @app.get("/api/weekly-breakout/scan")
