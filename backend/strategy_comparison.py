@@ -16,6 +16,7 @@ from backtest import simulate_mark_to_market_portfolio
 from backtest import simulate_rs_rotation_portfolio
 from backtest import summarize_buy_and_hold_benchmark
 from backtest import summarize_trades
+from backtest import SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE
 
 
 DEFAULT_START = "2021-05-31"
@@ -24,6 +25,16 @@ DEFAULT_FEE_BPS = 5.0
 DEFAULT_SLIPPAGE_BPS = 5.0
 FULL_WINDOW_MIN_BARS = 900
 ADX_THRESHOLDS = [20.0, 25.0, 30.0]
+SLIMMING_RATIO_RETENTION_GATE = 0.85
+SLIMMING_RETURN_RETENTION_GATE = 0.70
+
+SUPER_TREND_SLIMMING_MODES = [
+    ("high_priority_alerts", "高优先级多头提醒"),
+    ("daily_bull_flip", "日线刚翻多"),
+    ("support_test", "支撑回踩"),
+    ("weekly_bull_daily_bull_flip", "周多日刚翻多"),
+    ("weekly_bull_support_test", "周多支撑回踩"),
+]
 
 PROJECT_BACKEND_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = PROJECT_BACKEND_DIR / DATA_DIR
@@ -130,6 +141,7 @@ def build_supertrend_report(
     fee_bps: float,
     slippage_bps: float,
     min_adx_for_entry: Optional[float] = None,
+    entry_signal_mode: str = SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE,
 ) -> Dict[str, object]:
     frames: Dict[str, pd.DataFrame] = {}
     trades: List[Dict[str, object]] = []
@@ -171,6 +183,7 @@ def build_supertrend_report(
                 fee_bps=fee_bps,
                 slippage_bps=slippage_bps,
                 min_adx_for_entry=min_adx_for_entry,
+                entry_signal_mode=entry_signal_mode,
             )
         )
 
@@ -185,6 +198,7 @@ def build_supertrend_report(
     return {
         "label": label,
         "minAdxForEntry": min_adx_for_entry,
+        "entrySignalMode": entry_signal_mode,
         "symbolCount": len(frames),
         "symbols": list(frames),
         "missingSymbols": missing,
@@ -192,7 +206,7 @@ def build_supertrend_report(
         "weeklyResampledSymbols": weekly_resampled,
         "tradeSummary": summarize_trades(
             trades,
-            strategy_version=f"supertrend_adx_{min_adx_for_entry:g}" if min_adx_for_entry is not None else "supertrend_weekly_filtered",
+            strategy_version=_supertrend_strategy_version(min_adx_for_entry, entry_signal_mode),
         ),
         "portfolio": _curve_stats(portfolio),
         "buyHold": summarize_buy_and_hold_benchmark(
@@ -243,6 +257,77 @@ def _build_adx_research_row(
         "ratioImprovement": improvement,
         "variants": variants,
     }
+
+
+def _supertrend_strategy_version(min_adx_for_entry: Optional[float], entry_signal_mode: str) -> str:
+    strategy_version = (
+        f"supertrend_adx_{min_adx_for_entry:g}"
+        if min_adx_for_entry is not None
+        else f"supertrend_{entry_signal_mode}"
+    )
+    if min_adx_for_entry is not None and entry_signal_mode != SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE:
+        strategy_version = f"{strategy_version}_{entry_signal_mode}"
+    return strategy_version
+
+
+def _summary_metrics(report: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "totalReturnPct": report["portfolio"]["totalReturnPct"],
+        "maxDrawdownPct": report["portfolio"]["maxDrawdownPct"],
+        "returnDrawdownRatio": report["portfolio"]["returnDrawdownRatio"],
+        "tradeCount": report["tradeSummary"]["tradeCount"],
+        "winRate": report["tradeSummary"]["winRate"],
+        "averageHoldingDays": report["tradeSummary"]["averageHoldingDays"],
+    }
+
+
+def _retention(variant_value: object, baseline_value: object) -> Optional[float]:
+    try:
+        variant = float(variant_value)
+        baseline = float(baseline_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(variant) or not math.isfinite(baseline) or baseline <= 0:
+        return None
+    return variant / baseline
+
+
+def _build_supertrend_slimming_rows(
+    baseline_reports: List[Dict[str, object]],
+    variant_reports_by_label: Dict[str, List[Dict[str, object]]],
+) -> List[Dict[str, object]]:
+    rows = []
+    labels_by_mode = dict(SUPER_TREND_SLIMMING_MODES)
+    for baseline_report in baseline_reports:
+        baseline = _summary_metrics(baseline_report)
+        baseline_trades = int(baseline.get("tradeCount") or 0)
+        for variant_report in variant_reports_by_label.get(baseline_report["label"], []):
+            variant = _summary_metrics(variant_report)
+            variant_trades = int(variant.get("tradeCount") or 0)
+            total_return_retention = _retention(variant.get("totalReturnPct"), baseline.get("totalReturnPct"))
+            ratio_retention = _retention(variant.get("returnDrawdownRatio"), baseline.get("returnDrawdownRatio"))
+            trade_reduction = ((baseline_trades - variant_trades) / baseline_trades) if baseline_trades else None
+            passes = (
+                total_return_retention is not None
+                and ratio_retention is not None
+                and total_return_retention >= SLIMMING_RETURN_RETENTION_GATE
+                and ratio_retention >= SLIMMING_RATIO_RETENTION_GATE
+                and variant_trades < baseline_trades
+            )
+            rows.append(
+                {
+                    "assetGroup": baseline_report["label"],
+                    "mode": variant_report["entrySignalMode"],
+                    "label": labels_by_mode.get(variant_report["entrySignalMode"], variant_report["entrySignalMode"]),
+                    "baseline": baseline,
+                    "variant": variant,
+                    "totalReturnRetention": total_return_retention,
+                    "returnDrawdownRatioRetention": ratio_retention,
+                    "tradeCountReductionPct": trade_reduction,
+                    "passesSlimmingGate": passes,
+                }
+            )
+    return rows
 
 
 def build_momentum_report(
@@ -388,6 +473,24 @@ def build_strategy_comparison(
         )
         for symbols, label, max_positions in supertrend_inputs
     ]
+    slimming_variant_reports: Dict[str, List[Dict[str, object]]] = {}
+    for symbols, label, max_positions in supertrend_inputs:
+        slimming_variant_reports[label] = [
+            build_supertrend_report(
+                symbols,
+                label,
+                data_dir,
+                start,
+                end,
+                max_positions=max_positions,
+                fee_bps=fee_bps,
+                slippage_bps=slippage_bps,
+                entry_signal_mode=mode,
+            )
+            for mode, _ in SUPER_TREND_SLIMMING_MODES
+        ]
+    supertrend_slimming_rows = _build_supertrend_slimming_rows(supertrend_reports, slimming_variant_reports)
+
     adx_research_rows = []
     for baseline_report, (symbols, label, max_positions) in zip(supertrend_reports, supertrend_inputs):
         variants = [
@@ -534,13 +637,16 @@ def build_strategy_comparison(
             "supertrend": "日线 SuperTrend 翻多买入，日线翻空或触及 SuperTrend 止损卖出，并用周线 SuperTrend 多头过滤。",
             "momentum": "当前代码中的 RS Rotation：60 日相对强弱排名，20 个交易日调仓，按资产类别月 MACD 过滤。",
             "adx": "ADX 研究只作为入场过滤：SuperTrend 翻多时要求 ADX 达到阈值，离场和止损不受 ADX 阻止。",
+            "slimming": f"SuperTrend 精简层若收益回撤比保留 >= {SLIMMING_RATIO_RETENTION_GATE * 100:.0f}%、总收益保留 >= {SLIMMING_RETURN_RETENTION_GATE * 100:.0f}% 且交易数下降，才允许作为默认日常视图。",
             "weeklyBb": "周线 BB 对照使用 weekly_bb_breakout_ma30：周线突破优先，没有突破时接受突破后的回踩确认，最大持仓 90 天。",
             "costs": f"单边滑点 {slippage_bps} bps，买卖手续费合计按单边 {fee_bps} bps 估算。",
         },
         "comparisonRows": comparison_rows,
         "adxResearchRows": adx_research_rows,
+        "supertrendSlimmingRows": supertrend_slimming_rows,
         "weeklyBbRows": weekly_bb_reports,
         "supertrendReports": supertrend_reports,
+        "supertrendSlimmingReports": slimming_variant_reports,
         "momentumReports": momentum_reports,
         "dataCaveats": data_caveats,
     }
@@ -611,6 +717,41 @@ def format_markdown_report(report: Dict[str, object]) -> str:
                     dd=_pct(best.get("maxDrawdownPct")),
                     ratio=_ratio(best_ratio),
                     trade_delta=best_trades - baseline_trades,
+                    judgment=judgment,
+                )
+            )
+
+    slimming_rows = report.get("supertrendSlimmingRows") or []
+    if slimming_rows:
+        lines.extend([
+            "",
+            "## SuperTrend 精简层研究",
+            "",
+            f"达标口径：收益回撤比保留 >= {SLIMMING_RATIO_RETENTION_GATE * 100:.0f}%，总收益保留 >= {SLIMMING_RETURN_RETENTION_GATE * 100:.0f}%，且交易数下降。",
+            "",
+            "| 资产组 | 精简层 | 基础收益回撤比 | 精简收益 | 精简回撤 | 精简收益回撤比 | 收益保留 | 收益回撤比保留 | 交易数变化 | 胜率 | 判断 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ])
+        for row in slimming_rows:
+            baseline = row["baseline"]
+            variant = row["variant"]
+            baseline_trades = int(baseline.get("tradeCount") or 0)
+            variant_trades = int(variant.get("tradeCount") or 0)
+            total_retention = row.get("totalReturnRetention")
+            ratio_retention = row.get("returnDrawdownRatioRetention")
+            judgment = "通过" if row.get("passesSlimmingGate") else "未通过"
+            lines.append(
+                "| {asset} | {label} | {base_ratio} | {ret} | {dd} | {ratio} | {retention} | {ratio_retention} | {trade_delta:+d} | {win_rate} | {judgment} |".format(
+                    asset=row["assetGroup"],
+                    label=row["label"],
+                    base_ratio=_ratio(baseline.get("returnDrawdownRatio")),
+                    ret=_pct(variant.get("totalReturnPct")),
+                    dd=_pct(variant.get("maxDrawdownPct")),
+                    ratio=_ratio(variant.get("returnDrawdownRatio")),
+                    retention=_pct(float(total_retention) * 100) if total_retention is not None else "-",
+                    ratio_retention=_pct(float(ratio_retention) * 100) if ratio_retention is not None else "-",
+                    trade_delta=variant_trades - baseline_trades,
+                    win_rate=_pct(float(variant.get("winRate", 0)) * 100),
                     judgment=judgment,
                 )
             )

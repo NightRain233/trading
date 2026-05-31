@@ -15,6 +15,18 @@ from strategy_versions import DEFAULT_STRATEGY_VERSION_ID
 from strategy_versions import get_strategy_version
 
 
+SUPER_TREND_ENTRY_SIGNAL_MODES = {
+    "daily_bull_flip",
+    "support_test",
+    "high_priority_alerts",
+    "weekly_bull_daily_bull_flip",
+    "weekly_bull_support_test",
+}
+SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE = "weekly_bull_daily_bull_flip"
+SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_PCT = 1.5
+SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_ATR = 0.5
+
+
 def evaluate_weekly_bb_breakout(df_weekly: pd.DataFrame, lookback: int = 8) -> Dict[str, object]:
     """
     周线BB(20,2)突破策略信号。
@@ -230,7 +242,10 @@ def run_supertrend_backtest(
     end: Optional[str] = None,
     filter_weekly_df: Optional[pd.DataFrame] = None,
     min_adx_for_entry: Optional[float] = None,
+    entry_signal_mode: str = SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE,
 ) -> List[Dict[str, object]]:
+    if entry_signal_mode not in SUPER_TREND_ENTRY_SIGNAL_MODES:
+        raise ValueError(f"Unsupported SuperTrend entry signal mode: {entry_signal_mode}")
     if df_daily is None or df_daily.empty:
         return []
     daily = df_daily.sort_index().copy()
@@ -259,6 +274,42 @@ def run_supertrend_backtest(
         w = weekly_dir[weekly_dir.index <= date]
         return not w.empty and float(w.iloc[-1]) == 1
 
+    def _daily_bull_flip(prev, row) -> bool:
+        return float(prev["_st_dir"]) == -1 and float(row["_st_dir"]) == 1
+
+    def _daily_support_test(row) -> bool:
+        if float(row["_st_dir"]) != 1:
+            return False
+        if pd.isna(row.get("_st_val")) or pd.isna(row.get("Close")):
+            return False
+        close = float(row["Close"])
+        st_val = float(row["_st_val"])
+        if close <= 0 or close < st_val:
+            return False
+        distance_pct = abs(close - st_val) / close * 100
+        if distance_pct <= SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_PCT:
+            return True
+        atr = row.get("ATR")
+        if atr is None or pd.isna(atr) or float(atr) <= 0:
+            return False
+        return abs(close - st_val) / float(atr) <= SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_ATR
+
+    def _entry_mode_allows(prev, row, date) -> bool:
+        daily_flip = _daily_bull_flip(prev, row)
+        support_test = _daily_support_test(row)
+        weekly_bull = _weekly_bullish(date)
+        if entry_signal_mode == "daily_bull_flip":
+            return daily_flip
+        if entry_signal_mode == "support_test":
+            return support_test
+        if entry_signal_mode == "high_priority_alerts":
+            return weekly_bull and (daily_flip or support_test)
+        if entry_signal_mode == "weekly_bull_daily_bull_flip":
+            return weekly_bull and daily_flip
+        if entry_signal_mode == "weekly_bull_support_test":
+            return weekly_bull and support_test
+        return False
+
     def _adx_allows_entry(row) -> bool:
         if min_adx_for_entry is None:
             return True
@@ -274,6 +325,9 @@ def run_supertrend_backtest(
     entry_price = None
     stop_price = None
     entry_adx = None
+    strategy_version = f"supertrend_adx_{min_adx_for_entry:g}" if min_adx_for_entry is not None else "supertrend"
+    if entry_signal_mode != SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE:
+        strategy_version = f"{strategy_version}_{entry_signal_mode}"
 
     for idx in range(1, len(daily)):
         row = daily.iloc[idx]
@@ -297,14 +351,15 @@ def run_supertrend_backtest(
                     "returnPct": gross - fee_bps * 2 / 100,
                     "holdingDays": idx - entry_idx + 1,
                     "exitReason": "st_flip" if float(row["_st_dir"]) == -1 else "stop",
-                    "strategyVersion": f"supertrend_adx_{min_adx_for_entry:g}" if min_adx_for_entry is not None else "supertrend",
+                    "strategyVersion": strategy_version,
                     "poolType": "supertrend",
                     "entryAdx": entry_adx,
+                    "entrySignalMode": entry_signal_mode,
                 })
                 in_position = False
         else:
-            # 买入：方向从 -1 翻 +1，且周线方向为多（共振过滤）
-            if float(prev["_st_dir"]) == -1 and float(row["_st_dir"]) == 1 and _weekly_bullish(date) and _adx_allows_entry(row):
+            # 买入模式只筛选入场触发；出场逻辑在所有精简层中保持一致。
+            if _entry_mode_allows(prev, row, date) and _adx_allows_entry(row):
                 entry_date = date
                 if start_ts and entry_date < start_ts:
                     continue
