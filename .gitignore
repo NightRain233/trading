@@ -35,3 +35,4 @@ backend/watchlist.json
 backend/backtest_results/
 outputs/
 data/
+.worktrees/
