@@ -94,13 +94,15 @@ _check_host: ## Guard: fail if DEPLOY_HOST is not set
 	@test -n "$(DEPLOY_HOST)" || (echo "ERROR: DEPLOY_HOST not set. Run: cp Makefile.local.example Makefile.local && edit it." >&2 && exit 1)
 
 deploy: _check_host ## Sync project to remote server using rsync
-	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH) 
+	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST):$(DEPLOY_PATH)
+	scp backend/watchlist.json $(DEPLOY_HOST):$(DEPLOY_PATH)/backend/watchlist.json 2>/dev/null || true
 
 deploy-up: deploy ## Deploy and start docker containers on remote
 	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --build"
 
 deploy-tx: ## Sync project to remote server using rsync
-	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST_TX):$(DEPLOY_PATH_TX) 
+	rsync -avz --filter=':- .gitignore' --exclude='.git' ./ $(DEPLOY_HOST_TX):$(DEPLOY_PATH_TX)
+	scp backend/watchlist.json $(DEPLOY_HOST_TX):$(DEPLOY_PATH_TX)/backend/watchlist.json 2>/dev/null || true
 
 deploy-up-tx: deploy-tx ## Deploy and start docker containers on remote
 	ssh $(DEPLOY_HOST_TX) "cd $(DEPLOY_PATH_TX) && docker compose up -d --build"
