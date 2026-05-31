@@ -16,4 +16,4 @@ COPY . .
 RUN mkdir -p data
 
 # Use the environment created by uv
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uv", "run", "--no-dev", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
