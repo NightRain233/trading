@@ -153,6 +153,15 @@ class ResonanceStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(result["rewardRiskRatio"], 2.0, places=2)
         self.assertIn(result["riskLevel"], ("low", "medium", "high"))
 
+    def test_resonance_v2_no_buy_signal_without_volume_shrink(self):
+        daily = _build_daily_df(cross_index=20, final_volume=1200.0)
+        weekly = _build_weekly_df(macd_w=0.4, signal_w=0.2, ma5_w=100.0)
+
+        result = _evaluate_resonance_strategy_v2(daily, weekly)
+
+        self.assertTrue(result["inPool"])
+        self.assertFalse(result["buySignal"])
+
     def test_resonance_v2_uses_strategy_version_risk_parameters(self):
         daily = _build_daily_df(cross_index=20, final_volume=600.0)
         weekly = _build_weekly_df(macd_w=0.4, signal_w=0.2, ma5_w=100.0)
