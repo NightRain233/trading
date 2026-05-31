@@ -172,6 +172,7 @@ def _build_supertrend_daily_df(adx_at_entry: float) -> pd.DataFrame:
             "Low": [99.0, 99.0, 100.5, 102.0, 98.0],
             "Close": [100.0, 100.0, 103.0, 104.0, 99.0],
             "ADX": [15.0, 15.0, adx_at_entry, 30.0, 30.0],
+            "ATR": [2.0, 2.0, 4.0, 4.0, 4.0],
         },
         index=dates,
     )
@@ -237,6 +238,105 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["strategyVersion"], "supertrend_adx_25")
         self.assertEqual(trades[0]["entryAdx"], 28.0)
+
+    def test_supertrend_support_test_entry_enters_near_support(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        weekly = daily.copy()
+        st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [101.0, 101.0, 101.0, 101.0, 100.0],
+                "SUPERTd_7_3.0": [-1, 1, 1, 1, -1],
+            },
+            index=daily.index,
+        )
+        weekly_st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [98.0] * len(weekly),
+                "SUPERTd_7_3.0": [1] * len(weekly),
+            },
+            index=weekly.index,
+        )
+
+        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                filter_weekly_df=weekly,
+                fee_bps=0,
+                slippage_bps=0,
+                entry_signal_mode="weekly_bull_support_test",
+            )
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["entrySignalMode"], "weekly_bull_support_test")
+        self.assertEqual(trades[0]["entryDate"], str(daily.index[2].date()))
+
+    def test_supertrend_weekly_bull_support_test_rejects_weekly_bearish(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        weekly = daily.copy()
+        st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [101.0, 101.0, 101.0, 101.0, 100.0],
+                "SUPERTd_7_3.0": [-1, 1, 1, 1, -1],
+            },
+            index=daily.index,
+        )
+        weekly_st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [98.0] * len(weekly),
+                "SUPERTd_7_3.0": [-1] * len(weekly),
+            },
+            index=weekly.index,
+        )
+
+        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                filter_weekly_df=weekly,
+                fee_bps=0,
+                slippage_bps=0,
+                entry_signal_mode="weekly_bull_support_test",
+            )
+
+        self.assertEqual(trades, [])
+
+    def test_supertrend_daily_bull_flip_ignores_weekly_bearish_filter(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        weekly = daily.copy()
+        st = _build_supertrend_indicator(daily.index)
+        weekly_st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [98.0] * len(weekly),
+                "SUPERTd_7_3.0": [-1] * len(weekly),
+            },
+            index=weekly.index,
+        )
+
+        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                filter_weekly_df=weekly,
+                fee_bps=0,
+                slippage_bps=0,
+                entry_signal_mode="daily_bull_flip",
+            )
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["entrySignalMode"], "daily_bull_flip")
+
+    def test_supertrend_rejects_unknown_entry_signal_mode(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+
+        with self.assertRaises(ValueError):
+            run_supertrend_backtest(
+                "TEST",
+                daily,
+                fee_bps=0,
+                slippage_bps=0,
+                entry_signal_mode="unknown_mode",
+            )
 
     def test_weekly_bb_pullback_confirms_after_prior_breakout(self):
         weekly = _build_weekly_bb_pullback_df()

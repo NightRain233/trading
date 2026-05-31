@@ -2,6 +2,7 @@ import unittest
 
 from strategy_comparison import format_markdown_report
 from strategy_comparison import make_strategy_verdict
+from strategy_comparison import _supertrend_strategy_version
 
 
 class StrategyComparisonTests(unittest.TestCase):
@@ -25,6 +26,11 @@ class StrategyComparisonTests(unittest.TestCase):
 
         self.assertEqual(verdict["defaultStrategy"], "supertrend")
         self.assertIn("收益回撤比", verdict["reason"])
+
+    def test_supertrend_strategy_version_includes_adx_and_entry_mode_when_combined(self):
+        version = _supertrend_strategy_version(25.0, "support_test")
+
+        self.assertEqual(version, "supertrend_adx_25_support_test")
 
     def test_markdown_report_includes_asset_rows_and_data_caveats(self):
         report = {
@@ -71,6 +77,33 @@ class StrategyComparisonTests(unittest.TestCase):
                     "averageHoldingDays": 41.25,
                 }
             ],
+            "supertrendSlimmingRows": [
+                {
+                    "assetGroup": "BTC",
+                    "mode": "weekly_bull_daily_bull_flip",
+                    "label": "周多日刚翻多",
+                    "baseline": {
+                        "totalReturnPct": 828.8711,
+                        "maxDrawdownPct": 16.7806,
+                        "returnDrawdownRatio": 49.3945,
+                        "tradeCount": 15,
+                        "winRate": 0.8,
+                        "averageHoldingDays": 36.9,
+                    },
+                    "variant": {
+                        "totalReturnPct": 760.0,
+                        "maxDrawdownPct": 16.0,
+                        "returnDrawdownRatio": 47.5,
+                        "tradeCount": 10,
+                        "winRate": 0.7,
+                        "averageHoldingDays": 42.0,
+                    },
+                    "totalReturnRetention": 0.917,
+                    "returnDrawdownRatioRetention": 0.962,
+                    "tradeCountReductionPct": 0.3333,
+                    "passesSlimmingGate": True,
+                }
+            ],
             "dataCaveats": ["部分中国 ETF 只有不足五年缓存。"],
         }
 
@@ -82,6 +115,10 @@ class StrategyComparisonTests(unittest.TestCase):
         self.assertIn("ADX >= 25", markdown)
         self.assertIn("周线 BB 突破+回踩", markdown)
         self.assertIn("210.0%", markdown)
+        self.assertIn("SuperTrend 精简层研究", markdown)
+        self.assertIn("周多日刚翻多", markdown)
+        self.assertIn("通过", markdown)
+        self.assertIn("91.7%", markdown)
         self.assertIn("部分中国 ETF", markdown)
 
 

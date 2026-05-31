@@ -184,6 +184,8 @@ const isWeeklyBull = (s: STItem) => s.weeklyState === 'bull' || s.weeklyState ==
 const isWeeklyBear = (s: STItem) => s.weeklyState === 'bear' || s.weeklyState === 'bear_flip';
 const isDailyBull = (s: STItem) => s.state === 'bull' || s.state === 'bull_flip';
 const isDailyBear = (s: STItem) => s.state === 'bear' || s.state === 'bear_flip';
+const isLowPriorityObservation = (s: STItem) => !s.isActionable && (s.alertPriority === 'low' || s.alertPriority === 'none');
+const isFocusItem = (s: STItem) => s.alertPriority === 'high' || s.isActionable;
 
 const CROSS_FILTERS: { key: FilterType; label: string }[] = [
   { key: 'weekly_bull_daily_bull', label: '周多日多' },
@@ -216,6 +218,7 @@ export function SupertrendPage() {
   const [items, setItems] = useState<STItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [showLowPriority, setShowLowPriority] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -237,6 +240,11 @@ export function SupertrendPage() {
       if (priorityDiff !== 0) return priorityDiff;
       return ORDER.indexOf(a.state) - ORDER.indexOf(b.state);
     });
+  const lowPriorityCount = filter === 'all' ? displayed.filter(isLowPriorityObservation).length : 0;
+  const visibleDisplayed = filter === 'all' && !showLowPriority
+    ? displayed.filter(i => !isLowPriorityObservation(i))
+    : displayed;
+  const onlyFoldedLowPriority = filter === 'all' && !showLowPriority && visibleDisplayed.length === 0 && lowPriorityCount > 0;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -324,13 +332,39 @@ export function SupertrendPage() {
         ))}
       </div>
 
+      {filter === 'all' && (
+        <div className="mb-5 rounded-xl border border-zinc-800/90 bg-zinc-950/45 px-3 py-3 sm:px-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <div className="text-xs font-semibold text-zinc-300">日常视图：保留全量扫描，折叠低优先级观察</div>
+              <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                近五年精简层没有同时满足收益回撤比保留 85%、总收益保留 70%、交易数下降；默认只收起低优先级卡片，不改变底层扫描覆盖。
+              </div>
+            </div>
+            <button
+              onClick={() => setShowLowPriority(v => !v)}
+              className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:text-zinc-100 active:scale-[0.98]"
+            >
+              {showLowPriority ? '收起低优先级' : `展开低优先级 ${lowPriorityCount}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading && items.length === 0 && (
         <div className="text-zinc-500 text-sm text-center py-16">扫描中…</div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {displayed.map(item => (
-          <div key={item.symbol} className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+        {visibleDisplayed.map(item => (
+          <div
+            key={item.symbol}
+            className={`rounded-xl border overflow-hidden transition-all ${
+              isFocusItem(item)
+                ? 'border-emerald-500/25 bg-zinc-900/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                : 'border-zinc-800 bg-zinc-900/45 opacity-80'
+            }`}
+          >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm font-semibold text-zinc-200">{item.symbol}</span>
@@ -389,8 +423,10 @@ export function SupertrendPage() {
         ))}
       </div>
 
-      {!loading && displayed.length === 0 && (
-        <div className="text-zinc-600 text-sm text-center py-16">暂无符合条件的标的</div>
+      {!loading && visibleDisplayed.length === 0 && (
+        <div className="text-zinc-600 text-sm text-center py-16">
+          {onlyFoldedLowPriority ? '当前只有低优先级观察，已默认折叠' : '暂无符合条件的标的'}
+        </div>
       )}
     </div>
   );
