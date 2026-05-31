@@ -1,4 +1,4 @@
-import type { Candle, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
+import type { Candle, HistoryTradeSymbolOption, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
 import { normalizeBatchSnapshot, parseBatchHeaders, parseBatchResponse } from './batchResponse.js';
 
 // 自动根据环境判断 API 地址
@@ -262,4 +262,15 @@ export async function fetchHistoryTrades(params: {
     throw new Error(message);
   }
   return await response.json();
+}
+
+export async function fetchHistoryTradeSymbols(): Promise<HistoryTradeSymbolOption[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/history-trades/symbols`);
+    if (!response.ok) return [];
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching history trade symbols:', error);
+    return [];
+  }
 }

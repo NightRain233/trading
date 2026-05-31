@@ -32,6 +32,7 @@ from analysis import (
 )
 import json
 import os
+import sqlite3
 import uuid
 import time
 import logging
@@ -71,6 +72,7 @@ app.add_middleware(
 
 WATCHLIST_FILE = "watchlist.json"
 RS_HOLDINGS_CACHE_FILE = "backtest_results/rs_holdings_cache.json"
+HISTORY_TRADES_CACHE_FILE = "backtest_results/history_trades_cache.sqlite"
 PREWARM_HOURS = (9, 12, 15, 21)
 PREWARM_TZ = ZoneInfo("Asia/Shanghai")
 COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
@@ -645,6 +647,232 @@ def list_strategies():
     return [{"id": v.id, "label": v.label} for v in list_strategy_versions()] + list_rs_rotation_presets()
 
 
+def _history_cache_key(
+    symbol: str,
+    strategy: str,
+    start: Optional[str],
+    end: Optional[str],
+    min_adx_for_entry: Optional[float],
+    weekly_filter: bool,
+) -> str:
+    return json.dumps(
+        {
+            "symbol": symbol.strip().upper(),
+            "strategy": strategy,
+            "start": start or None,
+            "end": end or None,
+            "minAdxForEntry": float(min_adx_for_entry) if min_adx_for_entry is not None else None,
+            "weeklyFilter": bool(weekly_filter),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _history_cache_path(db_path: Optional[str] = None) -> str:
+    return db_path or HISTORY_TRADES_CACHE_FILE
+
+
+def _ensure_history_cache(db_path: Optional[str] = None) -> None:
+    db_path = _history_cache_path(db_path)
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS history_trade_reviews (
+                cache_key TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                start_date TEXT,
+                end_date TEXT,
+                min_adx_for_entry REAL,
+                weekly_filter INTEGER NOT NULL,
+                data_mtime REAL NOT NULL,
+                payload_json TEXT NOT NULL,
+                computed_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_history_trade_reviews_symbol ON history_trade_reviews(symbol)")
+
+
+def load_history_trade_cache(
+    symbol: str,
+    strategy: str,
+    start: Optional[str],
+    end: Optional[str],
+    min_adx_for_entry: Optional[float],
+    weekly_filter: bool,
+    data_mtime: float,
+    db_path: Optional[str] = None,
+) -> Optional[dict]:
+    db_path = _history_cache_path(db_path)
+    if not os.path.exists(db_path):
+        return None
+    _ensure_history_cache(db_path)
+    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT payload_json, data_mtime FROM history_trade_reviews WHERE cache_key = ?",
+            (key,),
+        ).fetchone()
+    if row is None:
+        return None
+    payload_json, cached_mtime = row
+    if float(cached_mtime) < float(data_mtime):
+        return None
+    return json.loads(payload_json)
+
+
+def save_history_trade_cache(
+    payload: dict,
+    data_mtime: float,
+    db_path: Optional[str] = None,
+    min_adx_for_entry: Optional[float] = None,
+    weekly_filter: bool = False,
+) -> None:
+    db_path = _history_cache_path(db_path)
+    _ensure_history_cache(db_path)
+    symbol = str(payload.get("symbol", "")).strip().upper()
+    strategy = str(payload.get("strategy", "supertrend"))
+    start = payload.get("start")
+    end = payload.get("end")
+    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO history_trade_reviews (
+                cache_key, symbol, strategy, start_date, end_date, min_adx_for_entry,
+                weekly_filter, data_mtime, payload_json, computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                data_mtime = excluded.data_mtime,
+                payload_json = excluded.payload_json,
+                computed_at = excluded.computed_at
+            """,
+            (
+                key,
+                symbol,
+                strategy,
+                start,
+                end,
+                float(min_adx_for_entry) if min_adx_for_entry is not None else None,
+                1 if weekly_filter else 0,
+                float(data_mtime),
+                json.dumps(payload, ensure_ascii=False, allow_nan=False),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+
+def _valid_history_symbol(symbol: str) -> bool:
+    normalized = symbol.strip().upper()
+    if not normalized:
+        return False
+    if " " in normalized:
+        return False
+    if normalized.startswith((".", "-", "=")):
+        return False
+    return any(ch.isalnum() for ch in normalized)
+
+
+def _add_catalog_item(catalog: dict, symbol: str, name: str = "", source: str = "") -> None:
+    normalized = symbol.strip().upper() if isinstance(symbol, str) else ""
+    if not _valid_history_symbol(normalized):
+        return
+    existing = catalog.get(normalized, {})
+    catalog[normalized] = {
+        "symbol": normalized,
+        "name": existing.get("name") or (name.strip() if isinstance(name, str) else ""),
+        "source": existing.get("source") or source,
+    }
+
+
+def collect_history_trade_symbol_catalog(
+    universe_files: Optional[List[str]] = None,
+) -> dict:
+    catalog: dict = {}
+
+    for group in load_watchlist():
+        for item in group.get("symbols", []):
+            if isinstance(item, dict):
+                _add_catalog_item(catalog, item.get("symbol", ""), item.get("alias", ""), "watchlist")
+            else:
+                _add_catalog_item(catalog, item, "", "watchlist")
+
+    for universe_file in universe_files or ["universes/a_share_etf_core.json", "universes/etf_core.json"]:
+        if not os.path.exists(universe_file):
+            continue
+        try:
+            with open(universe_file, "r") as f:
+                payload = json.load(f)
+        except Exception:
+            continue
+        raw_symbols = payload.get("symbols", []) if isinstance(payload, dict) else payload
+        for item in raw_symbols:
+            if isinstance(item, dict):
+                _add_catalog_item(catalog, item.get("symbol", ""), item.get("name", ""), universe_file)
+            else:
+                _add_catalog_item(catalog, item, "", universe_file)
+
+    if os.path.exists(DATA_DIR):
+        for filename in os.listdir(DATA_DIR):
+            if not filename.endswith(".parquet") or filename.endswith("_weekly.parquet"):
+                continue
+            _add_catalog_item(catalog, filename[:-8], "", "data")
+
+    return dict(sorted(catalog.items()))
+
+
+def _cached_symbols(db_path: Optional[str] = None) -> dict:
+    db_path = _history_cache_path(db_path)
+    if not os.path.exists(db_path):
+        return {}
+    _ensure_history_cache(db_path)
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT symbol, MAX(computed_at), COUNT(*)
+            FROM history_trade_reviews
+            GROUP BY symbol
+            """
+        ).fetchall()
+    return {symbol: {"cachedAt": computed_at, "cacheCount": count} for symbol, computed_at, count in rows}
+
+
+@app.get("/api/history-trades/symbols")
+def list_history_trade_symbols(universe_files: Optional[List[str]] = None):
+    catalog = collect_history_trade_symbol_catalog(universe_files=universe_files)
+    cached = _cached_symbols()
+    results = []
+    for symbol, item in catalog.items():
+        daily_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        cache_info = cached.get(symbol, {})
+        name = item.get("name", "")
+        results.append({
+            "symbol": symbol,
+            "name": name,
+            "displayName": f"{symbol} · {name}" if name else symbol,
+            "source": item.get("source", ""),
+            "hasData": os.path.exists(daily_path),
+            "hasCache": symbol in cached,
+            "cachedAt": cache_info.get("cachedAt"),
+            "cacheCount": cache_info.get("cacheCount", 0),
+        })
+    return results
+
+
+def _history_data_mtime(symbol: str, weekly_filter: bool = False) -> float:
+    paths = [os.path.join(DATA_DIR, f"{symbol}.parquet")]
+    if weekly_filter:
+        weekly_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+        if os.path.exists(weekly_path):
+            paths.append(weekly_path)
+    return max(os.path.getmtime(path) for path in paths if os.path.exists(path))
+
+
 @app.get("/api/history-trades")
 def get_history_trades(
     symbol: str,
@@ -667,6 +895,19 @@ def get_history_trades(
     if not os.path.exists(daily_path):
         raise HTTPException(status_code=404, detail=f"No cached data for symbol: {normalized_symbol}")
 
+    data_mtime = _history_data_mtime(normalized_symbol, weekly_filter=weekly_filter)
+    cached = load_history_trade_cache(
+        normalized_symbol,
+        strategy,
+        start,
+        end,
+        min_adx_for_entry,
+        weekly_filter,
+        data_mtime=data_mtime,
+    )
+    if cached is not None:
+        return cached
+
     daily = pd.read_parquet(daily_path)
     weekly = None
     if weekly_filter:
@@ -674,7 +915,7 @@ def get_history_trades(
         if os.path.exists(weekly_path):
             weekly = pd.read_parquet(weekly_path)
 
-    return build_supertrend_history_review(
+    payload = build_supertrend_history_review(
         normalized_symbol,
         daily,
         start=start,
@@ -682,6 +923,89 @@ def get_history_trades(
         filter_weekly_df=weekly,
         min_adx_for_entry=min_adx_for_entry,
     )
+    save_history_trade_cache(
+        payload,
+        data_mtime=data_mtime,
+        min_adx_for_entry=min_adx_for_entry,
+        weekly_filter=weekly_filter,
+    )
+    return payload
+
+
+@app.post("/api/history-trades/precompute")
+def precompute_history_trades(
+    strategy: str = "supertrend",
+    start: Optional[str] = "2023-01-01",
+    end: Optional[str] = None,
+    min_adx_for_entry: Optional[float] = None,
+    weekly_filter: bool = False,
+    force: bool = False,
+):
+    if strategy != "supertrend":
+        raise HTTPException(status_code=400, detail=f"Unsupported strategy: {strategy}")
+
+    import pandas as pd
+
+    catalog = collect_history_trade_symbol_catalog()
+    computed = 0
+    cached_count = 0
+    skipped_missing = []
+    failed = []
+
+    for symbol in catalog.keys():
+        daily_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+        if not os.path.exists(daily_path):
+            skipped_missing.append(symbol)
+            continue
+        try:
+            data_mtime = _history_data_mtime(symbol, weekly_filter=weekly_filter)
+            if not force and load_history_trade_cache(
+                symbol,
+                strategy,
+                start,
+                end,
+                min_adx_for_entry,
+                weekly_filter,
+                data_mtime=data_mtime,
+            ) is not None:
+                cached_count += 1
+                continue
+
+            daily = pd.read_parquet(daily_path)
+            weekly = None
+            if weekly_filter:
+                weekly_path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+                if os.path.exists(weekly_path):
+                    weekly = pd.read_parquet(weekly_path)
+            payload = build_supertrend_history_review(
+                symbol,
+                daily,
+                start=start,
+                end=end,
+                filter_weekly_df=weekly,
+                min_adx_for_entry=min_adx_for_entry,
+            )
+            save_history_trade_cache(
+                payload,
+                data_mtime=data_mtime,
+                min_adx_for_entry=min_adx_for_entry,
+                weekly_filter=weekly_filter,
+            )
+            computed += 1
+        except Exception as exc:
+            failed.append({"symbol": symbol, "error": str(exc)})
+
+    return {
+        "strategy": strategy,
+        "start": start,
+        "end": end,
+        "computed": computed,
+        "cached": cached_count,
+        "skippedMissingData": len(skipped_missing),
+        "skippedMissingSymbols": skipped_missing,
+        "failed": failed,
+        "dbPath": HISTORY_TRADES_CACHE_FILE,
+    }
 
 
 @app.get("/api/weekly-breakout/scan")

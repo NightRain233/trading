@@ -137,3 +137,14 @@ export interface HistoryTradesResponse {
   trades: HistoryTrade[];
   summary: HistoryTradesSummary;
 }
+
+export interface HistoryTradeSymbolOption {
+  symbol: string;
+  name: string;
+  displayName: string;
+  source: string;
+  hasData: boolean;
+  hasCache: boolean;
+  cachedAt?: string | null;
+  cacheCount: number;
+}
