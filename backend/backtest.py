@@ -375,6 +375,237 @@ def run_supertrend_backtest(
     return trades
 
 
+def build_supertrend_history_review(
+    symbol: str,
+    df_daily: pd.DataFrame,
+    length: int = 7,
+    multiplier: float = 3.0,
+    fee_bps: float = 5.0,
+    slippage_bps: float = 5.0,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    filter_weekly_df: Optional[pd.DataFrame] = None,
+    min_adx_for_entry: Optional[float] = None,
+) -> Dict[str, object]:
+    if df_daily is None or df_daily.empty:
+        return {
+            "symbol": symbol.upper(),
+            "strategy": "supertrend",
+            "start": start,
+            "end": end,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {
+                "tradeCount": 0,
+                "winRate": 0.0,
+                "averageReturnPct": 0.0,
+                "totalReturnPct": 0.0,
+                "averageHoldingDays": 0.0,
+                "exitReasonCounts": {},
+            },
+        }
+
+    daily = df_daily.sort_index().copy()
+    st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=length, multiplier=multiplier)
+    if st is None or st.empty:
+        return build_supertrend_history_review(
+            symbol,
+            pd.DataFrame(),
+            length=length,
+            multiplier=multiplier,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            start=start,
+            end=end,
+        )
+    dir_col = [c for c in st.columns if c.startswith("SUPERTd_")]
+    val_col = [
+        c for c in st.columns
+        if c.startswith("SUPERT_")
+        and not c.startswith("SUPERTd_")
+        and not c.startswith("SUPERTs_")
+        and not c.startswith("SUPERTl_")
+        and not c.startswith("SUPERTu_")
+    ]
+    if not dir_col or not val_col:
+        return build_supertrend_history_review(
+            symbol,
+            pd.DataFrame(),
+            length=length,
+            multiplier=multiplier,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            start=start,
+            end=end,
+        )
+
+    daily["_st_dir"] = st[dir_col[0]]
+    daily["_st_val"] = st[val_col[0]]
+
+    weekly_dir: Optional[pd.Series] = None
+    if filter_weekly_df is not None and not filter_weekly_df.empty:
+        weekly = filter_weekly_df.sort_index()
+        wst = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=length, multiplier=multiplier)
+        if wst is not None and not wst.empty:
+            wdir_col = [c for c in wst.columns if c.startswith("SUPERTd_")]
+            if wdir_col:
+                weekly_dir = wst[wdir_col[0]].sort_index()
+
+    def _weekly_bullish(date) -> bool:
+        if weekly_dir is None:
+            return True
+        w = weekly_dir[weekly_dir.index <= date]
+        return not w.empty and float(w.iloc[-1]) == 1
+
+    def _adx_allows_entry(row) -> bool:
+        if min_adx_for_entry is None:
+            return True
+        if "ADX" not in row or pd.isna(row.get("ADX")):
+            return False
+        return float(row["ADX"]) >= float(min_adx_for_entry)
+
+    def _row_price(row, col: str, fallback_col: str = "Close") -> float:
+        if col in row and pd.notna(row.get(col)):
+            return float(row[col])
+        return float(row[fallback_col])
+
+    start_ts = pd.Timestamp(start) if start else None
+    end_ts = pd.Timestamp(end) if end else None
+    trades: List[Dict[str, object]] = []
+    markers: List[Dict[str, object]] = []
+    in_position = False
+    entry_idx: Optional[int] = None
+    entry_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    entry_adx: Optional[float] = None
+
+    for idx in range(1, len(daily)):
+        row = daily.iloc[idx]
+        prev = daily.iloc[idx - 1]
+        date = daily.index[idx]
+
+        if in_position and entry_idx is not None and entry_price is not None:
+            cur_stop = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else stop_price
+            if cur_stop is not None and (float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1):
+                raw_exit = min(_row_price(row, "Open"), float(cur_stop))
+                exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
+                gross = (exit_price - entry_price) / entry_price * 100
+                trade_index = len(trades) + 1
+                reason = "st_flip" if float(row["_st_dir"]) == -1 else "stop"
+                trades.append({
+                    "tradeIndex": trade_index,
+                    "symbol": symbol.upper(),
+                    "strategy": "supertrend",
+                    "entryDate": _date_str(daily.index[entry_idx]),
+                    "exitDate": _date_str(date),
+                    "entryPrice": entry_price,
+                    "exitPrice": exit_price,
+                    "stopPrice": cur_stop,
+                    "returnPct": gross - fee_bps * 2 / 100,
+                    "holdingDays": idx - entry_idx + 1,
+                    "exitReason": reason,
+                    "entryAdx": entry_adx,
+                })
+                markers.append({
+                    "time": _date_str(date),
+                    "type": "sell",
+                    "position": "aboveBar",
+                    "color": "#ef4444",
+                    "shape": "arrowDown",
+                    "text": f"卖出 {exit_price:.2f}",
+                    "tradeIndex": trade_index,
+                    "price": exit_price,
+                    "exitReason": reason,
+                })
+                in_position = False
+                entry_idx = None
+                entry_price = None
+                stop_price = None
+                entry_adx = None
+        else:
+            if (
+                float(prev["_st_dir"]) == -1
+                and float(row["_st_dir"]) == 1
+                and _weekly_bullish(date)
+                and _adx_allows_entry(row)
+            ):
+                if start_ts is not None and date < start_ts:
+                    continue
+                if end_ts is not None and date > end_ts:
+                    break
+                raw_entry = _row_price(row, "Open")
+                entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
+                stop_price = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else raw_entry * 0.95
+                entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
+                entry_idx = idx
+                in_position = True
+                markers.append({
+                    "time": _date_str(date),
+                    "type": "buy",
+                    "position": "belowBar",
+                    "color": "#10b981",
+                    "shape": "arrowUp",
+                    "text": f"买入 {entry_price:.2f}",
+                    "tradeIndex": len(trades) + 1,
+                    "price": entry_price,
+                })
+
+    chart_window = daily
+    if start_ts is not None:
+        chart_window = chart_window[chart_window.index >= start_ts]
+    if end_ts is not None:
+        chart_window = chart_window[chart_window.index <= end_ts]
+
+    candles = []
+    supertrend_points = []
+    for ts, row in chart_window.iterrows():
+        if pd.isna(row.get("Close")):
+            continue
+        close = float(row["Close"])
+        candles.append({
+            "time": _date_str(ts),
+            "open": _row_price(row, "Open"),
+            "high": _row_price(row, "High"),
+            "low": _row_price(row, "Low"),
+            "close": close,
+            "volume": float(row["Volume"]) if "Volume" in row and pd.notna(row.get("Volume")) else 0.0,
+        })
+        if pd.notna(row.get("_st_val")) and pd.notna(row.get("_st_dir")):
+            supertrend_points.append({
+                "time": _date_str(ts),
+                "value": float(row["_st_val"]),
+                "direction": int(row["_st_dir"]),
+            })
+
+    returns = [float(trade["returnPct"]) for trade in trades]
+    holding_days = [int(trade["holdingDays"]) for trade in trades]
+    total_equity = 1.0
+    for ret in returns:
+        total_equity *= 1 + ret / 100
+    summary = {
+        "tradeCount": len(trades),
+        "winRate": (sum(1 for ret in returns if ret > 0) / len(returns)) if returns else 0.0,
+        "averageReturnPct": (sum(returns) / len(returns)) if returns else 0.0,
+        "totalReturnPct": (total_equity - 1) * 100 if returns else 0.0,
+        "averageHoldingDays": (sum(holding_days) / len(holding_days)) if holding_days else 0.0,
+        "exitReasonCounts": dict(Counter(str(trade["exitReason"]) for trade in trades)),
+    }
+
+    return {
+        "symbol": symbol.upper(),
+        "strategy": "supertrend",
+        "start": start,
+        "end": end,
+        "candles": candles,
+        "supertrend": supertrend_points,
+        "markers": markers,
+        "trades": trades,
+        "summary": summary,
+    }
+
+
 def _date_str(value) -> str:
     return pd.Timestamp(value).date().isoformat()
 
