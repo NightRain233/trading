@@ -4,6 +4,7 @@ import { createChart, createSeriesMarkers, ColorType, CandlestickSeries, Histogr
 import type { SeriesMarker, Time } from 'lightweight-charts';
 import { CalendarDays, RefreshCw, Search, ShieldCheck, TrendingUp } from 'lucide-react';
 import { fetchHistoryTrades, fetchHistoryTradeSymbols } from '../utils';
+import { getDefaultHistoryStartDate } from '../historyTradesDefaults.js';
 import type { Candle, HistorySupertrendPoint, HistoryTradeSymbolOption, HistoryTradesResponse } from '../types';
 
 const STRATEGIES = [
@@ -147,7 +148,7 @@ export function HistoryTradesPage() {
   const [symbol, setSymbol] = useState('');
   const [symbolOptions, setSymbolOptions] = useState<HistoryTradeSymbolOption[]>([]);
   const [strategy, setStrategy] = useState('supertrend');
-  const [start, setStart] = useState('2023-01-01');
+  const [start, setStart] = useState(() => getDefaultHistoryStartDate());
   const [end, setEnd] = useState('');
   const [weeklyFilter, setWeeklyFilter] = useState(false);
   const [minAdx, setMinAdx] = useState('');
