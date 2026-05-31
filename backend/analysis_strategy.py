@@ -90,6 +90,8 @@ def _has_pullback_reclaim_signal(
 
     volume_ma = df_daily["Volume"].rolling(window=volume_ma_window).mean()
     start_idx = max(1, len(df_daily) - lookback_bars)
+    found_price_reclaim = False
+    first_reason = ""
 
     for i in range(len(df_daily) - 1, start_idx - 1, -1):
         low = float(df_daily["Low"].iloc[i])
@@ -105,10 +107,13 @@ def _has_pullback_reclaim_signal(
             and low >= ema20
             and ema > ema_prev
         ):
+            found_price_reclaim = True
+            first_reason = first_reason or f"{ema_col}回踩确认"
             vol_confirmed = pd.notna(vol_ma) and float(vol_ma) > 0 and vol <= float(vol_ma) * volume_shrink_ratio
-            return True, f"{ema_col}回踩确认", vol_confirmed
+            if vol_confirmed:
+                return True, first_reason, True
 
-    return False, "", False
+    return found_price_reclaim, first_reason, False
 
 
 def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
@@ -144,10 +149,15 @@ def _evaluate_resonance_strategy(df_daily: pd.DataFrame, df_weekly: pd.DataFrame
     if not result["inPool"]:
         return result
 
-    pullback_ema5, reason_ema5, _ = _has_pullback_reclaim_signal(df_daily, "EMA5")
-    pullback_ema10, reason_ema10, _ = _has_pullback_reclaim_signal(df_daily, "EMA10")
-    result["buySignal"] = pullback_ema5 or pullback_ema10
-    result["buyReason"] = (reason_ema5 or reason_ema10) if result["buySignal"] else "最近未出现有效回踩确认"
+    pullback_ema5, reason_ema5, vol5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
+    pullback_ema10, reason_ema10, vol10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
+    result["buySignal"] = (pullback_ema5 and vol5) or (pullback_ema10 and vol10)
+    if result["buySignal"]:
+        result["buyReason"] = (reason_ema5 if vol5 else "") or (reason_ema10 if vol10 else "")
+    elif pullback_ema5 or pullback_ema10:
+        result["buyReason"] = "回踩确认但成交量未缩量"
+    else:
+        result["buyReason"] = "最近未出现有效回踩确认"
     return result
 
 
@@ -215,7 +225,7 @@ def _evaluate_resonance_strategy_v2(
 
     pullback_ema5, _, vol5 = _has_pullback_reclaim_signal(df_daily, "EMA5")
     pullback_ema10, _, vol10 = _has_pullback_reclaim_signal(df_daily, "EMA10")
-    result["buySignal"] = bool(result["inPool"] and (pullback_ema5 or pullback_ema10))
+    result["buySignal"] = bool(result["inPool"] and ((pullback_ema5 and vol5) or (pullback_ema10 and vol10)))
 
     score = 0
     if weekly_ok: score += 35
