@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -146,6 +147,17 @@ class HistoryTradesApiTests(unittest.TestCase):
         miss_item = next(item for item in symbols if item["symbol"] == "MISS")
         self.assertFalse(miss_item["hasData"])
 
+    def test_history_trade_symbols_default_to_watchlist_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_daily(tmpdir, "TEST")
+            self._write_daily(tmpdir, "EXTRA")
+            with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]):
+                symbols = main.list_history_trade_symbols()
+
+        self.assertEqual([item["symbol"] for item in symbols], ["TEST"])
+        self.assertEqual(symbols[0]["displayName"], "TEST · 测试ETF")
+
     def test_precompute_history_trades_writes_sqlite_cache(self):
         payload = {
             "symbol": "TEST",
@@ -164,7 +176,7 @@ class HistoryTradesApiTests(unittest.TestCase):
             db_path = Path(tmpdir) / "history.sqlite"
             with patch.object(main, "DATA_DIR", tmpdir), \
                  patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
-                 patch.object(main, "collect_history_trade_symbol_catalog", return_value={"TEST": {"symbol": "TEST", "name": "测试ETF", "source": "test"}}), \
+                 patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]), \
                  patch.object(main, "build_supertrend_history_review", return_value=payload):
                 result = main.precompute_history_trades(start="2026-01-01")
 
@@ -182,6 +194,122 @@ class HistoryTradesApiTests(unittest.TestCase):
         self.assertEqual(result["computed"], 1)
         self.assertEqual(result["skippedMissingData"], 0)
         self.assertEqual(cached, payload)
+
+    def test_precompute_history_trades_uses_watchlist_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_daily(tmpdir, "TEST")
+            self._write_daily(tmpdir, "EXTRA")
+            db_path = Path(tmpdir) / "history.sqlite"
+
+            def build_payload(symbol, *_args, **kwargs):
+                return {
+                    "symbol": symbol,
+                    "strategy": "supertrend",
+                    "start": kwargs.get("start"),
+                    "end": kwargs.get("end"),
+                    "candles": [],
+                    "supertrend": [],
+                    "markers": [],
+                    "trades": [],
+                    "summary": {"tradeCount": 0},
+                }
+
+            with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
+                 patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]), \
+                 patch.object(main, "collect_history_trade_symbol_catalog", return_value={
+                     "TEST": {"symbol": "TEST", "name": "测试ETF", "source": "watchlist"},
+                     "EXTRA": {"symbol": "EXTRA", "name": "不应预计算", "source": "data"},
+                 }) as broad_catalog, \
+                 patch.object(main, "build_supertrend_history_review", side_effect=build_payload) as mock_review:
+                result = main.precompute_history_trades(start="2026-01-01")
+
+        broad_catalog.assert_not_called()
+        self.assertEqual(result["computed"], 1)
+        self.assertEqual([call.args[0] for call in mock_review.call_args_list], ["TEST"])
+
+    def test_precompute_history_trades_downloads_missing_daily_data(self):
+        payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {"tradeCount": 0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "history.sqlite"
+
+            def write_downloaded_data(symbols):
+                for symbol in symbols:
+                    self._write_daily(tmpdir, symbol)
+                return {}
+
+            with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
+                 patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]), \
+                 patch.object(main, "batch_fetch_and_update", side_effect=write_downloaded_data) as mock_download, \
+                 patch.object(main, "build_supertrend_history_review", return_value=payload):
+                result = main.precompute_history_trades(start="2026-01-01")
+
+                cached = main.load_history_trade_cache(
+                    "TEST",
+                    "supertrend",
+                    "2026-01-01",
+                    None,
+                    None,
+                    False,
+                    data_mtime=(Path(tmpdir) / "TEST.parquet").stat().st_mtime,
+                    db_path=str(db_path),
+                )
+
+        mock_download.assert_called_once_with(["TEST"])
+        self.assertEqual(result["downloaded"], 1)
+        self.assertEqual(result["computed"], 1)
+        self.assertEqual(cached, payload)
+
+    def test_precompute_history_trades_defaults_to_five_years(self):
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = cls(2026, 5, 31, 12, 0, 0)
+                return value.replace(tzinfo=tz) if tz else value
+
+        payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "start": "2021-05-31",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {"tradeCount": 0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_daily(tmpdir)
+            db_path = Path(tmpdir) / "history.sqlite"
+            with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
+                 patch.object(main, "datetime", FrozenDatetime), \
+                 patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]), \
+                 patch.object(main, "build_supertrend_history_review", return_value=payload) as mock_review:
+                result = main.precompute_history_trades(start=None)
+
+        self.assertEqual(result["start"], "2021-05-31")
+        self.assertEqual(mock_review.call_args.kwargs["start"], "2021-05-31")
+
+    def test_history_precompute_cli_targets_single_symbol(self):
+        with patch.object(main, "precompute_history_trades", return_value={"computed": 1}) as mock_precompute:
+            exit_code = main.main(["--precompute-history-trades", "--symbol", "test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(mock_precompute.call_args.kwargs["symbols"], ["TEST"])
 
 
 if __name__ == "__main__":
