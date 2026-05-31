@@ -83,3 +83,57 @@ export interface WatchlistGroup {
 }
 
 export type Timeframe = '1D' | '1W';
+
+export interface HistorySupertrendPoint {
+  time: string;
+  value: number;
+  direction: 1 | -1;
+}
+
+export interface HistoryTradeMarker {
+  time: string;
+  type: 'buy' | 'sell';
+  position: 'aboveBar' | 'belowBar';
+  color: string;
+  shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square';
+  text: string;
+  tradeIndex: number;
+  price: number;
+  exitReason?: string;
+}
+
+export interface HistoryTrade {
+  tradeIndex: number;
+  symbol: string;
+  strategy: string;
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  stopPrice?: number | null;
+  returnPct: number;
+  holdingDays: number;
+  exitReason: string;
+  entryAdx?: number | null;
+}
+
+export interface HistoryTradesSummary {
+  tradeCount: number;
+  winRate: number;
+  averageReturnPct: number;
+  totalReturnPct: number;
+  averageHoldingDays: number;
+  exitReasonCounts: Record<string, number>;
+}
+
+export interface HistoryTradesResponse {
+  symbol: string;
+  strategy: string;
+  start?: string | null;
+  end?: string | null;
+  candles: Candle[];
+  supertrend: HistorySupertrendPoint[];
+  markers: HistoryTradeMarker[];
+  trades: HistoryTrade[];
+  summary: HistoryTradesSummary;
+}

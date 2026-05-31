@@ -22,8 +22,8 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st';
-  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st') => void;
+  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history';
+  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -58,7 +58,9 @@ export const Header: React.FC<HeaderProps> = ({
           ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
           : tab === 'wbb'
             ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-300"
-            : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
+            : tab === 'history'
+              ? "bg-sky-500/10 border-sky-500/40 text-sky-300"
+              : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
       : "btn-glass text-zinc-400 hover:text-zinc-200"
   );
 
@@ -95,6 +97,9 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             <button onClick={() => onTabChange('wbb')} className={tabClass('wbb')} title="周线BB突破">
               周线BB
+            </button>
+            <button onClick={() => onTabChange('history')} className={tabClass('history')} title="历史买卖点复盘">
+              复盘
             </button>
           </nav>
 

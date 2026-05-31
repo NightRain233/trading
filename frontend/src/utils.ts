@@ -1,4 +1,4 @@
-import type { Candle, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
+import type { Candle, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
 import { normalizeBatchSnapshot, parseBatchHeaders, parseBatchResponse } from './batchResponse.js';
 
 // 自动根据环境判断 API 地址
@@ -229,4 +229,37 @@ export async function updateAlias(symbol: string, alias: string): Promise<boolea
     console.error(`Error updating alias for ${symbol}:`, error);
     return false;
   }
+}
+
+export async function fetchHistoryTrades(params: {
+  symbol: string;
+  strategy: string;
+  start?: string;
+  end?: string;
+  minAdxForEntry?: number | null;
+  weeklyFilter?: boolean;
+}): Promise<HistoryTradesResponse> {
+  const query = new URLSearchParams({
+    symbol: params.symbol.trim().toUpperCase(),
+    strategy: params.strategy,
+  });
+  if (params.start) query.set('start', params.start);
+  if (params.end) query.set('end', params.end);
+  if (params.minAdxForEntry != null && Number.isFinite(params.minAdxForEntry)) {
+    query.set('min_adx_for_entry', String(params.minAdxForEntry));
+  }
+  if (params.weeklyFilter) query.set('weekly_filter', 'true');
+
+  const response = await fetch(`${API_BASE_URL}/history-trades?${query.toString()}`);
+  if (!response.ok) {
+    let message = `Request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.detail) message = payload.detail;
+    } catch {
+      // Keep status message when backend does not return JSON.
+    }
+    throw new Error(message);
+  }
+  return await response.json();
 }

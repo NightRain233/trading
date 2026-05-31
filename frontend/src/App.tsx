@@ -6,6 +6,7 @@ const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => 
 const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
 const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').then(m => ({ default: m.WeeklyBreakoutPage })));
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
+const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -33,6 +34,12 @@ const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '�
 const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
 const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 const trendOrder = ['强势多头', '回调多头', '震荡', '潜在转空', '反弹空头', '强势空头', '潜在转多'];
+type AppTab = 'watchlist' | 'rs' | 'wbb' | 'st' | 'history';
+
+const pathToTab = (pathname: string): AppTab => {
+  if (pathname === '/history-trades') return 'history';
+  return 'st';
+};
 
 const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
   const symbols = new Set<string>();
@@ -107,7 +114,7 @@ function App() {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
-  const [activeTab, setActiveTab] = useState<'watchlist' | 'rs' | 'wbb' | 'st'>('st');
+  const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -171,6 +178,20 @@ function App() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const handlePopState = () => setActiveTab(pathToTab(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleTabChange = useCallback((tab: AppTab) => {
+    setActiveTab(tab);
+    const nextPath = tab === 'history' ? '/history-trades' : '/';
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+  }, []);
 
   const allSymbols = useMemo(() => {
     const symbolSet = new Set<string>();
@@ -555,7 +576,7 @@ function App() {
         handleRefresh={handleManualRefresh}
         onShowBacktest={() => setShowBacktest(true)}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
       />
 
       {showNewGroupInput && (
@@ -589,6 +610,10 @@ function App() {
       ) : activeTab === 'st' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
           <SupertrendPage />
+        </Suspense>
+      ) : activeTab === 'history' ? (
+        <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
+          <HistoryTradesPage />
         </Suspense>
       ) : (
       <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
