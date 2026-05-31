@@ -1,0 +1,8 @@
+# Copy this file to Makefile.local and fill in your server details.
+# Makefile.local is gitignored — never commit it.
+
+DEPLOY_HOST :=
+DEPLOY_PATH :=
+
+DEPLOY_HOST_TX :=
+DEPLOY_PATH_TX :=

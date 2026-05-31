@@ -31,6 +31,9 @@ backend/cache.pkl
 .docker/
 backend/tests/__pycache__/
 
+# --- Local Config ---
+Makefile.local
+
 # --- Personal Data ---
 backend/watchlist.json
 backend/backtest_results/
