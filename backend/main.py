@@ -1,7 +1,9 @@
+import argparse
 from fastapi import FastAPI, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from pathlib import Path
 from typing import List, Optional, Literal
 from backtest import (
     load_universe_symbols,
@@ -70,7 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-WATCHLIST_FILE = "watchlist.json"
+WATCHLIST_FILE = str(Path(__file__).resolve().parent / "watchlist.json")
 RS_HOLDINGS_CACHE_FILE = "backtest_results/rs_holdings_cache.json"
 HISTORY_TRADES_CACHE_FILE = "backtest_results/history_trades_cache.sqlite"
 PREWARM_HOURS = (9, 12, 15, 21)
@@ -826,6 +828,24 @@ def collect_history_trade_symbol_catalog(
     return dict(sorted(catalog.items()))
 
 
+def collect_watchlist_history_trade_symbol_catalog(symbols: Optional[List[str]] = None) -> dict:
+    requested = set(normalize_symbols(symbols)) if symbols else None
+    catalog: dict = {}
+    for group in load_watchlist():
+        for item in group.get("symbols", []):
+            if isinstance(item, dict):
+                symbol = item.get("symbol", "")
+                name = item.get("alias", "")
+            else:
+                symbol = item
+                name = ""
+            normalized = symbol.strip().upper() if isinstance(symbol, str) else ""
+            if requested is not None and normalized not in requested:
+                continue
+            _add_catalog_item(catalog, normalized, name, "watchlist")
+    return dict(sorted(catalog.items()))
+
+
 def _cached_symbols(db_path: Optional[str] = None) -> dict:
     db_path = _history_cache_path(db_path)
     if not os.path.exists(db_path):
@@ -844,7 +864,11 @@ def _cached_symbols(db_path: Optional[str] = None) -> dict:
 
 @app.get("/api/history-trades/symbols")
 def list_history_trade_symbols(universe_files: Optional[List[str]] = None):
-    catalog = collect_history_trade_symbol_catalog(universe_files=universe_files)
+    catalog = (
+        collect_history_trade_symbol_catalog(universe_files=universe_files)
+        if universe_files is not None
+        else collect_watchlist_history_trade_symbol_catalog()
+    )
     cached = _cached_symbols()
     results = []
     for symbol, item in catalog.items():
@@ -871,6 +895,17 @@ def _history_data_mtime(symbol: str, weekly_filter: bool = False) -> float:
         if os.path.exists(weekly_path):
             paths.append(weekly_path)
     return max(os.path.getmtime(path) for path in paths if os.path.exists(path))
+
+
+def _default_history_precompute_start(today=None) -> str:
+    current = today or datetime.now(PREWARM_TZ).date()
+    if isinstance(current, datetime):
+        current = current.date()
+    try:
+        start_date = current.replace(year=current.year - 5)
+    except ValueError:
+        start_date = current.replace(year=current.year - 5, day=28)
+    return start_date.isoformat()
 
 
 @app.get("/api/history-trades")
@@ -935,34 +970,45 @@ def get_history_trades(
 @app.post("/api/history-trades/precompute")
 def precompute_history_trades(
     strategy: str = "supertrend",
-    start: Optional[str] = "2023-01-01",
+    start: Optional[str] = None,
     end: Optional[str] = None,
     min_adx_for_entry: Optional[float] = None,
     weekly_filter: bool = False,
     force: bool = False,
+    symbols: Optional[List[str]] = None,
 ):
     if strategy != "supertrend":
         raise HTTPException(status_code=400, detail=f"Unsupported strategy: {strategy}")
 
     import pandas as pd
 
-    catalog = collect_history_trade_symbol_catalog()
+    resolved_start = start or _default_history_precompute_start()
+    catalog = collect_watchlist_history_trade_symbol_catalog(symbols=symbols)
     computed = 0
     cached_count = 0
+    downloaded = 0
     skipped_missing = []
     failed = []
 
     for symbol in catalog.keys():
         daily_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
         if not os.path.exists(daily_path):
-            skipped_missing.append(symbol)
-            continue
+            try:
+                batch_fetch_and_update([symbol])
+            except Exception as exc:
+                failed.append({"symbol": symbol, "error": f"download failed: {exc}"})
+                continue
+            if os.path.exists(daily_path):
+                downloaded += 1
+            else:
+                skipped_missing.append(symbol)
+                continue
         try:
             data_mtime = _history_data_mtime(symbol, weekly_filter=weekly_filter)
             if not force and load_history_trade_cache(
                 symbol,
                 strategy,
-                start,
+                resolved_start,
                 end,
                 min_adx_for_entry,
                 weekly_filter,
@@ -980,7 +1026,7 @@ def precompute_history_trades(
             payload = build_supertrend_history_review(
                 symbol,
                 daily,
-                start=start,
+                start=resolved_start,
                 end=end,
                 filter_weekly_df=weekly,
                 min_adx_for_entry=min_adx_for_entry,
@@ -997,10 +1043,11 @@ def precompute_history_trades(
 
     return {
         "strategy": strategy,
-        "start": start,
+        "start": resolved_start,
         "end": end,
         "computed": computed,
         "cached": cached_count,
+        "downloaded": downloaded,
         "skippedMissingData": len(skipped_missing),
         "skippedMissingSymbols": skipped_missing,
         "failed": failed,
@@ -1367,6 +1414,37 @@ async def startup_event():
     bg_thread = threading.Thread(target=refresh_watchlist_background, daemon=True)
     bg_thread.start()
 
-if __name__ == "__main__":
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Trading backend utilities")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--precompute-history-trades", action="store_true")
+    parser.add_argument("--symbol", action="append", help="Limit history precompute to a watchlist symbol")
+    parser.add_argument("--start", default=None)
+    parser.add_argument("--end", default=None)
+    parser.add_argument("--min-adx-for-entry", type=float, default=None)
+    parser.add_argument("--weekly-filter", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.precompute_history_trades:
+        target_symbols = normalize_symbols(args.symbol or [])
+        result = precompute_history_trades(
+            start=args.start,
+            end=args.end,
+            min_adx_for_entry=args.min_adx_for_entry,
+            weekly_filter=args.weekly_filter,
+            force=args.force,
+            symbols=target_symbols or None,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
