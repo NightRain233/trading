@@ -229,6 +229,7 @@ def run_supertrend_backtest(
     start: Optional[str] = None,
     end: Optional[str] = None,
     filter_weekly_df: Optional[pd.DataFrame] = None,
+    min_adx_for_entry: Optional[float] = None,
 ) -> List[Dict[str, object]]:
     if df_daily is None or df_daily.empty:
         return []
@@ -258,6 +259,13 @@ def run_supertrend_backtest(
         w = weekly_dir[weekly_dir.index <= date]
         return not w.empty and float(w.iloc[-1]) == 1
 
+    def _adx_allows_entry(row) -> bool:
+        if min_adx_for_entry is None:
+            return True
+        if "ADX" not in row or pd.isna(row.get("ADX")):
+            return False
+        return float(row["ADX"]) >= float(min_adx_for_entry)
+
     start_ts = pd.Timestamp(start) if start else None
     end_ts = pd.Timestamp(end) if end else None
     trades: List[Dict[str, object]] = []
@@ -265,6 +273,7 @@ def run_supertrend_backtest(
     entry_idx = None
     entry_price = None
     stop_price = None
+    entry_adx = None
 
     for idx in range(1, len(daily)):
         row = daily.iloc[idx]
@@ -288,13 +297,14 @@ def run_supertrend_backtest(
                     "returnPct": gross - fee_bps * 2 / 100,
                     "holdingDays": idx - entry_idx + 1,
                     "exitReason": "st_flip" if float(row["_st_dir"]) == -1 else "stop",
-                    "strategyVersion": "supertrend",
+                    "strategyVersion": f"supertrend_adx_{min_adx_for_entry:g}" if min_adx_for_entry is not None else "supertrend",
                     "poolType": "supertrend",
+                    "entryAdx": entry_adx,
                 })
                 in_position = False
         else:
             # 买入：方向从 -1 翻 +1，且周线方向为多（共振过滤）
-            if float(prev["_st_dir"]) == -1 and float(row["_st_dir"]) == 1 and _weekly_bullish(date):
+            if float(prev["_st_dir"]) == -1 and float(row["_st_dir"]) == 1 and _weekly_bullish(date) and _adx_allows_entry(row):
                 entry_date = date
                 if start_ts and entry_date < start_ts:
                     continue
@@ -303,6 +313,7 @@ def run_supertrend_backtest(
                 raw_entry = float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"])
                 entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
                 stop_price = float(row["_st_val"]) if pd.notna(row["_st_val"]) else raw_entry * 0.95
+                entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
                 entry_idx = idx
                 in_position = True
 

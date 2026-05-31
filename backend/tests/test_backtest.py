@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -8,6 +9,7 @@ from backtest import load_universe_symbols
 from backtest import annotate_relative_strength
 from backtest import evaluate_weekly_bb_pullback
 from backtest import run_backtest_for_symbol
+from backtest import run_supertrend_backtest
 from backtest import resolve_market_settings
 from backtest import simulate_closed_trade_portfolio
 from backtest import simulate_mark_to_market_portfolio
@@ -161,7 +163,81 @@ def _build_market_regime_df(bullish: bool = True) -> pd.DataFrame:
     )
 
 
+def _build_supertrend_daily_df(adx_at_entry: float) -> pd.DataFrame:
+    dates = pd.date_range("2025-01-01", periods=5, freq="B")
+    return pd.DataFrame(
+        {
+            "Open": [100.0, 100.0, 101.0, 103.0, 102.0],
+            "High": [101.0, 101.0, 104.0, 105.0, 103.0],
+            "Low": [99.0, 99.0, 100.5, 102.0, 98.0],
+            "Close": [100.0, 100.0, 103.0, 104.0, 99.0],
+            "ADX": [15.0, 15.0, adx_at_entry, 30.0, 30.0],
+        },
+        index=dates,
+    )
+
+
+def _build_supertrend_indicator(index: pd.DatetimeIndex) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "SUPERT_7_3.0": [101.0, 101.0, 98.0, 99.0, 100.0],
+            "SUPERTd_7_3.0": [-1, -1, 1, 1, -1],
+        },
+        index=index,
+    )
+
+
 class BacktestTests(unittest.TestCase):
+    def test_supertrend_adx_filter_skips_low_adx_flip(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=18.0)
+        weekly = daily.copy()
+        st = _build_supertrend_indicator(daily.index)
+        weekly_st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [98.0] * len(weekly),
+                "SUPERTd_7_3.0": [1] * len(weekly),
+            },
+            index=weekly.index,
+        )
+
+        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                filter_weekly_df=weekly,
+                fee_bps=0,
+                slippage_bps=0,
+                min_adx_for_entry=25.0,
+            )
+
+        self.assertEqual(trades, [])
+
+    def test_supertrend_adx_filter_allows_trending_flip(self):
+        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        weekly = daily.copy()
+        st = _build_supertrend_indicator(daily.index)
+        weekly_st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [98.0] * len(weekly),
+                "SUPERTd_7_3.0": [1] * len(weekly),
+            },
+            index=weekly.index,
+        )
+
+        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                filter_weekly_df=weekly,
+                fee_bps=0,
+                slippage_bps=0,
+                min_adx_for_entry=25.0,
+            )
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["strategyVersion"], "supertrend_adx_25")
+        self.assertEqual(trades[0]["entryAdx"], 28.0)
+
     def test_weekly_bb_pullback_confirms_after_prior_breakout(self):
         weekly = _build_weekly_bb_pullback_df()
         daily = _build_daily_pullback_confirmation_df()

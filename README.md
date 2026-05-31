@@ -59,6 +59,15 @@ cd backend
 uv run python backtest.py --symbols 510300.SS 510050.SS --strategy-version resonance_v2_atr_1_5 --start 2023-01-01
 ```
 
+### 策略比较报告
+
+```bash
+cd backend
+PYTHONPATH=. uv run python strategy_comparison.py --format markdown
+```
+
+该脚本会复用本地 `backend/data/*.parquet` 缓存，对比 SuperTrend、RS 动量轮动、买入持有、ADX 过滤 SuperTrend、周线 BB 突破+回踩。详细说明见 [策略回测复盘指南](docs/strategy-backtesting-guide.md)，当前完整结论见 [SuperTrend vs 动量策略近五年回测](docs/supertrend-vs-momentum-5y-report.md)，直观版见 [HTML 可视化报告](docs/supertrend-vs-momentum-5y-report.html)。
+
 ## 交易策略
 
 系统设计为每日两次复盘（午间 12:00–13:00，晚间 21:00–22:00）：

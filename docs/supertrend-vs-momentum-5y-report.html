@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SuperTrend 策略近五年回测可视化报告</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --panel: #141417;
+      --panel-2: #18181b;
+      --line: #2a2a2f;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --soft: #71717a;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --cyan: #67e8f9;
+      --blue: #93c5fd;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% -12%, rgba(52, 211, 153, 0.11), transparent 28rem),
+        linear-gradient(180deg, #111113 0%, var(--bg) 22rem, #0d0d10 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.6;
+    }
+
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      gap: 24px;
+      align-items: stretch;
+      margin-bottom: 24px;
+    }
+
+    .hero-main, .panel {
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(24, 24, 27, 0.92), rgba(12, 12, 14, 0.96));
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      border-radius: 22px;
+      padding: 34px;
+      min-height: 360px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-main::after {
+      content: "";
+      position: absolute;
+      inset: auto -8% -34% 42%;
+      height: 340px;
+      background: radial-gradient(circle, rgba(52, 211, 153, 0.18), transparent 64%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(52, 211, 153, 0.28);
+      background: rgba(52, 211, 153, 0.08);
+      color: var(--emerald);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    h1 {
+      margin: 22px 0 14px;
+      max-width: 760px;
+      font-size: clamp(34px, 6vw, 72px);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+    }
+
+    .lead {
+      max-width: 760px;
+      color: #d4d4d8;
+      font-size: clamp(16px, 2vw, 20px);
+    }
+
+    .hero-foot {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 34px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.035);
+      border-radius: 999px;
+      padding: 7px 10px;
+    }
+
+    .verdict {
+      border-radius: 22px;
+      padding: 22px;
+      background:
+        linear-gradient(180deg, rgba(52, 211, 153, 0.13), rgba(24, 24, 27, 0.94)),
+        var(--panel);
+      border: 1px solid rgba(52, 211, 153, 0.24);
+      box-shadow: var(--shadow);
+    }
+
+    .verdict strong {
+      display: block;
+      color: var(--emerald);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .score {
+      margin: 20px 0;
+      font-size: 54px;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      font-weight: 900;
+    }
+
+    .score small {
+      display: block;
+      color: var(--soft);
+      font-size: 12px;
+      letter-spacing: 0;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .panel {
+      border-radius: 18px;
+      padding: 24px;
+      margin-top: 18px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(22px, 3vw, 34px);
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .section-head p, .panel > p {
+      color: var(--muted);
+      margin: 8px 0 0;
+      max-width: 720px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.028);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric b {
+      display: block;
+      margin-top: 8px;
+      font-size: clamp(22px, 3vw, 34px);
+      letter-spacing: -0.04em;
+    }
+
+    .grid-two {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .comparison {
+      display: grid;
+      gap: 14px;
+    }
+
+    .row-card {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.028);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .row-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+
+    .row-title b { font-size: 16px; }
+    .row-title span { color: var(--muted); font-size: 12px; }
+
+    .bar-set {
+      display: grid;
+      gap: 9px;
+    }
+
+    .bar-line {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr) 70px;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .bar {
+      height: 10px;
+      border-radius: 999px;
+      background: #27272a;
+      overflow: hidden;
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      width: var(--w);
+      border-radius: 999px;
+      background: var(--c);
+      min-width: 2px;
+    }
+
+    .mini-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 14px;
+      font-size: 13px;
+    }
+
+    .mini-table th, .mini-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: right;
+    }
+
+    .mini-table th:first-child, .mini-table td:first-child { text-align: left; }
+    .mini-table th { color: var(--soft); font-size: 11px; font-weight: 800; }
+    .mini-table tr:last-child td { border-bottom: 0; }
+
+    .callout {
+      border-left: 3px solid var(--emerald);
+      background: rgba(52, 211, 153, 0.07);
+      border-radius: 12px;
+      padding: 16px;
+      color: #d4d4d8;
+    }
+
+    .warning { border-left-color: var(--amber); background: rgba(251, 191, 36, 0.08); }
+    .danger { border-left-color: var(--rose); background: rgba(251, 113, 133, 0.08); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.026);
+    }
+
+    .step span {
+      color: var(--emerald);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .step b {
+      display: block;
+      margin: 6px 0;
+      line-height: 1.2;
+    }
+
+    .step p {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .big-number {
+      border: 1px solid rgba(52, 211, 153, 0.26);
+      background: rgba(52, 211, 153, 0.08);
+      border-radius: 16px;
+      padding: 22px;
+    }
+
+    .big-number b {
+      display: block;
+      font-size: clamp(42px, 7vw, 88px);
+      line-height: 0.9;
+      letter-spacing: -0.07em;
+      color: var(--emerald);
+    }
+
+    .big-number span { color: var(--muted); }
+
+    ul {
+      margin: 12px 0 0;
+      padding-left: 18px;
+      color: #d4d4d8;
+    }
+
+    li + li { margin-top: 8px; }
+
+    .footer {
+      margin-top: 22px;
+      color: var(--soft);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 860px) {
+      .page { width: min(100% - 20px, 1180px); padding-top: 18px; }
+      .hero, .grid-two, .decision { grid-template-columns: 1fr; }
+      .hero-main { padding: 24px; min-height: auto; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: 1fr; }
+      .panel { padding: 18px; }
+      .section-head { display: block; }
+      .bar-line { grid-template-columns: 66px minmax(0, 1fr) 58px; }
+      .mini-table { font-size: 12px; }
+      .mini-table th, .mini-table td { padding: 8px 5px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-main">
+        <div>
+          <span class="eyebrow">2021-05-31 至 2026-05-30 · 本地缓存回测</span>
+          <h1>SuperTrend 更适合做默认观察雷达</h1>
+          <p class="lead">这份报告把 SuperTrend、RS 动量轮动、买入持有、ADX 过滤、周线 BB 突破+回踩放在同一张桌上比较。结论不是“ST 永远最好”，而是：在当前中美股、BTC 与全球观察池样本里，它的收益回撤比和维护成本最适合作为第一屏。</p>
+        </div>
+        <div class="hero-foot">
+          <span class="pill">基础 ST 优于动量轮动</span>
+          <span class="pill">ADX 入场过滤未改善</span>
+          <span class="pill">周线 BB 更适合做专题机会</span>
+          <span class="pill">报告脚本可重复运行</span>
+        </div>
+      </div>
+
+      <aside class="verdict">
+        <strong>最终判断</strong>
+        <div class="score">ST<small>作为默认页：合理</small></div>
+        <p>SuperTrend 在四组资产中的收益回撤比均显著高于当前 RS 动量轮动。它不是追求最高收益的唯一答案，但更贴近“少操心、看关键支撑/阻力、按趋势纪律执行”。</p>
+      </aside>
+    </section>
+
+    <section class="metrics">
+      <div class="metric"><span>中国 ETF / A股代理 ST收益回撤比</span><b>4.29</b></div>
+      <div class="metric"><span>美股 / ETF ST收益回撤比</span><b>12.42</b></div>
+      <div class="metric"><span>BTC ST收益回撤比</span><b>49.39</b></div>
+      <div class="metric"><span>全球观察池 ST收益回撤比</span><b>10.34</b></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>核心对比：同样的五年，谁更稳</h2>
+          <p>条形长度表示收益回撤比。这个指标把收益和最大回撤放在一起看，更接近“普通人能不能坚持”的问题。</p>
+        </div>
+      </div>
+      <div class="comparison">
+        <div class="row-card">
+          <div class="row-title"><b>中国ETF/A股代理</b><span>ST 82.3% / 回撤 19.2%</span></div>
+          <div class="bar-set">
+            <div class="bar-line"><span>SuperTrend</span><div class="bar"><i style="--w:8.7%;--c:var(--emerald)"></i></div><b>4.29</b></div>
+            <div class="bar-line"><span>RS动量</span><div class="bar"><i style="--w:2.3%;--c:var(--amber)"></i></div><b>1.15</b></div>
+          </div>
+        </div>
+        <div class="row-card">
+          <div class="row-title"><b>美股/美股ETF</b><span>买入持有收益高，但 ST 回撤控制更好</span></div>
+          <div class="bar-set">
+            <div class="bar-line"><span>SuperTrend</span><div class="bar"><i style="--w:25.1%;--c:var(--emerald)"></i></div><b>12.42</b></div>
+            <div class="bar-line"><span>RS动量</span><div class="bar"><i style="--w:4.0%;--c:var(--amber)"></i></div><b>1.99</b></div>
+          </div>
+        </div>
+        <div class="row-card">
+          <div class="row-title"><b>BTC</b><span>ST 交易 15 笔，胜率 80.0%</span></div>
+          <div class="bar-set">
+            <div class="bar-line"><span>SuperTrend</span><div class="bar"><i style="--w:100%;--c:var(--emerald)"></i></div><b>49.39</b></div>
+            <div class="bar-line"><span>RS动量</span><div class="bar"><i style="--w:16.7%;--c:var(--amber)"></i></div><b>8.26</b></div>
+          </div>
+        </div>
+        <div class="row-card">
+          <div class="row-title"><b>全球观察池</b><span>ST 覆盖更多趋势机会</span></div>
+          <div class="bar-set">
+            <div class="bar-line"><span>SuperTrend</span><div class="bar"><i style="--w:20.9%;--c:var(--emerald)"></i></div><b>10.34</b></div>
+            <div class="bar-line"><span>RS动量</span><div class="bar"><i style="--w:2.8%;--c:var(--amber)"></i></div><b>1.40</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-two">
+      <div class="panel">
+        <h2>ADX 过滤为什么没帮上忙</h2>
+        <p>ADX 的直觉是对的：震荡市少动。但这次只把 ADX 当入场门槛，结果是回撤降低了，收益也被砍得更厉害。</p>
+        <table class="mini-table">
+          <thead><tr><th>资产组</th><th>基础比值</th><th>最优ADX</th><th>比值</th><th>交易变化</th></tr></thead>
+          <tbody>
+            <tr><td>中国ETF</td><td>4.29</td><td>&gt;= 20</td><td>3.92</td><td>-74</td></tr>
+            <tr><td>美股</td><td>12.42</td><td>&gt;= 20</td><td>6.98</td><td>-37</td></tr>
+            <tr><td>BTC</td><td>49.39</td><td>&gt;= 20</td><td>9.64</td><td>-8</td></tr>
+            <tr><td>全球池</td><td>10.34</td><td>&gt;= 20</td><td>8.91</td><td>-103</td></tr>
+          </tbody>
+        </table>
+        <div class="callout warning" style="margin-top:16px;">当前不建议把 ADX 作为硬过滤默认上线。更好的下一步是回测“ADX 只改变仓位/提醒权重”，而不是直接禁止交易。</div>
+      </div>
+
+      <div class="panel">
+        <h2>周线 BB 突破+回踩的位置</h2>
+        <p>它更像专题机会策略，不适合作为普通人的默认首页。低频不是问题，问题是当前样本里收益回撤比不够稳定。</p>
+        <table class="mini-table">
+          <thead><tr><th>资产组</th><th>收益</th><th>回撤</th><th>比值</th><th>胜率</th></tr></thead>
+          <tbody>
+            <tr><td>中国ETF</td><td>-16.3%</td><td>37.2%</td><td>-0.44</td><td>34.1%</td></tr>
+            <tr><td>美股</td><td>57.5%</td><td>16.1%</td><td>3.56</td><td>46.9%</td></tr>
+            <tr><td>BTC</td><td>27.5%</td><td>20.2%</td><td>1.36</td><td>40.0%</td></tr>
+            <tr><td>全球池</td><td>8.0%</td><td>27.0%</td><td>0.30</td><td>39.4%</td></tr>
+          </tbody>
+        </table>
+        <div class="callout danger" style="margin-top:16px;">它可以继续保留在系统里，但更适合做“二波机会雷达”，不适合替代 SuperTrend 默认页。</div>
+      </div>
+    </section>
+
+    <section class="panel decision">
+      <div class="big-number">
+        <b>不要塞</b>
+        <span>历史买卖点不适合全部塞进静态报告</span>
+      </div>
+      <div>
+        <h2>想看某个标的历史买卖点怎么办</h2>
+        <p>应该做专门的前后端查询页，而不是把所有买卖点放进这份 HTML。原因很简单：买卖点需要按标的、策略、区间、参数交互筛选，还要和 K 线缩放联动。</p>
+        <div class="flow">
+          <div class="step"><span>后端</span><b>交易点 API</b><p>返回 trades、markers、SuperTrend 线、每笔收益。</p></div>
+          <div class="step"><span>参数</span><b>symbol / start / end</b><p>支持 ST、ADX、周线过滤等参数。</p></div>
+          <div class="step"><span>前端</span><b>K 线叠加买卖点</b><p>点击标记看入场原因、止损、收益。</p></div>
+          <div class="step"><span>报告</span><b>只放入口和示意</b><p>报告解释结论，复盘页解释细节。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>ST 标的太多，怎么精简</h2>
+          <p>不要一刀切砍标的池。SuperTrend 的收益来自覆盖足够多的趋势机会；应该先精简“显示层”和“操作层”，再回测精简后的收益回撤。</p>
+        </div>
+      </div>
+      <div class="flow">
+        <div class="step"><span>第一屏</span><b>高优先级</b><p>刚翻多、刚翻空、接近 ST 支撑/阻力。</p></div>
+        <div class="step"><span>确认层</span><b>周多日多</b><p>周线多头 + 日线刚翻多或支撑回踩。</p></div>
+        <div class="step"><span>候补层</span><b>普通多头</b><p>趋势仍在，但今天不一定需要动作。</p></div>
+        <div class="step"><span>折叠层</span><b>低优先级空头</b><p>默认收起，保留数据，不占注意力。</p></div>
+      </div>
+      <div class="callout" style="margin-top:16px;">下一步最值得做的回测：只交易高优先级、只交易周日共振、只交易刚翻多、只交易支撑回踩。若收益回撤比接近基础 ST，就可以放心把前端默认视图继续收窄。</div>
+    </section>
+
+    <section class="panel">
+      <h2>脚本与文档入口</h2>
+      <ul>
+        <li>可重复比较脚本：<code>backend/strategy_comparison.py</code></li>
+        <li>运行：<code>cd backend && PYTHONPATH=. uv run python strategy_comparison.py --format markdown</code></li>
+        <li>完整 Markdown 报告：<a href="./supertrend-vs-momentum-5y-report.md">supertrend-vs-momentum-5y-report.md</a></li>
+        <li>后续复盘指南：<a href="./strategy-backtesting-guide.md">strategy-backtesting-guide.md</a></li>
+      </ul>
+    </section>
+
+    <p class="footer">本报告基于本地缓存数据和当前回测实现，用于策略研究与复盘，不构成投资建议。</p>
+  </main>
+</body>
+</html>
