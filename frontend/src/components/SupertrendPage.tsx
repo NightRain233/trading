@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
 import type { Time } from 'lightweight-charts';
-import { Bell, RefreshCw, ShieldAlert, Target } from 'lucide-react';
+import { Bell, BriefcaseBusiness, CircleOff, Eye, RefreshCw, ShieldAlert, Target } from 'lucide-react';
 
 const API_BASE = '/api';
 
@@ -38,9 +38,17 @@ interface STItem {
   distanceToSupertrendAtr: number | null;
   alertReason: string;
   suggestedAction: string;
+  trendAgeBars?: number | null;
+  opportunityStage: 'fresh_bull' | 'pullback_buy_zone' | 'wait_pullback' | 'extended_from_entry' | 'trend_watch' | 'invalidated' | 'neutral';
+  opportunityLabel: string;
+  opportunityAgeBars: number | null;
+  opportunityReason: string;
 }
 
 type FilterType = 'all' | STItem['state'] | 'actionable' | 'high_priority' | 'weekly_bull_daily_bear' | 'weekly_bear_daily_bull' | 'weekly_bull_daily_just_bull' | 'weekly_bear_daily_just_bear' | 'weekly_bull_daily_bull' | 'weekly_bear_daily_bear';
+type UserMark = 'none' | 'watch' | 'holding' | 'ignored';
+
+const MARK_STORAGE_KEY = 'supertrend:user-marks:v1';
 
 const STATE_LABEL: Record<STItem['state'], string> = {
   bull_flip: '金叉', bear_flip: '死叉', bull: '多头', bear: '空头',
@@ -62,6 +70,16 @@ const ALERT_COLOR: Record<STItem['alertType'], string> = {
   none: 'text-zinc-500 border-zinc-800 bg-zinc-900/40',
 };
 
+const OPPORTUNITY_COLOR: Record<STItem['opportunityStage'], string> = {
+  fresh_bull: 'text-emerald-200 border-emerald-500/35 bg-emerald-500/10',
+  pullback_buy_zone: 'text-cyan-200 border-cyan-500/35 bg-cyan-500/10',
+  wait_pullback: 'text-amber-200 border-amber-500/35 bg-amber-500/10',
+  extended_from_entry: 'text-amber-200 border-amber-500/35 bg-amber-500/10',
+  trend_watch: 'text-sky-200 border-sky-500/30 bg-sky-500/10',
+  invalidated: 'text-red-200 border-red-500/35 bg-red-500/10',
+  neutral: 'text-zinc-400 border-zinc-700 bg-zinc-800/30',
+};
+
 const PRIORITY_LABEL: Record<STItem['alertPriority'], string> = {
   high: '高',
   medium: '中',
@@ -74,6 +92,19 @@ const PRIORITY_RANK: Record<STItem['alertPriority'], number> = {
   medium: 1,
   low: 2,
   none: 3,
+};
+
+const MARK_OPTIONS: { value: Exclude<UserMark, 'none'>; label: string; icon: typeof Eye }[] = [
+  { value: 'watch', label: '关注', icon: Eye },
+  { value: 'holding', label: '持有', icon: BriefcaseBusiness },
+  { value: 'ignored', label: '忽略', icon: CircleOff },
+];
+
+const MARK_COLOR: Record<UserMark, string> = {
+  none: 'border-zinc-800 bg-zinc-950/30 text-zinc-500 hover:text-zinc-300',
+  watch: 'border-cyan-500/35 bg-cyan-500/10 text-cyan-200',
+  holding: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200',
+  ignored: 'border-zinc-700 bg-zinc-900/70 text-zinc-500',
 };
 
 const formatPrice = (value: number | null) => {
@@ -90,6 +121,25 @@ const formatPct = (value: number | null) => (
 const formatAtr = (value: number | null) => (
   value == null || !Number.isFinite(value) ? '-' : `${value.toFixed(2)} ATR`
 );
+
+const loadStoredMarks = (): Record<string, UserMark> => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(MARK_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, UserMark>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, mark]) => mark === 'watch' || mark === 'holding' || mark === 'ignored')
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveStoredMarks = (marks: Record<string, UserMark>) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MARK_STORAGE_KEY, JSON.stringify(marks));
+};
 
 function renderSTLines(chart: ReturnType<typeof createChart>, candles: STCandle[]) {
   const stCandles = candles.filter(c => c.st_val != null);
@@ -184,8 +234,16 @@ const isWeeklyBull = (s: STItem) => s.weeklyState === 'bull' || s.weeklyState ==
 const isWeeklyBear = (s: STItem) => s.weeklyState === 'bear' || s.weeklyState === 'bear_flip';
 const isDailyBull = (s: STItem) => s.state === 'bull' || s.state === 'bull_flip';
 const isDailyBear = (s: STItem) => s.state === 'bear' || s.state === 'bear_flip';
-const isLowPriorityObservation = (s: STItem) => !s.isActionable && (s.alertPriority === 'low' || s.alertPriority === 'none');
-const isFocusItem = (s: STItem) => s.alertPriority === 'high' || s.isActionable;
+const isPinnedMark = (mark: UserMark | undefined) => mark === 'watch' || mark === 'holding';
+const isLowPriorityObservation = (s: STItem, mark: UserMark | undefined) => (
+  !isPinnedMark(mark) && !s.isActionable && (s.alertPriority === 'low' || s.alertPriority === 'none')
+);
+const isFocusItem = (s: STItem, mark: UserMark | undefined) => (
+  isPinnedMark(mark) || s.alertPriority === 'high' || s.isActionable
+);
+const getMarkRank = (mark: UserMark | undefined) => (
+  mark === 'holding' ? 0 : mark === 'watch' ? 1 : mark === 'none' || mark == null ? 2 : 3
+);
 
 const CROSS_FILTERS: { key: FilterType; label: string }[] = [
   { key: 'weekly_bull_daily_bull', label: '周多日多' },
@@ -219,6 +277,7 @@ export function SupertrendPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>('all');
   const [showLowPriority, setShowLowPriority] = useState(false);
+  const [marks, setMarks] = useState<Record<string, UserMark>>(() => loadStoredMarks());
 
   async function load() {
     setLoading(true);
@@ -232,17 +291,32 @@ export function SupertrendPage() {
 
   useEffect(() => { load(); }, []);
 
+  function updateMark(symbol: string, nextMark: UserMark) {
+    setMarks(prev => {
+      const updated = { ...prev };
+      if (nextMark === 'none') {
+        delete updated[symbol];
+      } else {
+        updated[symbol] = nextMark;
+      }
+      saveStoredMarks(updated);
+      return updated;
+    });
+  }
+
   const ORDER: STItem['state'][] = ['bull_flip', 'bear_flip', 'bull', 'bear'];
   const displayed = items
     .filter(i => matchFilter(i, filter))
     .sort((a, b) => {
       const priorityDiff = PRIORITY_RANK[a.alertPriority] - PRIORITY_RANK[b.alertPriority];
       if (priorityDiff !== 0) return priorityDiff;
+      const markDiff = getMarkRank(marks[a.symbol]) - getMarkRank(marks[b.symbol]);
+      if (markDiff !== 0) return markDiff;
       return ORDER.indexOf(a.state) - ORDER.indexOf(b.state);
     });
-  const lowPriorityCount = filter === 'all' ? displayed.filter(isLowPriorityObservation).length : 0;
+  const lowPriorityCount = filter === 'all' ? displayed.filter(i => isLowPriorityObservation(i, marks[i.symbol])).length : 0;
   const visibleDisplayed = filter === 'all' && !showLowPriority
-    ? displayed.filter(i => !isLowPriorityObservation(i))
+    ? displayed.filter(i => !isLowPriorityObservation(i, marks[i.symbol]))
     : displayed;
   const onlyFoldedLowPriority = filter === 'all' && !showLowPriority && visibleDisplayed.length === 0 && lowPriorityCount > 0;
 
@@ -360,17 +434,17 @@ export function SupertrendPage() {
           <div
             key={item.symbol}
             className={`rounded-xl border overflow-hidden transition-all ${
-              isFocusItem(item)
+              isFocusItem(item, marks[item.symbol])
                 ? 'border-emerald-500/25 bg-zinc-900/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
                 : 'border-zinc-800 bg-zinc-900/45 opacity-80'
-            }`}
+            } ${marks[item.symbol] === 'ignored' ? 'opacity-60' : ''}`}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <div className="flex items-center gap-2">
+              <div className="min-w-0 flex items-center gap-2">
                 <span className="font-mono text-sm font-semibold text-zinc-200">{item.symbol}</span>
-                {item.alias && <span className="text-xs text-zinc-500">{item.alias}</span>}
+                {item.alias && <span className="truncate text-xs text-zinc-500">{item.alias}</span>}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ml-2 flex shrink-0 items-center gap-1.5">
                 {item.weeklyState && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${STATE_COLOR[item.weeklyState]}`}>
                     周{STATE_LABEL[item.weeklyState]}
@@ -382,12 +456,39 @@ export function SupertrendPage() {
               </div>
             </div>
             <div className="px-3 py-2 border-b border-zinc-800/80">
-              <div className="flex items-center justify-between gap-2">
-                <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${ALERT_COLOR[item.alertType]}`}>
-                  {item.alertType === 'sell_or_risk' ? <ShieldAlert size={11} /> : item.isActionable ? <Bell size={11} /> : <Target size={11} />}
-                  {item.alertLabel || '无信号'}
-                </span>
-                <span className="text-[10px] text-zinc-500">优先级 {PRIORITY_LABEL[item.alertPriority]}</span>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${ALERT_COLOR[item.alertType]}`}>
+                    {item.alertType === 'sell_or_risk' ? <ShieldAlert size={11} /> : item.isActionable ? <Bell size={11} /> : <Target size={11} />}
+                    {item.alertLabel || '无信号'}
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${OPPORTUNITY_COLOR[item.opportunityStage] || OPPORTUNITY_COLOR.neutral}`}
+                    title={item.opportunityReason}
+                  >
+                    <Target size={11} />
+                    {item.opportunityLabel || '观察'}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[10px] text-zinc-500">优先级 {PRIORITY_LABEL[item.alertPriority]}</span>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1.5">
+                {MARK_OPTIONS.map(({ value, label, icon: Icon }) => {
+                  const active = marks[item.symbol] === value;
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => updateMark(item.symbol, active ? 'none' : value)}
+                      className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-all active:scale-[0.98] ${
+                        active ? MARK_COLOR[value] : MARK_COLOR.none
+                      }`}
+                      title={label}
+                    >
+                      <Icon size={12} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                 <div>
@@ -407,6 +508,28 @@ export function SupertrendPage() {
                 <p className="text-[11px] leading-relaxed text-zinc-500">{item.alertReason}</p>
                 <span className="shrink-0 font-mono text-[10px] text-zinc-600">{formatAtr(item.distanceToSupertrendAtr)}</span>
               </div>
+              {marks[item.symbol] === 'holding' && (
+                <div className={`mt-2 grid grid-cols-3 gap-2 rounded-lg border px-2 py-2 text-[10px] ${
+                  item.opportunityStage === 'invalidated' || item.alertType === 'sell_or_risk'
+                    ? 'border-red-500/25 bg-red-500/10'
+                    : 'border-emerald-500/20 bg-emerald-500/10'
+                }`}>
+                  <div>
+                    <div className="text-zinc-500">持有</div>
+                    <div className="font-semibold text-zinc-200">
+                      {item.opportunityStage === 'invalidated' ? '风控' : '跟踪'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-zinc-500">ST止损</div>
+                    <div className="font-mono text-zinc-200">{formatPrice(item.keyLevelPrice ?? item.stVal)}</div>
+                  </div>
+                  <div>
+                    <div className="text-zinc-500">距离</div>
+                    <div className="font-mono text-zinc-200">{formatPct(item.distanceToSupertrendPct)}</div>
+                  </div>
+                </div>
+              )}
               {item.isActionable && (
                 <div className="mt-2 text-[11px] leading-relaxed text-zinc-400 border-t border-zinc-800/70 pt-2">
                   {item.suggestedAction}

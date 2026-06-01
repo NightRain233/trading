@@ -1306,6 +1306,13 @@ def supertrend_scan():
         else:
             state = "bear"
 
+        trend_age_bars = 0
+        if cur_dir != 0:
+            for direction in reversed([int(r) for r in dir_rows["_st_dir"].tolist()]):
+                if direction != cur_dir:
+                    break
+                trend_age_bars += 1
+
         def _to_candles(df, val_key, dir_key, n):
             rows = []
             for ts, row in df.sort_index().tail(n).iterrows():
@@ -1361,6 +1368,7 @@ def supertrend_scan():
             st_val=float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
             atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None,
             just_flipped=state in ("bull_flip", "bear_flip"),
+            trend_age_bars=trend_age_bars,
         )
 
         return {
@@ -1375,6 +1383,7 @@ def supertrend_scan():
             "weeklyCandles": weekly_candles,
             "justFlipped": state in ("bull_flip", "bear_flip"),
             "weeklyJustFlipped": weekly_just_flipped,
+            "trendAgeBars": trend_age_bars,
             **alert,
         }
 
