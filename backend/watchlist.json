@@ -107,6 +107,10 @@
       {
         "symbol": "159553.SZ",
         "alias": "中证 2000 增强"
+      },
+      {
+        "symbol": "588000.SS",
+        "alias": "科创 50"
       }
     ],
     "collapsed": false
