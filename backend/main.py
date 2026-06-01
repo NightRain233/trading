@@ -1276,6 +1276,7 @@ def supertrend_scan():
         daily = pd.read_parquet(daily_path)
         if daily.empty:
             return None
+        daily = daily.sort_index()
 
         st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
         if st is None or st.empty:
@@ -1307,7 +1308,7 @@ def supertrend_scan():
 
         def _to_candles(df, val_key, dir_key, n):
             rows = []
-            for ts, row in df.tail(n).iterrows():
+            for ts, row in df.sort_index().tail(n).iterrows():
                 rows.append({
                     "time": pd.Timestamp(ts).date().isoformat(),
                     "open": float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"]),
@@ -1329,6 +1330,7 @@ def supertrend_scan():
         if os.path.exists(weekly_path):
             weekly = pd.read_parquet(weekly_path)
             if not weekly.empty:
+                weekly = weekly.sort_index()
                 wst = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
                 if wst is not None and not wst.empty:
                     wval_col = next((c for c in wst.columns if c.startswith("SUPERT_") and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))), None)
