@@ -724,7 +724,13 @@ def load_history_trade_cache(
     payload_json, cached_mtime = row
     if float(cached_mtime) < float(data_mtime):
         return None
-    return json.loads(payload_json)
+    payload = json.loads(payload_json)
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    if not isinstance(summary, dict) or "maxDrawdownPct" not in summary:
+        return None
+    if "benchmark" not in payload or "strategyComparisons" not in payload:
+        return None
+    return payload
 
 
 def save_history_trade_cache(

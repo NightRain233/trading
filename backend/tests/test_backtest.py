@@ -366,6 +366,49 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(trade["exitReason"], "st_flip")
         self.assertIn("returnPct", trade)
         self.assertEqual(review["summary"]["tradeCount"], 1)
+        self.assertIn("maxDrawdownPct", review["summary"])
+        self.assertAlmostEqual(review["summary"]["maxDrawdownPct"], 3.8462, places=3)
+        self.assertAlmostEqual(review["benchmark"]["totalReturnPct"], -1.0, places=3)
+        self.assertAlmostEqual(review["benchmark"]["maxDrawdownPct"], 4.8077, places=3)
+        self.assertEqual(
+            [item["id"] for item in review["strategyComparisons"]],
+            ["baseline", "reclaim", "close_only"],
+        )
+
+    def test_supertrend_history_review_compares_stop_reentry_modes(self):
+        from backtest import build_supertrend_history_review
+
+        dates = pd.date_range("2025-01-01", periods=6, freq="B")
+        daily = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 101.0, 102.0, 103.0, 104.0],
+                "High": [101.0, 103.0, 103.0, 104.0, 105.0, 105.0],
+                "Low": [99.0, 99.0, 97.0, 101.0, 102.0, 99.0],
+                "Close": [100.0, 102.0, 101.0, 103.0, 104.0, 100.0],
+                "ADX": [30.0] * 6,
+                "ATR": [2.0] * 6,
+            },
+            index=dates,
+        )
+        st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [101.0, 99.0, 100.0, 100.0, 101.0, 102.0],
+                "SUPERTd_7_3.0": [-1, 1, 1, 1, 1, -1],
+            },
+            index=dates,
+        )
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            review = build_supertrend_history_review("TEST", daily, fee_bps=0, slippage_bps=0)
+
+        comparisons = {item["id"]: item for item in review["strategyComparisons"]}
+        self.assertEqual(comparisons["baseline"]["tradeCount"], 1)
+        self.assertEqual(comparisons["baseline"]["exitReasonCounts"], {"stop": 1})
+        self.assertEqual(comparisons["reclaim"]["tradeCount"], 2)
+        self.assertEqual(comparisons["reclaim"]["exitReasonCounts"], {"stop": 1, "reclaim_st_flip": 1})
+        self.assertEqual(comparisons["close_only"]["tradeCount"], 1)
+        self.assertEqual(comparisons["close_only"]["exitReasonCounts"], {"st_flip": 1})
+        self.assertGreater(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
 
     def test_supertrend_history_review_applies_date_filter(self):
         from backtest import build_supertrend_history_review
