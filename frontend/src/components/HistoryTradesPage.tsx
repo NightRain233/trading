@@ -5,15 +5,23 @@ import type { SeriesMarker, Time } from 'lightweight-charts';
 import { CalendarDays, RefreshCw, Search, ShieldCheck, TrendingUp } from 'lucide-react';
 import { fetchHistoryTrades, fetchHistoryTradeSymbols } from '../utils';
 import { getDefaultHistoryStartDate } from '../historyTradesDefaults.js';
-import type { Candle, HistorySupertrendPoint, HistoryTradeSymbolOption, HistoryTradesResponse } from '../types';
+import { DEFAULT_HISTORY_EXIT_MODE } from '../historyTradesQuery.js';
+import type { Candle, HistorySupertrendExitMode, HistorySupertrendPoint, HistoryTradeSymbolOption, HistoryTradesResponse } from '../types';
 
 const STRATEGIES = [
   { id: 'supertrend', label: 'SuperTrend' },
 ];
 
+const EXIT_MODES: { id: HistorySupertrendExitMode; label: string }[] = [
+  { id: 'baseline', label: '动态止损' },
+  { id: 'reclaim', label: '止损收复' },
+  { id: 'close_only', label: '仅翻空退出' },
+];
+
 const EXIT_REASON_LABEL: Record<string, string> = {
   st_flip: 'SuperTrend 翻空',
   stop: '触及动态止损',
+  reclaim_st_flip: '收复再入后翻空',
 };
 
 const formatPrice = (value?: number | null) => {
@@ -155,6 +163,7 @@ export function HistoryTradesPage() {
   const [symbol, setSymbol] = useState('');
   const [symbolOptions, setSymbolOptions] = useState<HistoryTradeSymbolOption[]>([]);
   const [strategy, setStrategy] = useState('supertrend');
+  const [exitMode, setExitMode] = useState<HistorySupertrendExitMode>(DEFAULT_HISTORY_EXIT_MODE);
   const [start, setStart] = useState(() => getDefaultHistoryStartDate());
   const [end, setEnd] = useState('');
   const [weeklyFilter, setWeeklyFilter] = useState(false);
@@ -180,6 +189,7 @@ export function HistoryTradesPage() {
       const payload = await fetchHistoryTrades({
         symbol: targetSymbol,
         strategy,
+        exitMode,
         start,
         end,
         weeklyFilter,
@@ -232,7 +242,7 @@ export function HistoryTradesPage() {
             event.preventDefault();
             void load();
           }}
-          className="grid grid-cols-2 md:grid-cols-6 xl:grid-cols-8 gap-2 items-end"
+          className="grid grid-cols-2 md:grid-cols-7 xl:grid-cols-9 gap-2 items-end"
         >
           <label className="flex flex-col gap-1 col-span-2 md:col-span-1">
             <span className="text-[10px] text-zinc-500">标的</span>
@@ -257,6 +267,16 @@ export function HistoryTradesPage() {
               className="input-glass rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none"
             >
               {STRATEGIES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-zinc-500">明细模式</span>
+            <select
+              value={exitMode}
+              onChange={e => setExitMode(e.target.value as HistorySupertrendExitMode)}
+              className="input-glass rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none"
+            >
+              {EXIT_MODES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1">
@@ -344,7 +364,7 @@ export function HistoryTradesPage() {
               <span>胜率</span>
             </div>
             {result.strategyComparisons.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(120px,1.4fr)_repeat(5,minmax(64px,1fr))] gap-2 px-3 py-2 text-xs text-zinc-300 border-b border-zinc-800/60 last:border-b-0">
+              <div key={item.id} className={`grid grid-cols-[minmax(120px,1.4fr)_repeat(5,minmax(64px,1fr))] gap-2 px-3 py-2 text-xs text-zinc-300 border-b border-zinc-800/60 last:border-b-0 ${item.id === result.exitMode ? 'bg-emerald-500/5' : ''}`}>
                 <span className="truncate text-zinc-200">{item.label}</span>
                 <span className={item.totalReturnPct >= 0 ? 'text-emerald-300' : 'text-red-300'}>{formatPct(item.totalReturnPct)}</span>
                 <span className="text-red-300">{item.maxDrawdownPct.toFixed(2)}%</span>

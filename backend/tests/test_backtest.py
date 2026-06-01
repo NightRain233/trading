@@ -354,6 +354,7 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(review["symbol"], "TEST")
         self.assertEqual(review["strategy"], "supertrend")
+        self.assertEqual(review["exitMode"], "close_only")
         self.assertEqual([c["time"] for c in review["candles"]], sorted(c["time"] for c in review["candles"]))
         self.assertEqual(review["supertrend"][2]["direction"], 1)
         self.assertEqual([m["type"] for m in review["markers"]], ["buy", "sell"])
@@ -367,7 +368,7 @@ class BacktestTests(unittest.TestCase):
         self.assertIn("returnPct", trade)
         self.assertEqual(review["summary"]["tradeCount"], 1)
         self.assertIn("maxDrawdownPct", review["summary"])
-        self.assertAlmostEqual(review["summary"]["maxDrawdownPct"], 3.8462, places=3)
+        self.assertAlmostEqual(review["summary"]["maxDrawdownPct"], 1.9231, places=3)
         self.assertAlmostEqual(review["benchmark"]["totalReturnPct"], -1.0, places=3)
         self.assertAlmostEqual(review["benchmark"]["maxDrawdownPct"], 4.8077, places=3)
         self.assertEqual(
@@ -401,6 +402,8 @@ class BacktestTests(unittest.TestCase):
         with patch("backtest.ta.supertrend", return_value=st):
             review = build_supertrend_history_review("TEST", daily, fee_bps=0, slippage_bps=0)
 
+        self.assertEqual(review["exitMode"], "close_only")
+        self.assertEqual(review["trades"][0]["exitReason"], "st_flip")
         comparisons = {item["id"]: item for item in review["strategyComparisons"]}
         self.assertEqual(comparisons["baseline"]["tradeCount"], 1)
         self.assertEqual(comparisons["baseline"]["exitReasonCounts"], {"stop": 1})
@@ -409,6 +412,18 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(comparisons["close_only"]["tradeCount"], 1)
         self.assertEqual(comparisons["close_only"]["exitReasonCounts"], {"st_flip": 1})
         self.assertGreater(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            baseline_review = build_supertrend_history_review(
+                "TEST",
+                daily,
+                fee_bps=0,
+                slippage_bps=0,
+                exit_mode="baseline",
+            )
+
+        self.assertEqual(baseline_review["exitMode"], "baseline")
+        self.assertEqual(baseline_review["trades"][0]["exitReason"], "stop")
 
     def test_supertrend_history_review_applies_date_filter(self):
         from backtest import build_supertrend_history_review

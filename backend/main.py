@@ -20,6 +20,8 @@ from backtest import (
     replay_weekly_bb_markers,
     build_supertrend_history_review,
     run_supertrend_backtest,
+    SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
+    SUPER_TREND_HISTORY_EXIT_MODES,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from supertrend_alerts import classify_supertrend_alert
@@ -656,11 +658,13 @@ def _history_cache_key(
     end: Optional[str],
     min_adx_for_entry: Optional[float],
     weekly_filter: bool,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
 ) -> str:
     return json.dumps(
         {
             "symbol": symbol.strip().upper(),
             "strategy": strategy,
+            "exitMode": exit_mode,
             "start": start or None,
             "end": end or None,
             "minAdxForEntry": float(min_adx_for_entry) if min_adx_for_entry is not None else None,
@@ -697,6 +701,16 @@ def _ensure_history_cache(db_path: Optional[str] = None) -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_history_trade_reviews_symbol ON history_trade_reviews(symbol)")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(history_trade_reviews)").fetchall()}
+        if "exit_mode" not in columns:
+            conn.execute("ALTER TABLE history_trade_reviews ADD COLUMN exit_mode TEXT")
+
+
+def _normalize_history_exit_mode(exit_mode: str) -> str:
+    normalized = (exit_mode or SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE).strip()
+    if normalized not in SUPER_TREND_HISTORY_EXIT_MODES:
+        raise HTTPException(status_code=400, detail=f"Unsupported exit_mode: {exit_mode}")
+    return normalized
 
 
 def load_history_trade_cache(
@@ -708,12 +722,13 @@ def load_history_trade_cache(
     weekly_filter: bool,
     data_mtime: float,
     db_path: Optional[str] = None,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
 ) -> Optional[dict]:
     db_path = _history_cache_path(db_path)
     if not os.path.exists(db_path):
         return None
     _ensure_history_cache(db_path)
-    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter)
+    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter, exit_mode)
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             "SELECT payload_json, data_mtime FROM history_trade_reviews WHERE cache_key = ?",
@@ -730,6 +745,8 @@ def load_history_trade_cache(
         return None
     if "benchmark" not in payload or "strategyComparisons" not in payload:
         return None
+    if payload.get("exitMode") is not None and payload.get("exitMode") != exit_mode:
+        return None
     return payload
 
 
@@ -739,6 +756,7 @@ def save_history_trade_cache(
     db_path: Optional[str] = None,
     min_adx_for_entry: Optional[float] = None,
     weekly_filter: bool = False,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
 ) -> None:
     db_path = _history_cache_path(db_path)
     _ensure_history_cache(db_path)
@@ -746,16 +764,18 @@ def save_history_trade_cache(
     strategy = str(payload.get("strategy", "supertrend"))
     start = payload.get("start")
     end = payload.get("end")
-    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter)
+    payload_exit_mode = str(payload.get("exitMode") or exit_mode)
+    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter, payload_exit_mode)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO history_trade_reviews (
                 cache_key, symbol, strategy, start_date, end_date, min_adx_for_entry,
-                weekly_filter, data_mtime, payload_json, computed_at
+                weekly_filter, exit_mode, data_mtime, payload_json, computed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET
+                exit_mode = excluded.exit_mode,
                 data_mtime = excluded.data_mtime,
                 payload_json = excluded.payload_json,
                 computed_at = excluded.computed_at
@@ -768,6 +788,7 @@ def save_history_trade_cache(
                 end,
                 float(min_adx_for_entry) if min_adx_for_entry is not None else None,
                 1 if weekly_filter else 0,
+                payload_exit_mode,
                 float(data_mtime),
                 json.dumps(payload, ensure_ascii=False, allow_nan=False),
                 datetime.now(timezone.utc).isoformat(),
@@ -922,6 +943,7 @@ def get_history_trades(
     end: Optional[str] = None,
     min_adx_for_entry: Optional[float] = None,
     weekly_filter: bool = False,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
 ):
     normalized_symbol = symbol.strip().upper()
     if not normalized_symbol:
@@ -929,6 +951,7 @@ def get_history_trades(
 
     if strategy != "supertrend":
         raise HTTPException(status_code=400, detail=f"Unsupported strategy: {strategy}")
+    resolved_exit_mode = _normalize_history_exit_mode(exit_mode)
 
     import pandas as pd
 
@@ -945,6 +968,7 @@ def get_history_trades(
         min_adx_for_entry,
         weekly_filter,
         data_mtime=data_mtime,
+        exit_mode=resolved_exit_mode,
     )
     if cached is not None:
         return cached
@@ -963,12 +987,14 @@ def get_history_trades(
         end=end,
         filter_weekly_df=weekly,
         min_adx_for_entry=min_adx_for_entry,
+        exit_mode=resolved_exit_mode,
     )
     save_history_trade_cache(
         payload,
         data_mtime=data_mtime,
         min_adx_for_entry=min_adx_for_entry,
         weekly_filter=weekly_filter,
+        exit_mode=resolved_exit_mode,
     )
     return payload
 
@@ -980,11 +1006,13 @@ def precompute_history_trades(
     end: Optional[str] = None,
     min_adx_for_entry: Optional[float] = None,
     weekly_filter: bool = False,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
     force: bool = False,
     symbols: Optional[List[str]] = None,
 ):
     if strategy != "supertrend":
         raise HTTPException(status_code=400, detail=f"Unsupported strategy: {strategy}")
+    resolved_exit_mode = _normalize_history_exit_mode(exit_mode)
 
     import pandas as pd
 
@@ -1019,6 +1047,7 @@ def precompute_history_trades(
                 min_adx_for_entry,
                 weekly_filter,
                 data_mtime=data_mtime,
+                exit_mode=resolved_exit_mode,
             ) is not None:
                 cached_count += 1
                 continue
@@ -1036,12 +1065,14 @@ def precompute_history_trades(
                 end=end,
                 filter_weekly_df=weekly,
                 min_adx_for_entry=min_adx_for_entry,
+                exit_mode=resolved_exit_mode,
             )
             save_history_trade_cache(
                 payload,
                 data_mtime=data_mtime,
                 min_adx_for_entry=min_adx_for_entry,
                 weekly_filter=weekly_filter,
+                exit_mode=resolved_exit_mode,
             )
             computed += 1
         except Exception as exc:
@@ -1049,6 +1080,7 @@ def precompute_history_trades(
 
     return {
         "strategy": strategy,
+        "exitMode": resolved_exit_mode,
         "start": resolved_start,
         "end": end,
         "computed": computed,
@@ -1431,6 +1463,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--end", default=None)
     parser.add_argument("--min-adx-for-entry", type=float, default=None)
     parser.add_argument("--weekly-filter", action="store_true")
+    parser.add_argument(
+        "--exit-mode",
+        choices=SUPER_TREND_HISTORY_EXIT_MODES,
+        default=SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
+        help="SuperTrend history exit mode for trades, summary, and markers",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1441,6 +1479,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             end=args.end,
             min_adx_for_entry=args.min_adx_for_entry,
             weekly_filter=args.weekly_filter,
+            exit_mode=args.exit_mode,
             force=args.force,
             symbols=target_symbols or None,
         )

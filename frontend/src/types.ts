@@ -102,6 +102,8 @@ export interface HistoryTradeMarker {
   exitReason?: string;
 }
 
+export type HistorySupertrendExitMode = 'baseline' | 'reclaim' | 'close_only';
+
 export interface HistoryTrade {
   tradeIndex: number;
   symbol: string;
@@ -135,13 +137,14 @@ export interface HistoryBenchmarkSummary {
 }
 
 export interface HistoryStrategyComparison extends HistoryTradesSummary {
-  id: string;
+  id: HistorySupertrendExitMode;
   label: string;
 }
 
 export interface HistoryTradesResponse {
   symbol: string;
   strategy: string;
+  exitMode: HistorySupertrendExitMode;
   start?: string | null;
   end?: string | null;
   candles: Candle[];
