@@ -122,8 +122,21 @@ export interface HistoryTradesSummary {
   winRate: number;
   averageReturnPct: number;
   totalReturnPct: number;
+  maxDrawdownPct: number;
   averageHoldingDays: number;
   exitReasonCounts: Record<string, number>;
+}
+
+export interface HistoryBenchmarkSummary {
+  id: string;
+  label: string;
+  totalReturnPct: number;
+  maxDrawdownPct: number;
+}
+
+export interface HistoryStrategyComparison extends HistoryTradesSummary {
+  id: string;
+  label: string;
 }
 
 export interface HistoryTradesResponse {
@@ -136,6 +149,8 @@ export interface HistoryTradesResponse {
   markers: HistoryTradeMarker[];
   trades: HistoryTrade[];
   summary: HistoryTradesSummary;
+  benchmark: HistoryBenchmarkSummary;
+  strategyComparisons: HistoryStrategyComparison[];
 }
 
 export interface HistoryTradeSymbolOption {

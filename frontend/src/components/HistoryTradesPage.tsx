@@ -27,6 +27,13 @@ const formatPct = (value?: number | null) => (
   value == null || !Number.isFinite(value) ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 );
 
+const formatRatio = (total?: number | null, drawdown?: number | null) => {
+  if (total == null || drawdown == null || !Number.isFinite(total) || !Number.isFinite(drawdown) || drawdown <= 0) {
+    return '-';
+  }
+  return (total / drawdown).toFixed(2);
+};
+
 function renderSupertrendSegments(chart: ReturnType<typeof createChart>, points: HistorySupertrendPoint[]) {
   const segments: { dir: number; pts: { time: Time; value: number }[] }[] = [];
   for (const p of points) {
@@ -308,12 +315,47 @@ export function HistoryTradesPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
         <Metric label="交易次数" value={summary?.tradeCount ?? '-'} />
         <Metric label="胜率" value={summary ? `${(summary.winRate * 100).toFixed(0)}%` : '-'} color="text-sky-300" />
         <Metric label="总收益" value={summary ? formatPct(summary.totalReturnPct) : '-'} color={(summary?.totalReturnPct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'} />
+        <Metric label="最大回撤" value={summary ? `${summary.maxDrawdownPct.toFixed(2)}%` : '-'} color="text-red-300" />
         <Metric label="平均持仓" value={summary ? `${summary.averageHoldingDays.toFixed(1)} 天` : '-'} />
       </div>
+
+      {result && (
+        <div className="mb-4 grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/35 px-3 py-2">
+            <div className="text-[10px] text-zinc-600">买入持有</div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <MetricMini label="收益" value={formatPct(result.benchmark.totalReturnPct)} color={(result.benchmark.totalReturnPct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'} />
+              <MetricMini label="回撤" value={`${result.benchmark.maxDrawdownPct.toFixed(2)}%`} color="text-red-300" />
+              <MetricMini label="收益/回撤" value={formatRatio(result.benchmark.totalReturnPct, result.benchmark.maxDrawdownPct)} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/35 overflow-hidden">
+            <div className="grid grid-cols-[minmax(120px,1.4fr)_repeat(5,minmax(64px,1fr))] gap-2 border-b border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
+              <span>策略</span>
+              <span>收益</span>
+              <span>回撤</span>
+              <span>收益/回撤</span>
+              <span>交易</span>
+              <span>胜率</span>
+            </div>
+            {result.strategyComparisons.map(item => (
+              <div key={item.id} className="grid grid-cols-[minmax(120px,1.4fr)_repeat(5,minmax(64px,1fr))] gap-2 px-3 py-2 text-xs text-zinc-300 border-b border-zinc-800/60 last:border-b-0">
+                <span className="truncate text-zinc-200">{item.label}</span>
+                <span className={item.totalReturnPct >= 0 ? 'text-emerald-300' : 'text-red-300'}>{formatPct(item.totalReturnPct)}</span>
+                <span className="text-red-300">{item.maxDrawdownPct.toFixed(2)}%</span>
+                <span className="font-mono">{formatRatio(item.totalReturnPct, item.maxDrawdownPct)}</span>
+                <span className="font-mono">{item.tradeCount}</span>
+                <span className="font-mono">{(item.winRate * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <HistoryTradesChart result={result} />
@@ -376,6 +418,15 @@ function Metric({ label, value, color = 'text-zinc-100' }: { label: string; valu
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/35 px-3 py-2">
       <div className="text-[10px] text-zinc-600">{label}</div>
       <div className={`mt-1 font-mono text-lg font-semibold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function MetricMini({ label, value, color = 'text-zinc-100' }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-600">{label}</div>
+      <div className={`mt-1 font-mono text-sm font-semibold ${color}`}>{value}</div>
     </div>
   );
 }

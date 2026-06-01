@@ -86,7 +86,9 @@ class HistoryTradesApiTests(unittest.TestCase):
             "supertrend": [],
             "markers": [],
             "trades": [],
-            "summary": {"tradeCount": 0},
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -109,6 +111,41 @@ class HistoryTradesApiTests(unittest.TestCase):
         self.assertEqual(response, payload)
         mock_review.assert_not_called()
 
+    def test_history_trade_cache_ignores_payload_without_benchmark_or_comparisons(self):
+        payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = self._write_daily(tmpdir)
+            db_path = Path(tmpdir) / "history.sqlite"
+            main.save_history_trade_cache(
+                payload,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+            )
+
+            cached = main.load_history_trade_cache(
+                "TEST",
+                "supertrend",
+                "2026-01-01",
+                None,
+                None,
+                False,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+            )
+
+        self.assertIsNone(cached)
+
     def test_history_trade_symbols_include_names_and_cache_state(self):
         payload = {
             "symbol": "TEST",
@@ -119,7 +156,9 @@ class HistoryTradesApiTests(unittest.TestCase):
             "supertrend": [],
             "markers": [],
             "trades": [],
-            "summary": {"tradeCount": 0},
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -168,7 +207,9 @@ class HistoryTradesApiTests(unittest.TestCase):
             "supertrend": [],
             "markers": [],
             "trades": [],
-            "summary": {"tradeCount": 0},
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -211,7 +252,9 @@ class HistoryTradesApiTests(unittest.TestCase):
                     "supertrend": [],
                     "markers": [],
                     "trades": [],
-                    "summary": {"tradeCount": 0},
+                    "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+                    "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+                    "strategyComparisons": [],
                 }
 
             with patch.object(main, "DATA_DIR", tmpdir), \
@@ -238,7 +281,9 @@ class HistoryTradesApiTests(unittest.TestCase):
             "supertrend": [],
             "markers": [],
             "trades": [],
-            "summary": {"tradeCount": 0},
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -288,7 +333,9 @@ class HistoryTradesApiTests(unittest.TestCase):
             "supertrend": [],
             "markers": [],
             "trades": [],
-            "summary": {"tradeCount": 0},
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
