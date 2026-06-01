@@ -1,5 +1,6 @@
-import type { Candle, HistoryTradeSymbolOption, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
+import type { Candle, HistorySupertrendExitMode, HistoryTradeSymbolOption, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
 import { normalizeBatchSnapshot, parseBatchHeaders, parseBatchResponse } from './batchResponse.js';
+import { buildHistoryTradesQuery } from './historyTradesQuery.js';
 
 // 自动根据环境判断 API 地址
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
@@ -234,21 +235,13 @@ export async function updateAlias(symbol: string, alias: string): Promise<boolea
 export async function fetchHistoryTrades(params: {
   symbol: string;
   strategy: string;
+  exitMode?: HistorySupertrendExitMode;
   start?: string;
   end?: string;
   minAdxForEntry?: number | null;
   weeklyFilter?: boolean;
 }): Promise<HistoryTradesResponse> {
-  const query = new URLSearchParams({
-    symbol: params.symbol.trim().toUpperCase(),
-    strategy: params.strategy,
-  });
-  if (params.start) query.set('start', params.start);
-  if (params.end) query.set('end', params.end);
-  if (params.minAdxForEntry != null && Number.isFinite(params.minAdxForEntry)) {
-    query.set('min_adx_for_entry', String(params.minAdxForEntry));
-  }
-  if (params.weeklyFilter) query.set('weekly_filter', 'true');
+  const query = buildHistoryTradesQuery(params);
 
   const response = await fetch(`${API_BASE_URL}/history-trades?${query.toString()}`);
   if (!response.ok) {

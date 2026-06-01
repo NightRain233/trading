@@ -75,6 +75,38 @@ class HistoryTradesApiTests(unittest.TestCase):
         args, kwargs = mock_review.call_args
         self.assertEqual(args[0], "TEST")
         self.assertEqual(kwargs["start"], "2026-01-01")
+        self.assertEqual(kwargs["exit_mode"], "close_only")
+
+    def test_history_trades_accepts_explicit_baseline_exit_mode(self):
+        payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "exitMode": "baseline",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [{"exitReason": "stop"}],
+            "summary": {"tradeCount": 1},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = Path(tmpdir) / "TEST.parquet"
+            db_path = Path(tmpdir) / "history.sqlite"
+            _build_daily_df().to_parquet(data_path)
+            with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
+                 patch.object(main, "build_supertrend_history_review", return_value=payload) as mock_review:
+                response = main.get_history_trades(
+                    symbol="test",
+                    strategy="supertrend",
+                    start="2026-01-01",
+                    exit_mode="baseline",
+                )
+
+        self.assertEqual(response, payload)
+        self.assertEqual(mock_review.call_args.kwargs["exit_mode"], "baseline")
 
     def test_history_trades_uses_persistent_cache_when_fresh(self):
         payload = {
@@ -110,6 +142,70 @@ class HistoryTradesApiTests(unittest.TestCase):
 
         self.assertEqual(response, payload)
         mock_review.assert_not_called()
+
+    def test_history_trade_cache_is_scoped_by_exit_mode(self):
+        baseline_payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "exitMode": "baseline",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [{"exitReason": "stop"}],
+            "summary": {"tradeCount": 1, "maxDrawdownPct": 3.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
+        }
+        close_only_payload = {
+            **baseline_payload,
+            "exitMode": "close_only",
+            "trades": [{"exitReason": "st_flip"}],
+            "summary": {"tradeCount": 1, "maxDrawdownPct": 1.0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = self._write_daily(tmpdir)
+            db_path = Path(tmpdir) / "history.sqlite"
+            main.save_history_trade_cache(
+                baseline_payload,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+                exit_mode="baseline",
+            )
+            main.save_history_trade_cache(
+                close_only_payload,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+                exit_mode="close_only",
+            )
+
+            baseline_cached = main.load_history_trade_cache(
+                "TEST",
+                "supertrend",
+                "2026-01-01",
+                None,
+                None,
+                False,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+                exit_mode="baseline",
+            )
+            close_only_cached = main.load_history_trade_cache(
+                "TEST",
+                "supertrend",
+                "2026-01-01",
+                None,
+                None,
+                False,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+                exit_mode="close_only",
+            )
+
+        self.assertEqual(baseline_cached, baseline_payload)
+        self.assertEqual(close_only_cached, close_only_payload)
 
     def test_history_trade_cache_ignores_payload_without_benchmark_or_comparisons(self):
         payload = {
@@ -350,13 +446,15 @@ class HistoryTradesApiTests(unittest.TestCase):
 
         self.assertEqual(result["start"], "2021-05-31")
         self.assertEqual(mock_review.call_args.kwargs["start"], "2021-05-31")
+        self.assertEqual(mock_review.call_args.kwargs["exit_mode"], "close_only")
 
     def test_history_precompute_cli_targets_single_symbol(self):
         with patch.object(main, "precompute_history_trades", return_value={"computed": 1}) as mock_precompute:
-            exit_code = main.main(["--precompute-history-trades", "--symbol", "test"])
+            exit_code = main.main(["--precompute-history-trades", "--symbol", "test", "--exit-mode", "baseline"])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(mock_precompute.call_args.kwargs["symbols"], ["TEST"])
+        self.assertEqual(mock_precompute.call_args.kwargs["exit_mode"], "baseline")
 
 
 if __name__ == "__main__":

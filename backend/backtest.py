@@ -23,6 +23,8 @@ SUPER_TREND_ENTRY_SIGNAL_MODES = {
     "weekly_bull_support_test",
 }
 SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE = "weekly_bull_daily_bull_flip"
+SUPER_TREND_HISTORY_EXIT_MODES = ("baseline", "reclaim", "close_only")
+SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE = "close_only"
 SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_PCT = 1.5
 SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_ATR = 0.5
 
@@ -386,11 +388,16 @@ def build_supertrend_history_review(
     end: Optional[str] = None,
     filter_weekly_df: Optional[pd.DataFrame] = None,
     min_adx_for_entry: Optional[float] = None,
+    exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
 ) -> Dict[str, object]:
+    if exit_mode not in SUPER_TREND_HISTORY_EXIT_MODES:
+        raise ValueError(f"Unsupported SuperTrend history exit mode: {exit_mode}")
+
     if df_daily is None or df_daily.empty:
         return {
             "symbol": symbol.upper(),
             "strategy": "supertrend",
+            "exitMode": exit_mode,
             "start": start,
             "end": end,
             "candles": [],
@@ -427,6 +434,7 @@ def build_supertrend_history_review(
             slippage_bps=slippage_bps,
             start=start,
             end=end,
+            exit_mode=exit_mode,
         )
     dir_col = [c for c in st.columns if c.startswith("SUPERTd_")]
     val_col = [
@@ -447,6 +455,7 @@ def build_supertrend_history_review(
             slippage_bps=slippage_bps,
             start=start,
             end=end,
+            exit_mode=exit_mode,
         )
 
     daily["_st_dir"] = st[dir_col[0]]
@@ -669,7 +678,7 @@ def build_supertrend_history_review(
             }
         return simulated_trades, simulated_markers, _summarize_supertrend_trades(simulated_trades, open_trade)
 
-    trades, markers, summary = _simulate_supertrend_mode("baseline", include_markers=True)
+    trades, markers, summary = _simulate_supertrend_mode(exit_mode, include_markers=True)
 
     chart_window = daily
     if start_ts is not None:
@@ -721,8 +730,8 @@ def build_supertrend_history_review(
         "close_only": "仅 ST 翻空退出",
     }
     strategy_comparisons = []
-    for mode in ("baseline", "reclaim", "close_only"):
-        if mode == "baseline":
+    for mode in SUPER_TREND_HISTORY_EXIT_MODES:
+        if mode == exit_mode:
             mode_summary = summary
         else:
             _, _, mode_summary = _simulate_supertrend_mode(mode, include_markers=False)
@@ -735,6 +744,7 @@ def build_supertrend_history_review(
     return {
         "symbol": symbol.upper(),
         "strategy": "supertrend",
+        "exitMode": exit_mode,
         "start": start,
         "end": end,
         "candles": candles,
