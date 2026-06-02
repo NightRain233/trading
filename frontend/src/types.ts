@@ -82,6 +82,14 @@ export interface WatchlistGroup {
   stocks?: StockData[]; // Optional, populated after fetching
 }
 
+export interface SymbolResolveCandidate {
+  symbol: string;
+  displayCode: string;
+  name: string;
+  market: string;
+  confidence: 'exact' | 'rule' | 'special';
+}
+
 export type Timeframe = '1D' | '1W';
 
 export interface HistorySupertrendPoint {

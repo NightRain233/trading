@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
-import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias } from './utils';
-import type { StockData, Candle, Timeframe, WatchlistGroup } from './types';
+import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias, resolveSymbolCandidates } from './utils';
+import type { StockData, Candle, SymbolResolveCandidate, Timeframe, WatchlistGroup } from './types';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
 const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
@@ -117,6 +117,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
+  const [symbolCandidates, setSymbolCandidates] = useState<SymbolResolveCandidate[]>([]);
+  const [symbolResolving, setSymbolResolving] = useState(false);
+  const [symbolDropdownOpen, setSymbolDropdownOpen] = useState(false);
+  const [selectedSymbolCandidate, setSelectedSymbolCandidate] = useState<SymbolResolveCandidate | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [loading, setLoading] = useState(false);
   const [showNewGroupInput, setShowNewGroupInput] = useState(false);
@@ -178,6 +182,46 @@ function App() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const query = newTicker.trim();
+
+    if (activeTab !== 'watchlist' || !query) {
+      setSymbolCandidates([]);
+      setSymbolResolving(false);
+      setSymbolDropdownOpen(false);
+      return;
+    }
+
+    if (selectedSymbolCandidate?.symbol === query.toUpperCase()) {
+      setSymbolCandidates([selectedSymbolCandidate]);
+      setSymbolResolving(false);
+      setSymbolDropdownOpen(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setSymbolResolving(true);
+      const candidates = await resolveSymbolCandidates(query);
+      setSymbolCandidates(candidates);
+      setSymbolDropdownOpen(candidates.length > 0);
+      setSymbolResolving(false);
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTab, newTicker, selectedSymbolCandidate]);
+
+  const handleNewTickerChange = useCallback((value: string) => {
+    setNewTicker(value);
+    setSelectedSymbolCandidate(null);
+    setSymbolDropdownOpen(Boolean(value.trim()));
+  }, []);
+
+  const handleSelectSymbolCandidate = useCallback((candidate: SymbolResolveCandidate) => {
+    setSelectedSymbolCandidate(candidate);
+    setNewTicker(candidate.symbol);
+    setSymbolDropdownOpen(false);
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => setActiveTab(pathToTab(window.location.pathname));
@@ -328,6 +372,9 @@ function App() {
     const success = await addTicker(newTicker);
     if (success) {
       setNewTicker('');
+      setSymbolCandidates([]);
+      setSelectedSymbolCandidate(null);
+      setSymbolDropdownOpen(false);
       loadData();
     } else {
       alert('Failed to add ticker. Check symbol or connection.');
@@ -558,8 +605,13 @@ function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
       <Header
         newTicker={newTicker}
-        setNewTicker={setNewTicker}
+        setNewTicker={handleNewTickerChange}
         handleAddStock={handleAddStock}
+        symbolCandidates={symbolCandidates}
+        symbolResolving={symbolResolving}
+        symbolDropdownOpen={symbolDropdownOpen}
+        setSymbolDropdownOpen={setSymbolDropdownOpen}
+        onSelectSymbolCandidate={handleSelectSymbolCandidate}
         setShowNewGroupInput={setShowNewGroupInput}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}

@@ -1,12 +1,17 @@
 import React from 'react';
 import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { Timeframe } from '../types';
+import type { SymbolResolveCandidate, Timeframe } from '../types';
 
 interface HeaderProps {
   newTicker: string;
   setNewTicker: (val: string) => void;
   handleAddStock: (e: React.FormEvent) => void;
+  symbolCandidates: SymbolResolveCandidate[];
+  symbolResolving: boolean;
+  symbolDropdownOpen: boolean;
+  setSymbolDropdownOpen: (val: boolean) => void;
+  onSelectSymbolCandidate: (candidate: SymbolResolveCandidate) => void;
   setShowNewGroupInput: (val: boolean) => void;
   searchTerm: string;
   setSearchTerm: (val: string) => void;
@@ -30,6 +35,11 @@ export const Header: React.FC<HeaderProps> = ({
   newTicker,
   setNewTicker,
   handleAddStock,
+  symbolCandidates,
+  symbolResolving,
+  symbolDropdownOpen,
+  setSymbolDropdownOpen,
+  onSelectSymbolCandidate,
   setShowNewGroupInput,
   searchTerm,
   setSearchTerm,
@@ -49,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
 }) => {
   const isWatchlist = activeTab === 'watchlist';
+  const showSymbolDropdown = symbolDropdownOpen && (symbolResolving || symbolCandidates.length > 0);
   const tabClass = (tab: HeaderProps['activeTab']) => clsx(
     "shrink-0 px-2.5 py-1.5 text-[10px] sm:text-xs rounded-lg border font-semibold transition-all duration-200 active:scale-[0.98]",
     activeTab === tab
@@ -105,14 +116,53 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Add Symbol Form */}
           {isWatchlist && (
-          <form onSubmit={handleAddStock} className="flex items-center gap-1.5">
-            <input
-              type="text"
-              placeholder="Symbol..."
-              value={newTicker}
-              onChange={e => setNewTicker(e.target.value)}
-              className="input-glass rounded-xl px-3 py-2 text-xs sm:text-sm w-20 sm:w-36 focus:outline-none uppercase placeholder:text-zinc-600 font-medium"
-            />
+          <form onSubmit={handleAddStock} className="relative flex items-center gap-1.5">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Symbol..."
+                value={newTicker}
+                onChange={e => setNewTicker(e.target.value)}
+                onFocus={() => setSymbolDropdownOpen(symbolCandidates.length > 0)}
+                onBlur={() => window.setTimeout(() => setSymbolDropdownOpen(false), 120)}
+                className="input-glass rounded-xl px-3 py-2 text-xs sm:text-sm w-20 sm:w-36 focus:outline-none uppercase placeholder:text-zinc-600 font-medium"
+              />
+              {showSymbolDropdown && (
+                <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-zinc-700/80 bg-zinc-950/95 shadow-2xl shadow-black/40 backdrop-blur z-50">
+                  {symbolResolving && symbolCandidates.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-zinc-500">解析中...</div>
+                  ) : (
+                    <div className="max-h-72 overflow-y-auto py-1">
+                      {symbolCandidates.map(candidate => (
+                        <button
+                          key={candidate.symbol}
+                          type="button"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            onSelectSymbolCandidate(candidate);
+                          }}
+                          className="w-full px-3 py-2 text-left hover:bg-emerald-500/10 focus:bg-emerald-500/10 focus:outline-none"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate text-xs font-semibold text-zinc-100">
+                              {candidate.name || candidate.displayCode}
+                            </span>
+                            <span className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                              {candidate.market}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[10px] text-zinc-500">
+                            <span className="font-mono">{candidate.displayCode}</span>
+                            <span className="h-1 w-1 rounded-full bg-zinc-700" />
+                            <span className="font-mono">Yahoo: {candidate.symbol}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <button
               type="submit"
               className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-emerald-400"
