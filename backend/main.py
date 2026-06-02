@@ -968,7 +968,12 @@ def collect_history_trade_symbol_catalog(
             else:
                 _add_catalog_item(catalog, item, "", "watchlist")
 
-    for universe_file in universe_files or ["universes/a_share_etf_core.json", "universes/etf_core.json"]:
+    resolved_universe_files = (
+        ["universes/a_share_etf_core.json", "universes/etf_core.json"]
+        if universe_files is None
+        else universe_files
+    )
+    for universe_file in resolved_universe_files:
         if not os.path.exists(universe_file):
             continue
         try:
@@ -1028,24 +1033,31 @@ def _cached_symbols(db_path: Optional[str] = None) -> dict:
 
 @app.get("/api/history-trades/symbols")
 def list_history_trade_symbols(universe_files: Optional[List[str]] = None):
+    require_ready = universe_files is None
     catalog = (
         collect_history_trade_symbol_catalog(universe_files=universe_files)
         if universe_files is not None
-        else collect_watchlist_history_trade_symbol_catalog()
+        else collect_history_trade_symbol_catalog(universe_files=[])
     )
     cached = _cached_symbols()
+    for symbol in cached.keys():
+        _add_catalog_item(catalog, symbol, "", "cache")
     results = []
     for symbol, item in catalog.items():
         daily_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
         cache_info = cached.get(symbol, {})
+        has_data = os.path.exists(daily_path)
+        has_cache = symbol in cached
+        if require_ready and not (has_data and has_cache):
+            continue
         name = item.get("name", "")
         results.append({
             "symbol": symbol,
             "name": name,
             "displayName": f"{symbol} · {name}" if name else symbol,
             "source": item.get("source", ""),
-            "hasData": os.path.exists(daily_path),
-            "hasCache": symbol in cached,
+            "hasData": has_data,
+            "hasCache": has_cache,
             "cachedAt": cache_info.get("cachedAt"),
             "cacheCount": cache_info.get("cacheCount", 0),
         })
@@ -1393,10 +1405,6 @@ def supertrend_scan():
     from analysis import DATA_DIR
     from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
-    if _st_scan_cache["data"] is not None and time.time() - _st_scan_cache["ts"] < 3600:
-        return _st_scan_cache["data"]
-    import pandas_ta as ta
-
     groups = load_watchlist()
     symbols, alias_map = [], {}
     for g in groups:
@@ -1405,6 +1413,26 @@ def supertrend_scan():
             if sym not in symbols:
                 symbols.append(sym)
                 alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
+
+    cache_symbols = _st_scan_cache.get("symbols")
+    if (
+        _st_scan_cache["data"] is not None
+        and cache_symbols == symbols
+        and time.time() - _st_scan_cache["ts"] < 3600
+    ):
+        return _st_scan_cache["data"]
+
+    missing_symbols = [
+        sym for sym in symbols
+        if not os.path.exists(os.path.join(DATA_DIR, f"{sym.upper()}.parquet"))
+    ]
+    if missing_symbols:
+        try:
+            batch_fetch_and_update(missing_symbols)
+        except Exception as exc:
+            logger.warning(f"SuperTrend 扫描预刷新失败: {exc}")
+
+    import pandas_ta as ta
 
     def _process_sym(sym):
         daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
@@ -1530,6 +1558,7 @@ def supertrend_scan():
 
     _st_scan_cache["data"] = results
     _st_scan_cache["ts"] = time.time()
+    _st_scan_cache["symbols"] = symbols
     return results
 
 

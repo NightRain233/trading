@@ -52,6 +52,31 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _normalize_downloaded_ohlcv_columns(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    if df is None or df.empty or not isinstance(df.columns, pd.MultiIndex):
+        return df
+
+    normalized_symbol = symbol.upper()
+    for level in range(df.columns.nlevels):
+        level_values = list(df.columns.get_level_values(level))
+        upper_values = [str(value).upper() for value in level_values]
+        if normalized_symbol in upper_values:
+            raw_symbol = level_values[upper_values.index(normalized_symbol)]
+            df = df.xs(raw_symbol, axis=1, level=level)
+            break
+
+    if isinstance(df.columns, pd.MultiIndex):
+        ohlcv_columns = {"Open", "High", "Low", "Close", "Volume", "Adj Close"}
+        for level in range(df.columns.nlevels):
+            level_values = set(df.columns.get_level_values(level))
+            if level_values & ohlcv_columns:
+                df = df.copy()
+                df.columns = df.columns.get_level_values(level)
+                break
+
+    return df
+
+
 # ============================================
 # 主分析函数
 # ============================================
@@ -242,8 +267,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
             new_df = downloaded_data[symbol]
             if hasattr(new_df.index, 'tz') and new_df.index.tz is not None:
                 new_df.index = new_df.index.tz_localize(None)
-            if isinstance(new_df.columns, pd.MultiIndex):
-                new_df.columns = new_df.columns.get_level_values(0)
+            new_df = _normalize_downloaded_ohlcv_columns(new_df, symbol)
             base_ohlcv = _extract_ohlcv(df_local)
             merged_df = _merge_and_clean_data(base_ohlcv, new_df, now)
             market_data_changed = _market_data_changed(df_local, merged_df)
