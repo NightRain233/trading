@@ -84,6 +84,137 @@ COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
 class UpdateAliasRequest(BaseModel):
     alias: str
 
+
+SHANGHAI_SYMBOL_PREFIXES = (
+    "600", "601", "603", "605", "688",
+    "510", "511", "512", "513", "515", "516", "517", "518", "588",
+)
+SHENZHEN_SYMBOL_PREFIXES = ("000", "001", "002", "003", "300", "301", "159")
+SPECIAL_A_SHARE_SYMBOLS = {
+    "000001": [
+        ("000001.SS", "上证指数"),
+        ("000001.SZ", "平安银行"),
+    ],
+}
+BUILTIN_A_SHARE_NAMES = {
+    "000001.SS": "上证指数",
+    "000001.SZ": "平安银行",
+    "000300.SS": "沪深300",
+    "600519.SS": "贵州茅台",
+}
+
+
+class SymbolResolveCandidate(BaseModel):
+    symbol: str
+    displayCode: str
+    name: str
+    market: str
+    confidence: Literal["exact", "rule", "special"]
+
+
+def _display_code_for_yahoo_symbol(symbol: str) -> str:
+    if symbol.endswith(".SS"):
+        return f"{symbol[:-3]}.SH"
+    return symbol
+
+
+def _market_for_yahoo_symbol(symbol: str) -> str:
+    if symbol.endswith(".SS"):
+        return "上海"
+    if symbol.endswith(".SZ"):
+        return "深圳"
+    return "其他"
+
+
+def _load_known_a_share_names() -> dict:
+    names = dict(BUILTIN_A_SHARE_NAMES)
+
+    universe_files = [
+        Path(__file__).resolve().parent / "universes" / "a_share_etf_core.json",
+        Path(__file__).resolve().parent / "universes" / "etf_core.json",
+    ]
+    for universe_file in universe_files:
+        if not universe_file.exists():
+            continue
+        try:
+            with open(universe_file, "r") as f:
+                payload = json.load(f)
+        except Exception as exc:
+            logger.warning(f"读取标的名称文件失败 {universe_file}: {exc}")
+            continue
+
+        raw_symbols = payload.get("symbols", []) if isinstance(payload, dict) else payload
+        for item in raw_symbols:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol", "")).strip().upper()
+            name = str(item.get("name", "")).strip()
+            if symbol and name:
+                names.setdefault(symbol, name)
+
+    try:
+        for group in load_watchlist():
+            for item in group.get("symbols", []):
+                if not isinstance(item, dict):
+                    continue
+                symbol = str(item.get("symbol", "")).strip().upper()
+                alias = str(item.get("alias", "")).strip()
+                if symbol and alias:
+                    names.setdefault(symbol, alias)
+    except Exception as exc:
+        logger.warning(f"读取 watchlist 名称失败: {exc}")
+
+    return names
+
+
+def _build_symbol_candidate(symbol: str, name: str = "", confidence: Literal["exact", "rule", "special"] = "rule") -> dict:
+    normalized = symbol.strip().upper().replace(".SH", ".SS")
+    display_code = _display_code_for_yahoo_symbol(normalized)
+    names = _load_known_a_share_names()
+    return {
+        "symbol": normalized,
+        "displayCode": display_code,
+        "name": name or names.get(normalized, display_code),
+        "market": _market_for_yahoo_symbol(normalized),
+        "confidence": confidence,
+    }
+
+
+def resolve_symbol_candidates(raw: str) -> List[dict]:
+    query = raw.strip().upper()
+    if not query:
+        return []
+
+    if query.endswith(".SH"):
+        return [_build_symbol_candidate(query, confidence="exact")]
+    if query.endswith(".SS") or query.endswith(".SZ"):
+        return [_build_symbol_candidate(query, confidence="exact")]
+    if not (query.isdigit() and len(query) == 6):
+        return []
+
+    special_candidates = SPECIAL_A_SHARE_SYMBOLS.get(query)
+    if special_candidates:
+        return [
+            _build_symbol_candidate(symbol, name=name, confidence="special")
+            for symbol, name in special_candidates
+        ]
+
+    if query.startswith(SHANGHAI_SYMBOL_PREFIXES):
+        return [_build_symbol_candidate(f"{query}.SS", confidence="rule")]
+    if query.startswith(SHENZHEN_SYMBOL_PREFIXES):
+        return [_build_symbol_candidate(f"{query}.SZ", confidence="rule")]
+    return []
+
+
+def normalize_watchlist_symbol(raw: str) -> str:
+    symbol = raw.strip().upper()
+    if not symbol:
+        return ""
+    candidates = resolve_symbol_candidates(symbol)
+    if candidates:
+        return candidates[0]["symbol"]
+    return symbol.replace(".SH", ".SS")
+
 def load_watchlist():
     """Load watchlist with migration support for legacy format."""
     if not os.path.exists(WATCHLIST_FILE):
@@ -263,6 +394,12 @@ def build_cache_headers(
 def read_root():
     return {"status": "ok", "message": "Trading Backend is running"}
 
+
+@app.get("/api/symbol/resolve", response_model=List[SymbolResolveCandidate])
+def resolve_symbol(q: str = ""):
+    return resolve_symbol_candidates(q)
+
+
 @app.get("/api/quote/{symbol}", response_model=StockResponse)
 def get_quote(symbol: str):
     data = analyze_stock(symbol.upper())
@@ -351,7 +488,7 @@ def get_watchlist():
 @app.post("/api/watchlist")
 def add_to_watchlist(request: AddStockRequest):
     """Add symbol to a group (default: first group)."""
-    symbol = request.symbol.strip().upper()
+    symbol = normalize_watchlist_symbol(request.symbol)
     if not symbol:
         raise HTTPException(status_code=400, detail="Invalid symbol")
     

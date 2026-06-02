@@ -1,4 +1,4 @@
-import type { Candle, HistorySupertrendExitMode, HistoryTradeSymbolOption, HistoryTradesResponse, StockData, Timeframe, WatchlistGroup, WatchlistItem } from './types';
+import type { Candle, HistorySupertrendExitMode, HistoryTradeSymbolOption, HistoryTradesResponse, StockData, SymbolResolveCandidate, Timeframe, WatchlistGroup, WatchlistItem } from './types';
 import { normalizeBatchSnapshot, parseBatchHeaders, parseBatchResponse } from './batchResponse.js';
 import { buildHistoryTradesQuery } from './historyTradesQuery.js';
 
@@ -174,6 +174,20 @@ export async function addTicker(symbol: string, groupId?: string, alias?: string
   } catch (error) {
     console.error(`Error adding ${symbol}:`, error);
     return false;
+  }
+}
+
+export async function resolveSymbolCandidates(query: string): Promise<SymbolResolveCandidate[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/symbol/resolve?q=${encodeURIComponent(trimmed)}`);
+    if (!response.ok) return [];
+    return await response.json();
+  } catch (error) {
+    console.error(`Error resolving symbol ${query}:`, error);
+    return [];
   }
 }
 
