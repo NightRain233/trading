@@ -186,6 +186,49 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertIn("TEST", analysis._memory_cache)
             self.assertEqual(analysis._memory_cache["TEST"]["timestamp"], old_mtime)
 
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "002119.SZ", "price": 10.7})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_handles_single_symbol_price_ticker_multiindex_download(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index = pd.date_range("2026-01-01", periods=3, freq="B")
+            columns = pd.MultiIndex.from_product(
+                [["002119.SZ"], ["Open", "High", "Low", "Close", "Volume"]],
+                names=["Ticker", "Price"],
+            )
+            raw_download_df = pd.DataFrame(
+                [
+                    [10.0, 10.5, 9.8, 10.3, 1000],
+                    [10.2, 10.7, 10.0, 10.5, 1100],
+                    [10.4, 10.9, 10.2, 10.7, 1200],
+                ],
+                columns=columns,
+                index=index,
+            )
+            daily_df = _build_daily_df(periods=3)
+            daily_df.index = index
+            weekly_df = _build_weekly_df()
+            mock_download.return_value = raw_download_df
+            mock_daily_indicators.side_effect = lambda df: df.assign(EMA20=df["Close"])
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir):
+                batch_fetch_and_update(["002119.SZ"])
+
+                stored = pd.read_parquet(Path(tmpdir) / "002119.SZ.parquet")
+
+            self.assertIn("Close", stored.columns)
+            self.assertAlmostEqual(float(stored["Close"].iloc[-1]), 10.7)
+
 
 if __name__ == "__main__":
     unittest.main()

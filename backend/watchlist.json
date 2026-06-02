@@ -111,6 +111,34 @@
       {
         "symbol": "588000.SS",
         "alias": "科创 50"
+      },
+      {
+        "symbol": "002119.SZ",
+        "alias": "康强电子"
+      },
+      {
+        "symbol": "002796.SZ",
+        "alias": "世嘉科技"
+      },
+      {
+        "symbol": "002015.SZ",
+        "alias": "协鑫能科"
+      },
+      {
+        "symbol": "000890.SZ",
+        "alias": "法尔胜"
+      },
+      {
+        "symbol": "600487.SS",
+        "alias": "亨通光电"
+      },
+      {
+        "symbol": "002309.SZ",
+        "alias": "ST中利"
+      },
+      {
+        "symbol": "600345.SS",
+        "alias": "长江通信"
       }
     ],
     "collapsed": false

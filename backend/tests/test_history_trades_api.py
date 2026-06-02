@@ -282,16 +282,49 @@ class HistoryTradesApiTests(unittest.TestCase):
         miss_item = next(item for item in symbols if item["symbol"] == "MISS")
         self.assertFalse(miss_item["hasData"])
 
-    def test_history_trade_symbols_default_to_watchlist_only(self):
+    def test_history_trade_symbols_default_include_only_symbols_with_data_and_cache(self):
+        ready_payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
+        }
+        cache_only_payload = {**ready_payload, "symbol": "CACHED"}
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._write_daily(tmpdir, "TEST")
             self._write_daily(tmpdir, "EXTRA")
+            db_path = Path(tmpdir) / "history.sqlite"
+            main.save_history_trade_cache(
+                ready_payload,
+                data_mtime=(Path(tmpdir) / "TEST.parquet").stat().st_mtime,
+                db_path=str(db_path),
+            )
+            main.save_history_trade_cache(
+                cache_only_payload,
+                data_mtime=123.0,
+                db_path=str(db_path),
+            )
             with patch.object(main, "DATA_DIR", tmpdir), \
+                 patch.object(main, "HISTORY_TRADES_CACHE_FILE", str(db_path)), \
                  patch.object(main, "load_watchlist", return_value=[{"symbols": [{"symbol": "TEST", "alias": "测试ETF"}]}]):
                 symbols = main.list_history_trade_symbols()
 
-        self.assertEqual([item["symbol"] for item in symbols], ["TEST"])
-        self.assertEqual(symbols[0]["displayName"], "TEST · 测试ETF")
+        by_symbol = {item["symbol"]: item for item in symbols}
+        self.assertIn("TEST", by_symbol)
+        self.assertNotIn("EXTRA", by_symbol)
+        self.assertNotIn("CACHED", by_symbol)
+        self.assertEqual(by_symbol["TEST"]["displayName"], "TEST · 测试ETF")
+        self.assertEqual(by_symbol["TEST"]["source"], "watchlist")
+        self.assertTrue(by_symbol["TEST"]["hasData"])
+        self.assertTrue(by_symbol["TEST"]["hasCache"])
 
     def test_precompute_history_trades_writes_sqlite_cache(self):
         payload = {
