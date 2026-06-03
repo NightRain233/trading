@@ -117,14 +117,17 @@ export interface HistoryTrade {
   symbol: string;
   strategy: string;
   entryDate: string;
-  exitDate: string;
+  exitDate: string | null;
   entryPrice: number;
-  exitPrice: number;
+  exitPrice: number | null;
+  currentDate?: string | null;
+  currentPrice?: number | null;
   stopPrice?: number | null;
   returnPct: number;
   holdingDays: number;
   exitReason: string;
   entryAdx?: number | null;
+  isOpen?: boolean;
 }
 
 export interface HistoryTradesSummary {

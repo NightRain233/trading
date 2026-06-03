@@ -51,6 +51,7 @@ dependencies = [
     { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "pandas-ta" },
     { name = "pyarrow" },
+    { name = "requests" },
     { name = "uvicorn" },
     { name = "yfinance" },
 ]
@@ -66,6 +67,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pandas-ta", specifier = ">=0.4.71b0" },
     { name = "pyarrow", specifier = ">=23.0.0" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "uvicorn", specifier = ">=0.40.0" },
     { name = "yfinance", specifier = ">=1.1.0" },
 ]

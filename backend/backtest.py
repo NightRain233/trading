@@ -497,9 +497,6 @@ def build_supertrend_history_review(
     ) -> Dict[str, object]:
         returns = [float(trade["returnPct"]) for trade in trade_list]
         holding_days = [int(trade["holdingDays"]) for trade in trade_list]
-        total_equity = 1.0
-        for ret in returns:
-            total_equity *= 1 + ret / 100
 
         drawdown_entries = [
             {
@@ -519,6 +516,7 @@ def build_supertrend_history_review(
         max_drawdown = 0.0
         active_trade = None
         next_trade_idx = 0
+        final_equity = 1.0
         for ts, row in daily.iterrows():
             current_date = _date_str(ts)
             if active_trade is None and next_trade_idx < len(drawdown_entries):
@@ -542,12 +540,13 @@ def build_supertrend_history_review(
             peak_equity = max(peak_equity, equity)
             if peak_equity > 0:
                 max_drawdown = max(max_drawdown, (peak_equity - equity) / peak_equity * 100)
+            final_equity = equity
 
         return {
             "tradeCount": len(trade_list),
             "winRate": (sum(1 for ret in returns if ret > 0) / len(returns)) if returns else 0.0,
             "averageReturnPct": (sum(returns) / len(returns)) if returns else 0.0,
-            "totalReturnPct": (total_equity - 1) * 100 if returns else 0.0,
+            "totalReturnPct": (final_equity - 1) * 100,
             "maxDrawdownPct": max_drawdown,
             "averageHoldingDays": (sum(holding_days) / len(holding_days)) if holding_days else 0.0,
             "exitReasonCounts": dict(Counter(str(trade["exitReason"]) for trade in trade_list)),
@@ -669,16 +668,39 @@ def build_supertrend_history_review(
                         })
 
         open_trade = None
+        open_trade_display = None
         if in_position and entry_idx is not None and entry_price is not None:
+            latest_row = daily.iloc[-1]
+            current_price = _row_price(latest_row, "Close")
+            current_stop = float(latest_row["_st_val"]) if pd.notna(latest_row.get("_st_val")) else stop_price
+            return_pct = (current_price - entry_price) / entry_price * 100
             open_trade = {
                 "entryDate": _date_str(daily.index[entry_idx]),
                 "entryPrice": entry_price,
                 "exitDate": None,
                 "exitPrice": None,
             }
-        return simulated_trades, simulated_markers, _summarize_supertrend_trades(simulated_trades, open_trade)
+            open_trade_display = {
+                "tradeIndex": len(simulated_trades) + 1,
+                "symbol": symbol.upper(),
+                "strategy": "supertrend",
+                "entryDate": _date_str(daily.index[entry_idx]),
+                "exitDate": None,
+                "entryPrice": entry_price,
+                "exitPrice": None,
+                "currentDate": _date_str(daily.index[-1]),
+                "currentPrice": current_price,
+                "stopPrice": current_stop,
+                "returnPct": return_pct,
+                "holdingDays": len(daily) - entry_idx,
+                "exitReason": "open",
+                "entryAdx": entry_adx,
+                "isOpen": True,
+            }
+        return simulated_trades, simulated_markers, _summarize_supertrend_trades(simulated_trades, open_trade), open_trade_display
 
-    trades, markers, summary = _simulate_supertrend_mode(exit_mode, include_markers=True)
+    trades, markers, summary, open_trade_display = _simulate_supertrend_mode(exit_mode, include_markers=True)
+    display_trades = trades + ([open_trade_display] if open_trade_display is not None else [])
 
     chart_window = daily
     if start_ts is not None:
@@ -734,7 +756,7 @@ def build_supertrend_history_review(
         if mode == exit_mode:
             mode_summary = summary
         else:
-            _, _, mode_summary = _simulate_supertrend_mode(mode, include_markers=False)
+            _, _, mode_summary, _ = _simulate_supertrend_mode(mode, include_markers=False)
         strategy_comparisons.append({
             "id": mode,
             "label": comparison_labels[mode],
@@ -750,7 +772,7 @@ def build_supertrend_history_review(
         "candles": candles,
         "supertrend": supertrend_points,
         "markers": markers,
-        "trades": trades,
+        "trades": display_trades,
         "summary": summary,
         "benchmark": _buy_and_hold_benchmark(chart_window),
         "strategyComparisons": strategy_comparisons,
