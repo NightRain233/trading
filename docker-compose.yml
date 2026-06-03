@@ -2,9 +2,13 @@ version: '3.8'
 
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        - HTTP_PROXY=http://127.0.0.1:7890
+        - HTTPS_PROXY=http://127.0.0.1:7890
     restart: always
-    network_mode: "host"  # 关键点：直接使用宿主机网络
+    network_mode: "host"
     environment:
       - HTTP_PROXY=http://127.0.0.1:7890
       - HTTPS_PROXY=http://127.0.0.1:7890
@@ -12,7 +16,11 @@ services:
       - ./backend/data:/app/data
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        - HTTP_PROXY=http://127.0.0.1:7890
+        - HTTPS_PROXY=http://127.0.0.1:7890
     restart: always
     network_mode: "host"
     depends_on:
