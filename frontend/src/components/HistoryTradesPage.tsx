@@ -22,6 +22,7 @@ const EXIT_REASON_LABEL: Record<string, string> = {
   st_flip: 'SuperTrend 翻空',
   stop: '触及动态止损',
   reclaim_st_flip: '收复再入后翻空',
+  open: '持仓中',
 };
 
 const formatPrice = (value?: number | null) => {
@@ -391,27 +392,43 @@ export function HistoryTradesPage() {
           )}
 
           {result && result.trades.length === 0 && (
-            <div className="p-6 text-sm text-zinc-600">当前区间没有完成交易。</div>
+            <div className="p-6 text-sm text-zinc-600">当前区间没有交易。</div>
           )}
 
           {result && result.trades.length > 0 && (
             <div className="max-h-[520px] overflow-auto divide-y divide-zinc-800/80">
-              {result.trades.map(trade => (
-                <div key={trade.tradeIndex} className="p-3">
+              {result.trades.map(trade => {
+                const isOpen = Boolean(trade.isOpen || !trade.exitDate);
+                const exitLabel = isOpen ? '当前' : '卖出';
+                const exitDate = isOpen ? trade.currentDate : trade.exitDate;
+                const exitPrice = isOpen ? trade.currentPrice : trade.exitPrice;
+                return (
+                <div key={`${trade.tradeIndex}-${isOpen ? 'open' : 'closed'}`} className="p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs text-zinc-500">#{trade.tradeIndex}</span>
-                    <span className={`font-mono text-sm font-semibold ${trade.returnPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                      {formatPct(trade.returnPct)}
-                    </span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="font-mono text-xs text-zinc-500">#{trade.tradeIndex}</span>
+                      {isOpen && (
+                        <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-200">
+                          持仓中
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      {isOpen && <div className="text-[10px] text-zinc-600">浮盈</div>}
+                      <span className={`font-mono text-sm font-semibold ${trade.returnPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {formatPct(trade.returnPct)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
                     <TradeField icon={<CalendarDays size={12} />} label="买入" value={`${trade.entryDate} · ${formatPrice(trade.entryPrice)}`} />
-                    <TradeField icon={<CalendarDays size={12} />} label="卖出" value={`${trade.exitDate} · ${formatPrice(trade.exitPrice)}`} />
+                    <TradeField icon={<CalendarDays size={12} />} label={exitLabel} value={`${exitDate || '-'} · ${formatPrice(exitPrice)}`} />
                     <TradeField icon={<ShieldCheck size={12} />} label="持仓" value={`${trade.holdingDays} 天`} />
                     <TradeField icon={<ShieldCheck size={12} />} label="原因" value={EXIT_REASON_LABEL[trade.exitReason] || trade.exitReason} />
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
 
@@ -453,9 +470,9 @@ function MetricMini({ label, value, color = 'text-zinc-100' }: { label: string; 
 
 function TradeField({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="flex items-center gap-1 text-zinc-600">{icon}{label}</div>
-      <div className="mt-0.5 font-mono text-zinc-300">{value}</div>
+      <div className="mt-0.5 break-words font-mono text-zinc-300">{value}</div>
     </div>
   );
 }

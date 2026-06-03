@@ -2,7 +2,7 @@ import json
 import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -221,13 +221,341 @@ class CacheMetadataTests(unittest.TestCase):
 
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "DATA_DIR", tmpdir):
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "_fetch_eastmoney_daily", return_value=None):
                 batch_fetch_and_update(["002119.SZ"])
 
                 stored = pd.read_parquet(Path(tmpdir) / "002119.SZ.parquet")
 
             self.assertIn("Close", stored.columns)
             self.assertAlmostEqual(float(stored["Close"].iloc[-1]), 10.7)
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "TEST", "price": 1.23})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_uses_next_day_end_to_include_latest_daily_bar(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 6, 2, 21, 30)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            daily_df = _build_daily_df()
+            weekly_df = _build_weekly_df()
+            data_dir = Path(tmpdir)
+            daily_path = data_dir / "TEST.parquet"
+            weekly_path = data_dir / "TEST_weekly.parquet"
+            daily_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+
+            old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+            import os
+            os.utime(daily_path, (old_mtime, old_mtime))
+            os.utime(weekly_path, (old_mtime, old_mtime))
+
+            mock_download.return_value = daily_df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            mock_daily_indicators.side_effect = lambda df: daily_df.copy()
+            mock_weekly_indicators.side_effect = lambda df: weekly_df.copy()
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "datetime", FixedDateTime):
+                batch_fetch_and_update(["TEST"])
+
+        self.assertEqual(mock_download.call_args.kwargs["end"], FixedDateTime.now() + timedelta(days=1))
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_patches_a_share_yfinance_daily_gap_with_eastmoney(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            daily_df = _build_daily_df()
+            weekly_df = _build_weekly_df()
+            data_dir = Path(tmpdir)
+            daily_path = data_dir / "512890.SS.parquet"
+            weekly_path = data_dir / "512890.SS_weekly.parquet"
+            daily_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+
+            old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+            import os
+            os.utime(daily_path, (old_mtime, old_mtime))
+            os.utime(weekly_path, (old_mtime, old_mtime))
+
+            yfinance_df = pd.DataFrame(
+                {
+                    "Open": [1.166, 1.180],
+                    "High": [1.184, 1.180],
+                    "Low": [1.158, 1.163],
+                    "Close": [1.181, 1.164],
+                    "Volume": [818364328, 464471901],
+                },
+                index=pd.to_datetime(["2026-06-01", "2026-06-03"]),
+            )
+            eastmoney_df = pd.DataFrame(
+                {
+                    "Open": [1.179],
+                    "High": [1.191],
+                    "Low": [1.178],
+                    "Close": [1.182],
+                    "Volume": [737393600],
+                },
+                index=pd.to_datetime(["2026-06-02"]),
+            )
+            mock_download.return_value = yfinance_df
+            mock_daily_indicators.side_effect = lambda df: df
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                batch_fetch_and_update(["512890.SS"])
+
+                stored = pd.read_parquet(daily_path)
+
+            stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
+            self.assertIn("2026-06-02", stored_dates)
+            self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
+            mock_eastmoney.assert_called_once()
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.182})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_patches_a_share_when_yfinance_lags_latest_business_day(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 6, 2, 21, 30)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            daily_df = _build_daily_df()
+            weekly_df = _build_weekly_df()
+            data_dir = Path(tmpdir)
+            daily_path = data_dir / "512890.SS.parquet"
+            weekly_path = data_dir / "512890.SS_weekly.parquet"
+            daily_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+
+            old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+            import os
+            os.utime(daily_path, (old_mtime, old_mtime))
+            os.utime(weekly_path, (old_mtime, old_mtime))
+
+            yfinance_df = pd.DataFrame(
+                {
+                    "Open": [1.166],
+                    "High": [1.184],
+                    "Low": [1.158],
+                    "Close": [1.181],
+                    "Volume": [818364328],
+                },
+                index=pd.to_datetime(["2026-06-01"]),
+            )
+            eastmoney_df = pd.DataFrame(
+                {
+                    "Open": [1.179],
+                    "High": [1.191],
+                    "Low": [1.178],
+                    "Close": [1.182],
+                    "Volume": [737393600],
+                },
+                index=pd.to_datetime(["2026-06-02"]),
+            )
+            mock_download.return_value = yfinance_df
+            mock_daily_indicators.side_effect = lambda df: df
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "datetime", FixedDateTime), \
+                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                batch_fetch_and_update(["512890.SS"])
+
+                stored = pd.read_parquet(daily_path)
+
+            stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
+            self.assertIn("2026-06-02", stored_dates)
+            mock_eastmoney.assert_called_once()
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_patches_a_share_gap_after_merging_local_cache(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 6, 3, 21, 30)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_df = _build_daily_df(periods=5)
+            local_df.index = pd.date_range("2026-05-25", periods=5, freq="B")
+            weekly_df = _build_weekly_df()
+            data_dir = Path(tmpdir)
+            daily_path = data_dir / "512890.SS.parquet"
+            weekly_path = data_dir / "512890.SS_weekly.parquet"
+            local_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+
+            old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+            import os
+            os.utime(daily_path, (old_mtime, old_mtime))
+            os.utime(weekly_path, (old_mtime, old_mtime))
+
+            yfinance_df = pd.DataFrame(
+                {
+                    "Open": [1.180],
+                    "High": [1.180],
+                    "Low": [1.163],
+                    "Close": [1.164],
+                    "Volume": [464471901],
+                },
+                index=pd.to_datetime(["2026-06-03"]),
+            )
+            eastmoney_df = pd.DataFrame(
+                {
+                    "Open": [1.166, 1.179, 1.180],
+                    "High": [1.184, 1.191, 1.180],
+                    "Low": [1.158, 1.178, 1.163],
+                    "Close": [1.181, 1.182, 1.164],
+                    "Volume": [818364300, 737393600, 490919700],
+                },
+                index=pd.to_datetime(["2026-06-01", "2026-06-02", "2026-06-03"]),
+            )
+            mock_download.return_value = yfinance_df
+            mock_daily_indicators.side_effect = lambda df: df
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "datetime", FixedDateTime), \
+                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                batch_fetch_and_update(["512890.SS"])
+
+                stored = pd.read_parquet(daily_path)
+
+            stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
+            self.assertIn("2026-06-01", stored_dates)
+            self.assertIn("2026-06-02", stored_dates)
+            self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
+            mock_eastmoney.assert_called_once()
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_starts_from_first_local_gap_when_latest_bar_exists(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 6, 3, 21, 30)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            close = pd.Series([1.15, 1.16, 1.17, 1.18], index=pd.to_datetime([
+                "2026-05-28",
+                "2026-05-29",
+                "2026-06-01",
+                "2026-06-03",
+            ]))
+            local_df = pd.DataFrame(
+                {
+                    "Open": close - 0.01,
+                    "High": close + 0.01,
+                    "Low": close - 0.02,
+                    "Close": close,
+                    "Volume": 100000,
+                    "EMA5": close,
+                    "EMA20": close,
+                    "EMA50": close,
+                    "ADX": 20.0,
+                },
+                index=close.index,
+            )
+            weekly_df = _build_weekly_df()
+            data_dir = Path(tmpdir)
+            daily_path = data_dir / "512890.SS.parquet"
+            weekly_path = data_dir / "512890.SS_weekly.parquet"
+            local_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+
+            old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+            import os
+            os.utime(daily_path, (old_mtime, old_mtime))
+            os.utime(weekly_path, (old_mtime, old_mtime))
+
+            mock_download.return_value = pd.DataFrame(
+                {
+                    "Open": [1.180],
+                    "High": [1.180],
+                    "Low": [1.163],
+                    "Close": [1.164],
+                    "Volume": [464471901],
+                },
+                index=pd.to_datetime(["2026-06-03"]),
+            )
+            eastmoney_df = pd.DataFrame(
+                {
+                    "Open": [1.179],
+                    "High": [1.191],
+                    "Low": [1.178],
+                    "Close": [1.182],
+                    "Volume": [737393600],
+                },
+                index=pd.to_datetime(["2026-06-02"]),
+            )
+            mock_daily_indicators.side_effect = lambda df: df
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "datetime", FixedDateTime), \
+                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                batch_fetch_and_update(["512890.SS"])
+
+                stored = pd.read_parquet(daily_path)
+
+            fallback_start = pd.Timestamp(mock_eastmoney.call_args.args[1]).date()
+            self.assertLessEqual(fallback_start.isoformat(), "2026-06-02")
+            stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
+            self.assertIn("2026-06-02", stored_dates)
 
 
 if __name__ == "__main__":

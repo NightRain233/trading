@@ -1403,7 +1403,7 @@ def supertrend_scan():
     """扫描所有 watchlist 标的的 SuperTrend 状态，返回九宫格所需数据。"""
     import pandas as pd
     from analysis import DATA_DIR
-    from analysis_constants import ST_LENGTH, ST_MULTIPLIER
+    from analysis_constants import CACHE_DURATION_SECONDS, ST_LENGTH, ST_MULTIPLIER
 
     groups = load_watchlist()
     symbols, alias_map = [], {}
@@ -1422,13 +1422,22 @@ def supertrend_scan():
     ):
         return _st_scan_cache["data"]
 
-    missing_symbols = [
-        sym for sym in symbols
-        if not os.path.exists(os.path.join(DATA_DIR, f"{sym.upper()}.parquet"))
-    ]
-    if missing_symbols:
+    refresh_symbols = []
+    stale_before = time.time() - CACHE_DURATION_SECONDS
+    for sym in symbols:
+        daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+        if not os.path.exists(daily_path):
+            refresh_symbols.append(sym)
+            continue
         try:
-            batch_fetch_and_update(missing_symbols)
+            if os.path.getmtime(daily_path) < stale_before:
+                refresh_symbols.append(sym)
+        except OSError:
+            continue
+
+    if refresh_symbols:
+        try:
+            batch_fetch_and_update(refresh_symbols)
         except Exception as exc:
             logger.warning(f"SuperTrend 扫描预刷新失败: {exc}")
 

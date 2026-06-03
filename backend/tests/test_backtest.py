@@ -376,6 +376,46 @@ class BacktestTests(unittest.TestCase):
             ["baseline", "reclaim", "close_only"],
         )
 
+    def test_supertrend_history_review_marks_open_trade_to_market_in_summary(self):
+        from backtest import build_supertrend_history_review
+
+        dates = pd.date_range("2025-01-01", periods=5, freq="B")
+        daily = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 100.0, 110.0, 120.0],
+                "High": [101.0, 101.0, 112.0, 121.0, 122.0],
+                "Low": [99.0, 99.0, 99.0, 109.0, 119.0],
+                "Close": [100.0, 100.0, 110.0, 120.0, 130.0],
+                "ADX": [30.0] * 5,
+                "ATR": [2.0] * 5,
+            },
+            index=dates,
+        )
+        st = pd.DataFrame(
+            {
+                "SUPERT_7_3.0": [101.0, 101.0, 99.0, 100.0, 110.0],
+                "SUPERTd_7_3.0": [-1, -1, 1, 1, 1],
+            },
+            index=dates,
+        )
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            review = build_supertrend_history_review("TEST", daily, fee_bps=0, slippage_bps=0)
+
+        self.assertEqual(len(review["trades"]), 1)
+        open_trade = review["trades"][0]
+        self.assertTrue(open_trade["isOpen"])
+        self.assertEqual(open_trade["exitDate"], None)
+        self.assertEqual(open_trade["exitPrice"], None)
+        self.assertEqual(open_trade["currentDate"], str(daily.index[-1].date()))
+        self.assertAlmostEqual(open_trade["currentPrice"], 130.0)
+        self.assertAlmostEqual(open_trade["returnPct"], 30.0)
+        self.assertEqual(open_trade["exitReason"], "open")
+        self.assertEqual([marker["type"] for marker in review["markers"]], ["buy"])
+        self.assertAlmostEqual(review["summary"]["totalReturnPct"], 30.0)
+        comparisons = {item["id"]: item for item in review["strategyComparisons"]}
+        self.assertAlmostEqual(comparisons["close_only"]["totalReturnPct"], 30.0)
+
     def test_supertrend_history_review_compares_stop_reentry_modes(self):
         from backtest import build_supertrend_history_review
 

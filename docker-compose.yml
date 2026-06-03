@@ -4,6 +4,7 @@ services:
   backend:
     build:
       context: ./backend
+      network: host
       args:
         - HTTP_PROXY=http://127.0.0.1:7890
         - HTTPS_PROXY=http://127.0.0.1:7890
@@ -14,10 +15,12 @@ services:
       - HTTPS_PROXY=http://127.0.0.1:7890
     volumes:
       - ./backend/data:/app/data
+      - ./backend/backtest_results:/app/backtest_results
 
   frontend:
     build:
       context: ./frontend
+      network: host
       args:
         - HTTP_PROXY=http://127.0.0.1:7890
         - HTTPS_PROXY=http://127.0.0.1:7890

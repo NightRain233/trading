@@ -1,5 +1,6 @@
 import sys
 import types
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -85,6 +86,61 @@ def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monke
     assert fetched == ["MISSING.SZ"]
     assert result[0]["symbol"] == "MISSING.SZ"
     assert result[0]["alias"] == "缺失票"
+
+
+def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
+    stale_daily = pd.DataFrame(
+        {
+            "Open": [10.0],
+            "High": [11.0],
+            "Low": [9.5],
+            "Close": [10.5],
+            "ATR": [1.0],
+        },
+        index=pd.to_datetime(["2026-06-01"]),
+    )
+    refreshed_daily = pd.DataFrame(
+        {
+            "Open": [10.0, 11.0],
+            "High": [11.0, 12.0],
+            "Low": [9.5, 10.5],
+            "Close": [10.5, 11.5],
+            "ATR": [1.0, 1.0],
+        },
+        index=pd.to_datetime(["2026-06-01", "2026-06-02"]),
+    )
+    st = pd.DataFrame(
+        {
+            "SUPERT_7_3.0": [9.0, 10.0],
+            "SUPERTd_7_3.0": [1, 1],
+        },
+        index=refreshed_daily.index,
+    )
+    daily_path = Path(tmp_path) / "STALE.SZ.parquet"
+    stale_daily.to_parquet(daily_path)
+    old_mtime = time.time() - (analysis.CACHE_DURATION_SECONDS + 60)
+    main.os.utime(daily_path, (old_mtime, old_mtime))
+    fetched = []
+
+    def fake_fetch(symbols):
+        fetched.extend(symbols)
+        refreshed_daily.to_parquet(daily_path)
+        return {}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pandas_ta",
+        types.SimpleNamespace(supertrend=lambda *args, **kwargs: st, atr=lambda *args, **kwargs: pd.Series([1.0] * len(refreshed_daily), index=refreshed_daily.index)),
+    )
+    monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "STALE.SZ", "alias": "旧数据"}]}])
+    monkeypatch.setattr(main, "batch_fetch_and_update", fake_fetch)
+    main._st_scan_cache = {"data": None, "ts": 0.0}
+
+    result = main.supertrend_scan()
+
+    assert fetched == ["STALE.SZ"]
+    assert result[0]["candles"][-1]["time"] == "2026-06-02"
 
 
 def test_supertrend_scan_cache_is_scoped_to_watchlist_symbols(monkeypatch):
