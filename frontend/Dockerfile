@@ -2,6 +2,11 @@
 FROM node:20-slim AS build-stage
 WORKDIR /app
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY}
+
 # Install pnpm and dependencies
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
