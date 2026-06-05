@@ -242,6 +242,45 @@ class HistoryTradesApiTests(unittest.TestCase):
 
         self.assertIsNone(cached)
 
+    def test_history_trade_cache_ignores_legacy_execution_mode_payload(self):
+        payload = {
+            "symbol": "TEST",
+            "strategy": "supertrend",
+            "executionMode": "legacy_same_open",
+            "exitMode": "close_only",
+            "start": "2026-01-01",
+            "end": None,
+            "candles": [],
+            "supertrend": [],
+            "markers": [],
+            "trades": [],
+            "summary": {"tradeCount": 0, "maxDrawdownPct": 0.0},
+            "benchmark": {"totalReturnPct": 0.0, "maxDrawdownPct": 0.0},
+            "strategyComparisons": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_path = self._write_daily(tmpdir)
+            db_path = Path(tmpdir) / "history.sqlite"
+            main.save_history_trade_cache(
+                payload,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+            )
+
+            cached = main.load_history_trade_cache(
+                "TEST",
+                "supertrend",
+                "2026-01-01",
+                None,
+                None,
+                False,
+                data_mtime=data_path.stat().st_mtime,
+                db_path=str(db_path),
+            )
+
+        self.assertIsNone(cached)
+
     def test_history_trade_symbols_include_names_and_cache_state(self):
         payload = {
             "symbol": "TEST",

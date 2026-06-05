@@ -188,7 +188,52 @@ def _build_supertrend_indicator(index: pd.DatetimeIndex) -> pd.DataFrame:
     )
 
 
+def _build_supertrend_next_open_daily_df() -> pd.DataFrame:
+    dates = pd.date_range("2025-01-01", periods=6, freq="B")
+    return pd.DataFrame(
+        {
+            "Open": [100.0, 100.0, 101.0, 111.0, 99.0, 88.0],
+            "High": [101.0, 101.0, 104.0, 112.0, 100.0, 89.0],
+            "Low": [99.0, 99.0, 100.0, 110.0, 98.0, 87.0],
+            "Close": [100.0, 100.0, 103.0, 110.0, 98.0, 87.0],
+            "ADX": [30.0] * 6,
+            "ATR": [2.0] * 6,
+        },
+        index=dates,
+    )
+
+
+def _build_supertrend_next_open_indicator(index: pd.DatetimeIndex) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "SUPERT_7_3.0": [101.0, 101.0, 98.0, 99.0, 100.0, 101.0],
+            "SUPERTd_7_3.0": [-1, -1, 1, 1, -1, -1],
+        },
+        index=index,
+    )
+
+
 class BacktestTests(unittest.TestCase):
+    def test_supertrend_backtest_executes_confirmed_flips_at_next_open(self):
+        daily = _build_supertrend_next_open_daily_df()
+        st = _build_supertrend_next_open_indicator(daily.index)
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            trades = run_supertrend_backtest(
+                "TEST",
+                daily,
+                fee_bps=0,
+                slippage_bps=0,
+                entry_signal_mode="daily_bull_flip",
+            )
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["entryDate"], str(daily.index[3].date()))
+        self.assertEqual(trades[0]["entryPrice"], 111.0)
+        self.assertEqual(trades[0]["exitDate"], str(daily.index[5].date()))
+        self.assertEqual(trades[0]["exitPrice"], 88.0)
+        self.assertEqual(trades[0]["holdingDays"], 3)
+
     def test_supertrend_adx_filter_skips_low_adx_flip(self):
         daily = _build_supertrend_daily_df(adx_at_entry=18.0)
         weekly = daily.copy()
@@ -214,9 +259,9 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(trades, [])
 
     def test_supertrend_adx_filter_allows_trending_flip(self):
-        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        daily = _build_supertrend_next_open_daily_df()
         weekly = daily.copy()
-        st = _build_supertrend_indicator(daily.index)
+        st = _build_supertrend_next_open_indicator(daily.index)
         weekly_st = pd.DataFrame(
             {
                 "SUPERT_7_3.0": [98.0] * len(weekly),
@@ -237,15 +282,15 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["strategyVersion"], "supertrend_adx_25")
-        self.assertEqual(trades[0]["entryAdx"], 28.0)
+        self.assertEqual(trades[0]["entryAdx"], 30.0)
 
     def test_supertrend_support_test_entry_enters_near_support(self):
-        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        daily = _build_supertrend_next_open_daily_df()
         weekly = daily.copy()
         st = pd.DataFrame(
             {
-                "SUPERT_7_3.0": [101.0, 101.0, 101.0, 101.0, 100.0],
-                "SUPERTd_7_3.0": [-1, 1, 1, 1, -1],
+                "SUPERT_7_3.0": [101.0, 100.0, 100.0, 100.0, 101.0, 102.0],
+                "SUPERTd_7_3.0": [-1, 1, 1, 1, -1, -1],
             },
             index=daily.index,
         )
@@ -302,9 +347,9 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(trades, [])
 
     def test_supertrend_daily_bull_flip_ignores_weekly_bearish_filter(self):
-        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
+        daily = _build_supertrend_next_open_daily_df()
         weekly = daily.copy()
-        st = _build_supertrend_indicator(daily.index)
+        st = _build_supertrend_next_open_indicator(daily.index)
         weekly_st = pd.DataFrame(
             {
                 "SUPERT_7_3.0": [98.0] * len(weekly),
@@ -341,8 +386,8 @@ class BacktestTests(unittest.TestCase):
     def test_supertrend_history_review_returns_chart_payload(self):
         from backtest import build_supertrend_history_review
 
-        daily = _build_supertrend_daily_df(adx_at_entry=28.0)
-        st = _build_supertrend_indicator(daily.index)
+        daily = _build_supertrend_next_open_daily_df()
+        st = _build_supertrend_next_open_indicator(daily.index)
 
         with patch("backtest.ta.supertrend", return_value=st):
             review = build_supertrend_history_review(
@@ -355,22 +400,25 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(review["symbol"], "TEST")
         self.assertEqual(review["strategy"], "supertrend")
         self.assertEqual(review["exitMode"], "close_only")
+        self.assertEqual(review["executionMode"], "close_confirm_next_open")
         self.assertEqual([c["time"] for c in review["candles"]], sorted(c["time"] for c in review["candles"]))
         self.assertEqual(review["supertrend"][2]["direction"], 1)
         self.assertEqual([m["type"] for m in review["markers"]], ["buy", "sell"])
         self.assertEqual(len(review["trades"]), 1)
         trade = review["trades"][0]
         self.assertEqual(trade["tradeIndex"], 1)
-        self.assertEqual(trade["entryDate"], str(daily.index[2].date()))
-        self.assertEqual(trade["exitDate"], str(daily.index[4].date()))
+        self.assertEqual(trade["entryDate"], str(daily.index[3].date()))
+        self.assertEqual(trade["entryPrice"], 111.0)
+        self.assertEqual(trade["exitDate"], str(daily.index[5].date()))
+        self.assertEqual(trade["exitPrice"], 88.0)
         self.assertEqual(trade["holdingDays"], 3)
         self.assertEqual(trade["exitReason"], "st_flip")
         self.assertIn("returnPct", trade)
         self.assertEqual(review["summary"]["tradeCount"], 1)
         self.assertIn("maxDrawdownPct", review["summary"])
-        self.assertAlmostEqual(review["summary"]["maxDrawdownPct"], 1.9231, places=3)
-        self.assertAlmostEqual(review["benchmark"]["totalReturnPct"], -1.0, places=3)
-        self.assertAlmostEqual(review["benchmark"]["maxDrawdownPct"], 4.8077, places=3)
+        self.assertAlmostEqual(review["summary"]["maxDrawdownPct"], 20.7207, places=3)
+        self.assertAlmostEqual(review["benchmark"]["totalReturnPct"], -13.0, places=3)
+        self.assertAlmostEqual(review["benchmark"]["maxDrawdownPct"], 20.9091, places=3)
         self.assertEqual(
             [item["id"] for item in review["strategyComparisons"]],
             ["baseline", "reclaim", "close_only"],
@@ -409,32 +457,32 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(open_trade["exitPrice"], None)
         self.assertEqual(open_trade["currentDate"], str(daily.index[-1].date()))
         self.assertAlmostEqual(open_trade["currentPrice"], 130.0)
-        self.assertAlmostEqual(open_trade["returnPct"], 30.0)
+        self.assertAlmostEqual(open_trade["returnPct"], 18.1818, places=3)
         self.assertEqual(open_trade["exitReason"], "open")
         self.assertEqual([marker["type"] for marker in review["markers"]], ["buy"])
-        self.assertAlmostEqual(review["summary"]["totalReturnPct"], 30.0)
+        self.assertAlmostEqual(review["summary"]["totalReturnPct"], 18.1818, places=3)
         comparisons = {item["id"]: item for item in review["strategyComparisons"]}
-        self.assertAlmostEqual(comparisons["close_only"]["totalReturnPct"], 30.0)
+        self.assertAlmostEqual(comparisons["close_only"]["totalReturnPct"], 18.1818, places=3)
 
     def test_supertrend_history_review_compares_stop_reentry_modes(self):
         from backtest import build_supertrend_history_review
 
-        dates = pd.date_range("2025-01-01", periods=6, freq="B")
+        dates = pd.date_range("2025-01-01", periods=7, freq="B")
         daily = pd.DataFrame(
             {
-                "Open": [100.0, 100.0, 101.0, 102.0, 103.0, 104.0],
-                "High": [101.0, 103.0, 103.0, 104.0, 105.0, 105.0],
-                "Low": [99.0, 99.0, 97.0, 101.0, 102.0, 99.0],
-                "Close": [100.0, 102.0, 101.0, 103.0, 104.0, 100.0],
-                "ADX": [30.0] * 6,
-                "ATR": [2.0] * 6,
+                "Open": [100.0, 100.0, 101.0, 102.0, 103.0, 104.0, 95.0],
+                "High": [101.0, 103.0, 103.0, 104.0, 105.0, 105.0, 96.0],
+                "Low": [99.0, 99.0, 97.0, 101.0, 102.0, 99.0, 94.0],
+                "Close": [100.0, 102.0, 101.0, 103.0, 104.0, 100.0, 95.0],
+                "ADX": [30.0] * 7,
+                "ATR": [2.0] * 7,
             },
             index=dates,
         )
         st = pd.DataFrame(
             {
-                "SUPERT_7_3.0": [101.0, 99.0, 100.0, 100.0, 101.0, 102.0],
-                "SUPERTd_7_3.0": [-1, 1, 1, 1, 1, -1],
+                "SUPERT_7_3.0": [101.0, 99.0, 100.0, 100.0, 101.0, 102.0, 103.0],
+                "SUPERTd_7_3.0": [-1, 1, 1, 1, 1, -1, -1],
             },
             index=dates,
         )
@@ -451,7 +499,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(comparisons["reclaim"]["exitReasonCounts"], {"stop": 1, "reclaim_st_flip": 1})
         self.assertEqual(comparisons["close_only"]["tradeCount"], 1)
         self.assertEqual(comparisons["close_only"]["exitReasonCounts"], {"st_flip": 1})
-        self.assertGreater(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
+        self.assertLess(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
 
         with patch("backtest.ta.supertrend", return_value=st):
             baseline_review = build_supertrend_history_review(
@@ -475,7 +523,7 @@ class BacktestTests(unittest.TestCase):
             review = build_supertrend_history_review(
                 "TEST",
                 daily,
-                start="2025-01-06",
+                start="2025-01-07",
                 fee_bps=0,
                 slippage_bps=0,
             )
@@ -1198,7 +1246,6 @@ class RsRotationRegressionTests(unittest.TestCase):
         )
         # 全年252个交易日，美股持有天数应少于一半（月MACD大部分时间空头）
         self.assertLess(us_held_days, 126)
-
 
 if __name__ == "__main__":
     unittest.main()

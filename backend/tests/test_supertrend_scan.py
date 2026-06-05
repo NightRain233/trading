@@ -176,3 +176,104 @@ def test_supertrend_scan_cache_is_scoped_to_watchlist_symbols(monkeypatch):
     result = main.supertrend_scan()
 
     assert [item["symbol"] for item in result] == ["NEW"]
+
+
+def test_supertrend_scan_cache_invalidates_when_daily_parquet_mtime_changes(monkeypatch, tmp_path):
+    index = pd.to_datetime(["2026-05-29", "2026-06-01", "2026-06-02"])
+
+    def build_daily(close):
+        return pd.DataFrame(
+            {
+                "Open": [9.0, 10.0, close],
+                "High": [10.0, 11.0, close + 1.0],
+                "Low": [8.8, 9.5, close - 1.0],
+                "Close": [9.2, 10.5, close],
+                "ATR": [1.0, 1.0, 1.0],
+            },
+            index=index,
+        )
+
+    def fake_supertrend(high, low, close, *args, **kwargs):
+        return pd.DataFrame(
+            {
+                "SUPERT_7_3.0": close - 1.0,
+                "SUPERTd_7_3.0": [1] * len(close),
+            },
+            index=close.index,
+        )
+
+    daily_path = Path(tmp_path) / "TEST.parquet"
+    build_daily(11.5).to_parquet(daily_path)
+    first_mtime = time.time()
+    main.os.utime(daily_path, (first_mtime, first_mtime))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pandas_ta",
+        types.SimpleNamespace(supertrend=fake_supertrend, atr=lambda *args, **kwargs: pd.Series([1.0] * len(index), index=index)),
+    )
+    monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "TEST", "alias": ""}]}])
+    monkeypatch.setattr(main, "batch_fetch_and_update", lambda symbols: {})
+    main._st_scan_cache = {"data": None, "ts": 0.0}
+
+    first_result = main.supertrend_scan()
+
+    build_daily(22.5).to_parquet(daily_path)
+    second_mtime = first_mtime + 10
+    main.os.utime(daily_path, (second_mtime, second_mtime))
+    second_result = main.supertrend_scan()
+
+    assert first_result[0]["close"] == 11.5
+    assert second_result[0]["close"] == 22.5
+
+
+def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
+    index = pd.to_datetime(["2026-05-29", "2026-06-01", "2026-06-02"])
+    daily = pd.DataFrame(
+        {
+            "Open": [9.0, 10.0, 11.0],
+            "High": [10.0, 11.0, 12.0],
+            "Low": [8.8, 9.5, 10.5],
+            "Close": [9.2, 10.5, 11.5],
+            "ATR": [1.0, 1.0, 1.0],
+        },
+        index=index,
+    )
+
+    def fake_supertrend(high, low, close, *args, **kwargs):
+        return pd.DataFrame(
+            {
+                "SUPERT_7_3.0": close - 1.0,
+                "SUPERTd_7_3.0": [1] * len(close),
+            },
+            index=close.index,
+        )
+
+    daily_path = Path(tmp_path) / "TEST.parquet"
+    daily.to_parquet(daily_path)
+    data_mtime = time.time()
+    main.os.utime(daily_path, (data_mtime, data_mtime))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pandas_ta",
+        types.SimpleNamespace(fake_supertrend=fake_supertrend, supertrend=fake_supertrend, atr=lambda *args, **kwargs: pd.Series([1.0] * len(index), index=index)),
+    )
+    monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "TEST", "alias": ""}]}])
+    monkeypatch.setattr(main, "batch_fetch_and_update", lambda symbols: {})
+    main._st_scan_cache = {"data": None, "ts": 0.0}
+
+    result = main.supertrend_scan()
+
+    item = result[0]
+    assert item["latestDataDate"] == "2026-06-02"
+    assert item["dataUpdatedAt"] is not None
+    assert item["cacheStale"] is False
+    assert item["dataStale"] is False
+    assert item["dataIntegrity"] == {
+        "hasGap": False,
+        "firstMissingDate": None,
+        "expectedLatestDate": None,
+    }

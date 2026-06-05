@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias, resolveSymbolCandidates } from './utils';
 import type { StockData, Candle, SymbolResolveCandidate, Timeframe, WatchlistGroup } from './types';
+import { getWatchlistPollDelay } from './pollingPolicy.js';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
 const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
@@ -180,8 +181,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (activeTab === 'watchlist') {
+      loadData();
+    }
+  }, [activeTab, loadData]);
 
   useEffect(() => {
     const query = newTicker.trim();
@@ -282,7 +285,7 @@ function App() {
   }, [symbolsKey]);
 
   useEffect(() => {
-    if (!symbolsKey) return;
+    if (activeTab !== 'watchlist' || !symbolsKey) return;
 
     const symbols = symbolsKey.split(',');
     let disposed = false;
@@ -316,7 +319,8 @@ function App() {
 
     const scheduleNextPoll = (overrideDelay?: number | null) => {
       if (disposed) return;
-      const delay = overrideDelay ?? (document.visibilityState === 'visible' ? 30_000 : 300_000);
+      const delay = overrideDelay ?? getWatchlistPollDelay({ activeTab, visibilityState: document.visibilityState });
+      if (delay == null) return;
       timerId = window.setTimeout(async () => {
         const nextDelay = await runPoll();
         scheduleNextPoll(nextDelay);
@@ -341,7 +345,7 @@ function App() {
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [symbolsKey]);
+  }, [activeTab, symbolsKey]);
 
   const handleEditAlias = async () => {
     if (!editingAliasStock) return;

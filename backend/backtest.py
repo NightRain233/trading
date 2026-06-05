@@ -25,6 +25,7 @@ SUPER_TREND_ENTRY_SIGNAL_MODES = {
 SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE = "weekly_bull_daily_bull_flip"
 SUPER_TREND_HISTORY_EXIT_MODES = ("baseline", "reclaim", "close_only")
 SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE = "close_only"
+SUPER_TREND_EXECUTION_MODE = "close_confirm_next_open"
 SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_PCT = 1.5
 SUPER_TREND_SUPPORT_TEST_MAX_DISTANCE_ATR = 0.5
 
@@ -331,27 +332,33 @@ def run_supertrend_backtest(
     if entry_signal_mode != SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE:
         strategy_version = f"{strategy_version}_{entry_signal_mode}"
 
-    for idx in range(1, len(daily)):
-        row = daily.iloc[idx]
-        prev = daily.iloc[idx - 1]
-        date = daily.index[idx]
+    for signal_idx in range(1, len(daily) - 1):
+        row = daily.iloc[signal_idx]
+        prev = daily.iloc[signal_idx - 1]
+        date = daily.index[signal_idx]
+        exec_idx = signal_idx + 1
+        exec_row = daily.iloc[exec_idx]
+        exec_date = daily.index[exec_idx]
 
         if in_position:
-            # 止损：当日 low 触及 supertrend 线
+            # Signal is confirmed after the signal bar closes; execution uses the next bar open.
             cur_stop = float(row["_st_val"]) if pd.notna(row["_st_val"]) else stop_price
             if float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1:
-                exit_price = _price_with_bps(min(float(row["Open"]), cur_stop), slippage_bps, "sell")
+                raw_exit = float(exec_row["Open"]) if pd.notna(exec_row.get("Open")) else float(exec_row["Close"])
+                if float(row["_st_dir"]) != -1:
+                    raw_exit = min(raw_exit, cur_stop)
+                exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
                 gross = (exit_price - entry_price) / entry_price * 100
                 trades.append({
                     "symbol": symbol.upper(),
                     "assetClass": classify_asset(symbol),
                     "entryDate": _date_str(daily.index[entry_idx]),
-                    "exitDate": _date_str(date),
+                    "exitDate": _date_str(exec_date),
                     "entryPrice": entry_price,
                     "exitPrice": exit_price,
                     "stopPrice": cur_stop,
                     "returnPct": gross - fee_bps * 2 / 100,
-                    "holdingDays": idx - entry_idx + 1,
+                    "holdingDays": exec_idx - entry_idx + 1,
                     "exitReason": "st_flip" if float(row["_st_dir"]) == -1 else "stop",
                     "strategyVersion": strategy_version,
                     "poolType": "supertrend",
@@ -362,16 +369,16 @@ def run_supertrend_backtest(
         else:
             # 买入模式只筛选入场触发；出场逻辑在所有精简层中保持一致。
             if _entry_mode_allows(prev, row, date) and _adx_allows_entry(row):
-                entry_date = date
+                entry_date = exec_date
                 if start_ts and entry_date < start_ts:
                     continue
                 if end_ts and entry_date > end_ts:
                     break
-                raw_entry = float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"])
+                raw_entry = float(exec_row["Open"]) if pd.notna(exec_row.get("Open")) else float(exec_row["Close"])
                 entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
                 stop_price = float(row["_st_val"]) if pd.notna(row["_st_val"]) else raw_entry * 0.95
                 entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
-                entry_idx = idx
+                entry_idx = exec_idx
                 in_position = True
 
     return trades
@@ -397,6 +404,7 @@ def build_supertrend_history_review(
         return {
             "symbol": symbol.upper(),
             "strategy": "supertrend",
+            "executionMode": SUPER_TREND_EXECUTION_MODE,
             "exitMode": exit_mode,
             "start": start,
             "end": end,
@@ -563,10 +571,13 @@ def build_supertrend_history_review(
         entry_source = "flip"
         reclaim_until_idx: Optional[int] = None
 
-        for idx in range(1, len(daily)):
-            row = daily.iloc[idx]
-            prev = daily.iloc[idx - 1]
-            date = daily.index[idx]
+        for signal_idx in range(1, len(daily) - 1):
+            row = daily.iloc[signal_idx]
+            prev = daily.iloc[signal_idx - 1]
+            date = daily.index[signal_idx]
+            exec_idx = signal_idx + 1
+            exec_row = daily.iloc[exec_idx]
+            exec_date = daily.index[exec_idx]
 
             if in_position and entry_idx is not None and entry_price is not None:
                 cur_stop = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else stop_price
@@ -575,10 +586,12 @@ def build_supertrend_history_review(
                 if mode == "close_only":
                     if float(row["_st_dir"]) == -1:
                         exit_reason = "st_flip"
-                        raw_exit = _row_price(row, "Open")
+                        raw_exit = _row_price(exec_row, "Open")
                 elif cur_stop is not None and (float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1):
                     exit_reason = "st_flip" if float(row["_st_dir"]) == -1 else "stop"
-                    raw_exit = min(_row_price(row, "Open"), float(cur_stop))
+                    raw_exit = _row_price(exec_row, "Open")
+                    if exit_reason == "stop":
+                        raw_exit = min(raw_exit, float(cur_stop))
 
                 if exit_reason is not None and raw_exit is not None:
                     exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
@@ -594,18 +607,18 @@ def build_supertrend_history_review(
                         "symbol": symbol.upper(),
                         "strategy": "supertrend",
                         "entryDate": _date_str(daily.index[entry_idx]),
-                        "exitDate": _date_str(date),
+                        "exitDate": _date_str(exec_date),
                         "entryPrice": entry_price,
                         "exitPrice": exit_price,
                         "stopPrice": cur_stop,
                         "returnPct": gross - fee_bps * 2 / 100,
-                        "holdingDays": idx - entry_idx + 1,
+                        "holdingDays": exec_idx - entry_idx + 1,
                         "exitReason": reported_reason,
                         "entryAdx": entry_adx,
                     })
                     if include_markers:
                         simulated_markers.append({
-                            "time": _date_str(date),
+                            "time": _date_str(exec_date),
                             "type": "sell",
                             "position": "aboveBar",
                             "color": "#ef4444",
@@ -616,7 +629,7 @@ def build_supertrend_history_review(
                             "exitReason": reported_reason,
                         })
                     if mode == "reclaim" and exit_reason == "stop" and float(row["_st_dir"]) == 1:
-                        reclaim_until_idx = idx + 3
+                        reclaim_until_idx = signal_idx + 3
                     in_position = False
                     entry_idx = None
                     entry_price = None
@@ -624,7 +637,7 @@ def build_supertrend_history_review(
                     entry_adx = None
                     entry_source = "flip"
             else:
-                if reclaim_until_idx is not None and (idx > reclaim_until_idx or float(row["_st_dir"]) == -1):
+                if reclaim_until_idx is not None and (signal_idx > reclaim_until_idx or float(row["_st_dir"]) == -1):
                     reclaim_until_idx = None
                 normal_entry = (
                     float(prev["_st_dir"]) == -1
@@ -635,7 +648,7 @@ def build_supertrend_history_review(
                 reclaim_entry = (
                     mode == "reclaim"
                     and reclaim_until_idx is not None
-                    and idx <= reclaim_until_idx
+                    and signal_idx <= reclaim_until_idx
                     and float(row["_st_dir"]) == 1
                     and pd.notna(row.get("_st_val"))
                     and float(row["Close"]) >= float(row["_st_val"])
@@ -643,21 +656,21 @@ def build_supertrend_history_review(
                     and _adx_allows_entry(row)
                 )
                 if normal_entry or reclaim_entry:
-                    if start_ts is not None and date < start_ts:
+                    if start_ts is not None and exec_date < start_ts:
                         continue
-                    if end_ts is not None and date > end_ts:
+                    if end_ts is not None and exec_date > end_ts:
                         break
-                    raw_entry = _row_price(row, "Open")
+                    raw_entry = _row_price(exec_row, "Open")
                     entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
                     stop_price = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else raw_entry * 0.95
                     entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
-                    entry_idx = idx
+                    entry_idx = exec_idx
                     entry_source = "reclaim" if reclaim_entry and not normal_entry else "flip"
                     reclaim_until_idx = None
                     in_position = True
                     if include_markers:
                         simulated_markers.append({
-                            "time": _date_str(date),
+                            "time": _date_str(exec_date),
                             "type": "buy",
                             "position": "belowBar",
                             "color": "#10b981",
@@ -766,6 +779,7 @@ def build_supertrend_history_review(
     return {
         "symbol": symbol.upper(),
         "strategy": "supertrend",
+        "executionMode": SUPER_TREND_EXECUTION_MODE,
         "exitMode": exit_mode,
         "start": start,
         "end": end,
