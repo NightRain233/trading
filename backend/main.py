@@ -20,6 +20,7 @@ from backtest import (
     replay_weekly_bb_markers,
     build_supertrend_history_review,
     run_supertrend_backtest,
+    SUPER_TREND_EXECUTION_MODE,
     SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
     SUPER_TREND_HISTORY_EXIT_MODES,
 )
@@ -42,6 +43,7 @@ import time
 import logging
 import threading
 import hashlib
+import pandas as pd
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
@@ -796,11 +798,13 @@ def _history_cache_key(
     min_adx_for_entry: Optional[float],
     weekly_filter: bool,
     exit_mode: str = SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
+    execution_mode: str = SUPER_TREND_EXECUTION_MODE,
 ) -> str:
     return json.dumps(
         {
             "symbol": symbol.strip().upper(),
             "strategy": strategy,
+            "executionMode": execution_mode,
             "exitMode": exit_mode,
             "start": start or None,
             "end": end or None,
@@ -841,6 +845,8 @@ def _ensure_history_cache(db_path: Optional[str] = None) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(history_trade_reviews)").fetchall()}
         if "exit_mode" not in columns:
             conn.execute("ALTER TABLE history_trade_reviews ADD COLUMN exit_mode TEXT")
+        if "execution_mode" not in columns:
+            conn.execute("ALTER TABLE history_trade_reviews ADD COLUMN execution_mode TEXT")
 
 
 def _normalize_history_exit_mode(exit_mode: str) -> str:
@@ -865,15 +871,26 @@ def load_history_trade_cache(
     if not os.path.exists(db_path):
         return None
     _ensure_history_cache(db_path)
-    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter, exit_mode)
+    key = _history_cache_key(
+        symbol,
+        strategy,
+        start,
+        end,
+        min_adx_for_entry,
+        weekly_filter,
+        exit_mode,
+        SUPER_TREND_EXECUTION_MODE,
+    )
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT payload_json, data_mtime FROM history_trade_reviews WHERE cache_key = ?",
+            "SELECT payload_json, data_mtime, execution_mode FROM history_trade_reviews WHERE cache_key = ?",
             (key,),
         ).fetchone()
     if row is None:
         return None
-    payload_json, cached_mtime = row
+    payload_json, cached_mtime, cached_execution_mode = row
+    if cached_execution_mode not in (None, SUPER_TREND_EXECUTION_MODE):
+        return None
     if float(cached_mtime) < float(data_mtime):
         return None
     payload = json.loads(payload_json)
@@ -883,6 +900,8 @@ def load_history_trade_cache(
     if "benchmark" not in payload or "strategyComparisons" not in payload:
         return None
     if payload.get("exitMode") is not None and payload.get("exitMode") != exit_mode:
+        return None
+    if payload.get("executionMode") != SUPER_TREND_EXECUTION_MODE:
         return None
     return payload
 
@@ -902,17 +921,29 @@ def save_history_trade_cache(
     start = payload.get("start")
     end = payload.get("end")
     payload_exit_mode = str(payload.get("exitMode") or exit_mode)
-    key = _history_cache_key(symbol, strategy, start, end, min_adx_for_entry, weekly_filter, payload_exit_mode)
+    payload_execution_mode = str(payload.get("executionMode") or SUPER_TREND_EXECUTION_MODE)
+    payload.setdefault("executionMode", payload_execution_mode)
+    key = _history_cache_key(
+        symbol,
+        strategy,
+        start,
+        end,
+        min_adx_for_entry,
+        weekly_filter,
+        payload_exit_mode,
+        payload_execution_mode,
+    )
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO history_trade_reviews (
                 cache_key, symbol, strategy, start_date, end_date, min_adx_for_entry,
-                weekly_filter, exit_mode, data_mtime, payload_json, computed_at
+                weekly_filter, exit_mode, execution_mode, data_mtime, payload_json, computed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET
                 exit_mode = excluded.exit_mode,
+                execution_mode = excluded.execution_mode,
                 data_mtime = excluded.data_mtime,
                 payload_json = excluded.payload_json,
                 computed_at = excluded.computed_at
@@ -926,6 +957,7 @@ def save_history_trade_cache(
                 float(min_adx_for_entry) if min_adx_for_entry is not None else None,
                 1 if weekly_filter else 0,
                 payload_exit_mode,
+                payload_execution_mode,
                 float(data_mtime),
                 json.dumps(payload, ensure_ascii=False, allow_nan=False),
                 datetime.now(timezone.utc).isoformat(),
@@ -1229,6 +1261,7 @@ def precompute_history_trades(
 
     return {
         "strategy": strategy,
+        "executionMode": SUPER_TREND_EXECUTION_MODE,
         "exitMode": resolved_exit_mode,
         "start": resolved_start,
         "end": end,
@@ -1396,14 +1429,129 @@ def weekly_breakout_scan():
     return results
 
 
+ST_SCAN_REFRESH_THRESHOLD_SECONDS = 15 * 60
+ST_SCAN_MISSING_REFRESH_TIMEOUT_SECONDS = 8.0
+ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS = 5.0
+
 _st_scan_cache: dict = {"data": None, "ts": 0.0}
 
+
+def _st_path(symbol: str, weekly: bool = False) -> str:
+    from analysis import DATA_DIR as current_data_dir
+    suffix = "_weekly.parquet" if weekly else ".parquet"
+    return os.path.join(current_data_dir, f"{symbol.upper()}{suffix}")
+
+
+def _st_file_mtime(path: str) -> Optional[float]:
+    try:
+        return os.path.getmtime(path) if os.path.exists(path) else None
+    except OSError:
+        return None
+
+
+def _st_iso_from_timestamp(timestamp: Optional[float]) -> Optional[str]:
+    if timestamp is None:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+def _st_latest_data_date(df) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    try:
+        index = pd.DatetimeIndex(df.index).tz_localize(None).normalize()
+        if index.empty:
+            return None
+        return index.max().date().isoformat()
+    except Exception:
+        return None
+
+
+def _st_is_a_share_symbol(symbol: str) -> bool:
+    normalized = symbol.upper()
+    code = normalized.split(".", 1)[0]
+    return normalized.endswith((".SS", ".SZ")) and code.isdigit() and len(code) == 6
+
+
+def _st_recent_gap_info(symbol: str, df) -> dict:
+    """保守的 A 股近期缺口提示：只检查最近窗口，避免节假日历史误报。"""
+    empty = {"hasGap": False, "firstMissingDate": None, "expectedLatestDate": None}
+    if not _st_is_a_share_symbol(symbol) or df is None or df.empty:
+        return empty
+    try:
+        dates = pd.DatetimeIndex(df.index).tz_localize(None).normalize().unique().sort_values()
+    except Exception:
+        return empty
+    if len(dates) < 2:
+        return empty
+
+    latest = dates[-1]
+    window_start = latest - pd.Timedelta(days=14)
+    recent_dates = dates[dates >= window_start]
+    if len(recent_dates) < 2:
+        return empty
+
+    expected = pd.bdate_range(recent_dates[0], recent_dates[-1])
+    missing = expected.difference(recent_dates)
+    if missing.empty:
+        return empty
+
+    return {
+        "hasGap": True,
+        "firstMissingDate": missing[0].date().isoformat(),
+        "expectedLatestDate": None,
+    }
+
+
+def _st_data_stale(latest_data_date: Optional[str], integrity: dict) -> bool:
+    if integrity.get("hasGap"):
+        return True
+    if not latest_data_date:
+        return True
+    try:
+        latest = datetime.fromisoformat(latest_data_date).date()
+    except ValueError:
+        return True
+    now_local = datetime.now(PREWARM_TZ).date()
+    return (now_local - latest).days > 3
+
+
+def _st_scan_signature(symbols: List[str]) -> list:
+    signature = []
+    for sym in symbols:
+        daily_path = _st_path(sym)
+        weekly_path = _st_path(sym, weekly=True)
+        signature.append({
+            "symbol": sym.upper(),
+            "dailyMtime": _st_file_mtime(daily_path),
+            "weeklyMtime": _st_file_mtime(weekly_path),
+        })
+    return signature
+
+
+def _refresh_supertrend_symbols(symbols: List[str], timeout_seconds: float) -> bool:
+    if not symbols:
+        return True
+
+    completed = {"done": False}
+
+    def worker():
+        try:
+            batch_fetch_and_update(symbols)
+            completed["done"] = True
+        except Exception as exc:
+            logger.warning(f"SuperTrend 扫描预刷新失败: {exc}")
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    return completed["done"]
+
 @app.get("/api/supertrend/scan")
-def supertrend_scan():
+def supertrend_scan(force: bool = False):
     """扫描所有 watchlist 标的的 SuperTrend 状态，返回九宫格所需数据。"""
     import pandas as pd
-    from analysis import DATA_DIR
-    from analysis_constants import CACHE_DURATION_SECONDS, ST_LENGTH, ST_MULTIPLIER
+    from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
     groups = load_watchlist()
     symbols, alias_map = [], {}
@@ -1415,42 +1563,65 @@ def supertrend_scan():
                 alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
 
     cache_symbols = _st_scan_cache.get("symbols")
+    cache_signature = _st_scan_cache.get("signature")
+    signature = _st_scan_signature(symbols)
     if (
-        _st_scan_cache["data"] is not None
+        not force
+        and _st_scan_cache["data"] is not None
         and cache_symbols == symbols
-        and time.time() - _st_scan_cache["ts"] < 3600
+        and cache_signature == signature
     ):
         return _st_scan_cache["data"]
 
     refresh_symbols = []
-    stale_before = time.time() - CACHE_DURATION_SECONDS
+    missing_symbols = []
+    stale_before = time.time() - ST_SCAN_REFRESH_THRESHOLD_SECONDS
     for sym in symbols:
-        daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+        daily_path = _st_path(sym)
         if not os.path.exists(daily_path):
             refresh_symbols.append(sym)
+            missing_symbols.append(sym)
             continue
         try:
-            if os.path.getmtime(daily_path) < stale_before:
+            if force or os.path.getmtime(daily_path) < stale_before:
                 refresh_symbols.append(sym)
         except OSError:
             continue
 
+    refresh_completed = True
     if refresh_symbols:
-        try:
-            batch_fetch_and_update(refresh_symbols)
-        except Exception as exc:
-            logger.warning(f"SuperTrend 扫描预刷新失败: {exc}")
+        refresh_timeout = (
+            ST_SCAN_MISSING_REFRESH_TIMEOUT_SECONDS
+            if missing_symbols
+            else ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS
+        )
+        refresh_completed = _refresh_supertrend_symbols(refresh_symbols, refresh_timeout)
+
+    signature = _st_scan_signature(symbols)
+    if (
+        not force
+        and refresh_completed
+        and _st_scan_cache["data"] is not None
+        and cache_symbols == symbols
+        and cache_signature == signature
+    ):
+        return _st_scan_cache["data"]
 
     import pandas_ta as ta
 
     def _process_sym(sym):
-        daily_path = os.path.join(DATA_DIR, f"{sym.upper()}.parquet")
+        daily_path = _st_path(sym)
         if not os.path.exists(daily_path):
             return None
+        daily_mtime = _st_file_mtime(daily_path)
         daily = pd.read_parquet(daily_path)
         if daily.empty:
             return None
         daily = daily.sort_index()
+        latest_data_date = _st_latest_data_date(daily)
+        data_integrity = _st_recent_gap_info(sym, daily)
+        cache_stale = daily_mtime is None or daily_mtime < stale_before
+        data_stale = _st_data_stale(latest_data_date, data_integrity)
 
         st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
         if st is None or st.empty:
@@ -1507,7 +1678,7 @@ def supertrend_scan():
         weekly_st_val = None
         weekly_candles = []
         weekly_just_flipped = False
-        weekly_path = os.path.join(DATA_DIR, f"{sym.upper()}_weekly.parquet")
+        weekly_path = _st_path(sym, weekly=True)
         if os.path.exists(weekly_path):
             weekly = pd.read_parquet(weekly_path)
             if not weekly.empty:
@@ -1558,6 +1729,12 @@ def supertrend_scan():
             "justFlipped": state in ("bull_flip", "bear_flip"),
             "weeklyJustFlipped": weekly_just_flipped,
             "trendAgeBars": trend_age_bars,
+            "latestDataDate": latest_data_date,
+            "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
+            "cacheStale": cache_stale,
+            "dataStale": data_stale,
+            "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
+            "dataIntegrity": data_integrity,
             **alert,
         }
 
@@ -1568,6 +1745,7 @@ def supertrend_scan():
     _st_scan_cache["data"] = results
     _st_scan_cache["ts"] = time.time()
     _st_scan_cache["symbols"] = symbols
+    _st_scan_cache["signature"] = signature
     return results
 
 

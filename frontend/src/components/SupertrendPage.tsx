@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
 import type { Time } from 'lightweight-charts';
 import { Bell, BriefcaseBusiness, CircleOff, Eye, RefreshCw, ShieldAlert, Target } from 'lucide-react';
+import { getSupertrendPollDelay, shouldRefreshOnVisibility } from '../pollingPolicy.js';
 
 const API_BASE = '/api';
 
@@ -43,6 +44,16 @@ interface STItem {
   opportunityLabel: string;
   opportunityAgeBars: number | null;
   opportunityReason: string;
+  latestDataDate?: string | null;
+  dataUpdatedAt?: string | null;
+  cacheStale?: boolean;
+  dataStale?: boolean;
+  refreshTriggered?: boolean;
+  dataIntegrity?: {
+    hasGap: boolean;
+    firstMissingDate: string | null;
+    expectedLatestDate: string | null;
+  };
 }
 
 type FilterType = 'all' | STItem['state'] | 'actionable' | 'high_priority' | 'weekly_bull_daily_bear' | 'weekly_bear_daily_bull' | 'weekly_bull_daily_just_bull' | 'weekly_bear_daily_just_bear' | 'weekly_bull_daily_bull' | 'weekly_bear_daily_bear';
@@ -121,6 +132,18 @@ const formatPct = (value: number | null) => (
 const formatAtr = (value: number | null) => (
   value == null || !Number.isFinite(value) ? '-' : `${value.toFixed(2)} ATR`
 );
+
+const formatDateLabel = (value: string | null) => {
+  if (!value) return '-';
+  return value;
+};
+
+const formatDateTimeLabel = (value: string | null) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
 
 const loadStoredMarks = (): Record<string, UserMark> => {
   if (typeof window === 'undefined') return {};
@@ -278,18 +301,69 @@ export function SupertrendPage() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [showLowPriority, setShowLowPriority] = useState(false);
   const [marks, setMarks] = useState<Record<string, UserMark>>(() => loadStoredMarks());
+  const lastLoadedAtRef = useRef<number | null>(null);
+  const refreshRetryCountRef = useRef(0);
 
-  async function load() {
-    setLoading(true);
+  const load = useCallback(async ({ force = false, background = false }: { force?: boolean; background?: boolean } = {}) => {
+    if (!background) setLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/supertrend/scan`);
-      setItems(await r.json());
+      const r = await fetch(`${API_BASE}/supertrend/scan${force ? '?force=1' : ''}`);
+      const data = await r.json() as STItem[];
+      setItems(data);
+      lastLoadedAtRef.current = Date.now();
+      return data.some(item => item.refreshTriggered);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    let disposed = false;
+    let timerId: number | null = null;
+
+    const clearTimer = () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+
+    const scheduleNext = (refreshTriggered: boolean) => {
+      if (disposed) return;
+      const retryCount = refreshRetryCountRef.current;
+      const delay = getSupertrendPollDelay({ refreshTriggered, retryCount });
+      if (refreshTriggered && retryCount < 2) {
+        refreshRetryCountRef.current = retryCount + 1;
+      } else {
+        refreshRetryCountRef.current = 0;
+      }
+      timerId = window.setTimeout(async () => {
+        const nextRefreshTriggered = await load({ background: true });
+        if (!disposed) scheduleNext(Boolean(nextRefreshTriggered));
+      }, delay);
+    };
+
+    const run = async (background = false) => {
+      const refreshTriggered = await load({ background });
+      if (!disposed) scheduleNext(Boolean(refreshTriggered));
+    };
+
+    void run(false);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!shouldRefreshOnVisibility({ lastLoadedAt: lastLoadedAtRef.current, now: Date.now() })) return;
+      clearTimer();
+      void run(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      clearTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [load]);
 
   function updateMark(symbol: string, nextMark: UserMark) {
     setMarks(prev => {
@@ -319,18 +393,60 @@ export function SupertrendPage() {
     ? displayed.filter(i => !isLowPriorityObservation(i, marks[i.symbol]))
     : displayed;
   const onlyFoldedLowPriority = filter === 'all' && !showLowPriority && visibleDisplayed.length === 0 && lowPriorityCount > 0;
+  const dataStatus = useMemo(() => {
+    const latestDataDate = items
+      .map(item => item.latestDataDate)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
+    const latestUpdatedAt = items
+      .map(item => item.dataUpdatedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => Date.parse(a) - Date.parse(b))
+      .at(-1) ?? null;
+    const cacheStaleCount = items.filter(item => item.cacheStale).length;
+    const dataStaleCount = items.filter(item => item.dataStale).length;
+    const gapCount = items.filter(item => item.dataIntegrity?.hasGap).length;
+    const refreshingCount = items.filter(item => item.refreshTriggered).length;
+    return { latestDataDate, latestUpdatedAt, cacheStaleCount, dataStaleCount, gapCount, refreshingCount };
+  }, [items]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <span className="text-sm font-semibold text-zinc-300">SuperTrend 扫描</span>
         <button
-          onClick={load}
+          onClick={() => void load({ force: true })}
           title="刷新"
           className={`ml-auto p-2 rounded-xl text-zinc-500 hover:text-emerald-400 btn-glass active:scale-[0.98] ${loading ? 'animate-spin' : ''}`}
         >
           <RefreshCw size={15} />
         </button>
+      </div>
+
+      <div className={`mb-4 rounded-lg border px-3 py-2 text-[11px] ${
+        dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0
+          ? 'border-amber-500/25 bg-amber-500/10 text-amber-200'
+          : dataStatus.cacheStaleCount > 0 || dataStatus.refreshingCount > 0
+            ? 'border-sky-500/25 bg-sky-500/10 text-sky-200'
+            : 'border-zinc-800 bg-zinc-900/45 text-zinc-400'
+      }`}>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            数据截至 {formatDateLabel(dataStatus.latestDataDate)} · 更新 {formatDateTimeLabel(dataStatus.latestUpdatedAt)}
+          </span>
+          {(dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0 || dataStatus.cacheStaleCount > 0 || dataStatus.refreshingCount > 0) && (
+            <span className="font-medium">
+              {dataStatus.refreshingCount > 0 && `${dataStatus.refreshingCount} 个正在刷新`}
+              {dataStatus.refreshingCount > 0 && (dataStatus.cacheStaleCount > 0 || dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0) ? ' · ' : ''}
+              {dataStatus.cacheStaleCount > 0 && `${dataStatus.cacheStaleCount} 个缓存偏旧`}
+              {dataStatus.cacheStaleCount > 0 && (dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0) ? ' · ' : ''}
+              {dataStatus.dataStaleCount > 0 && `${dataStatus.dataStaleCount} 个数据可能延迟`}
+              {dataStatus.dataStaleCount > 0 && dataStatus.gapCount > 0 ? ' · ' : ''}
+              {dataStatus.gapCount > 0 && `${dataStatus.gapCount} 个可能有缺口`}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
