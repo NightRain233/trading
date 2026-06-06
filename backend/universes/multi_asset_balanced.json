@@ -1,0 +1,51 @@
+{
+  "name": "multi-asset-balanced",
+  "baseCurrency": "CNY",
+  "fxSymbol": "CNY=X",
+  "cashSymbol": "__CASH__",
+  "categoryCaps": {
+    "a_share_equity": 0.30,
+    "us_equity": 0.40,
+    "gold": 0.25,
+    "crypto": 0.05
+  },
+  "assets": [
+    {
+      "symbol": "SPY",
+      "name": "SPDR S&P 500 ETF",
+      "assetClass": "us_equity",
+      "currency": "USD",
+      "maxWeight": 0.25
+    },
+    {
+      "symbol": "QQQ",
+      "name": "Invesco QQQ",
+      "assetClass": "us_equity",
+      "currency": "USD",
+      "maxWeight": 0.25
+    },
+    {
+      "symbol": "GLD",
+      "name": "SPDR Gold Shares",
+      "assetClass": "gold",
+      "currency": "USD",
+      "maxWeight": 0.25
+    },
+    {
+      "symbol": "511010.SS",
+      "name": "国债ETF",
+      "assetClass": "a_bond",
+      "currency": "CNY",
+      "maxWeight": 1.0
+    },
+    {
+      "symbol": "BTC-USD",
+      "name": "Bitcoin",
+      "assetClass": "crypto",
+      "currency": "USD",
+      "maxWeight": 0.05
+    }
+  ],
+  "aShareUniverseFile": "a_share_etf_core.json",
+  "aShareBucket": "broad"
+}
