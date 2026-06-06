@@ -104,6 +104,32 @@ def test_fx_alignment_never_backfills_future_rates():
     assert converted.loc[pd.Timestamp("2025-01-03"), "Close"] == 77.0
 
 
+def test_constant_fx_counterfactual_uses_local_usd_prices_and_cny_domestic_prices():
+    module = load_research_module()
+    dates = pd.to_datetime(["2025-01-02", "2025-01-03"])
+    raw_frames = {
+        "SPY": pd.DataFrame({"Close": [10.0, 11.0]}, index=dates),
+        "510300.SS": pd.DataFrame({"Close": [4.0, 4.1]}, index=dates),
+    }
+    cny_frames = {
+        "SPY": pd.DataFrame({"Close": [70.0, 78.1]}, index=dates),
+        "510300.SS": pd.DataFrame({"Close": [4.0, 4.1]}, index=dates),
+    }
+    metadata = {
+        "SPY": {"currency": "USD"},
+        "510300.SS": {"currency": "CNY"},
+    }
+
+    counterfactual = module.build_constant_fx_counterfactual_frames(
+        raw_frames,
+        cny_frames,
+        metadata,
+    )
+
+    assert counterfactual["SPY"].equals(raw_frames["SPY"])
+    assert counterfactual["510300.SS"].equals(cny_frames["510300.SS"])
+
+
 def test_monthly_trend_signals_use_only_completed_months():
     module = load_research_module()
     index = pd.date_range("2024-01-02", "2025-02-14", freq="B")
@@ -288,6 +314,7 @@ def test_equity_summary_calculates_drawdown_and_recovery():
 
     assert summary["maxDrawdownPct"] == pytest.approx(25.0)
     assert summary["longestRecoveryDays"] >= 122
+    assert summary["longestLosingStreakDays"] >= 92
     assert summary["historyYears"] >= 5.0
 
 
@@ -340,6 +367,18 @@ def test_dca_principal_is_not_counted_as_strategy_return():
     assert result["timeWeightedReturnPct"] == 5.0
 
 
+def test_dca_reports_annualized_money_weighted_return_when_dates_are_known():
+    module = load_research_module()
+    result = module.summarize_dca(
+        contributions=[{"date": "2024-01-01", "amount": 1000}],
+        ending_value=1100,
+        time_weighted_return_pct=10.0,
+        ending_date="2025-01-01",
+    )
+
+    assert result["moneyWeightedReturnPct"] == pytest.approx(9.98, abs=0.01)
+
+
 def test_rolling_window_stats_identify_worst_three_year_period():
     module = load_research_module()
     curve = [
@@ -376,3 +415,238 @@ def test_variant_matrix_reports_every_predeclared_parameter_combination():
     assert {row["btcCap"] for row in variants} == {0.0, 0.05, 0.10}
     assert {row["driftThreshold"] for row in variants} == {0.0, 0.05}
     assert len(keys) == len(variants)
+
+
+def test_static_allocation_benchmark_keeps_rolling_metrics(monkeypatch):
+    module = load_research_module()
+    dates = pd.date_range("2018-01-31", periods=97, freq="ME")
+    curve = [
+        {"date": date.date().isoformat(), "equity": 1.0 + index * 0.01}
+        for index, date in enumerate(dates)
+    ]
+
+    monkeypatch.setattr(
+        module,
+        "simulate_monthly_portfolio",
+        lambda *args, **kwargs: {
+            "equityCurve": curve,
+            "rebalances": [],
+            "costPaid": 0.0,
+        },
+    )
+
+    result = module.simulate_static_allocation_benchmark(
+        frames={},
+        asset_metadata={},
+        start=None,
+        end=None,
+    )
+
+    assert result["summary"]["worstRolling3YearReturnPct"] is not None
+    assert result["summary"]["worstRolling5YearReturnPct"] is not None
+
+
+def test_asset_correlation_matrix_uses_cny_return_series():
+    module = load_research_module()
+    dates = pd.date_range("2025-01-01", periods=5, freq="D")
+    frames = {
+        "A": pd.DataFrame({"Close": [1, 2, 3, 4, 5]}, index=dates),
+        "B": pd.DataFrame({"Close": [2, 4, 6, 8, 10]}, index=dates),
+    }
+
+    matrix = module.asset_correlation_matrix(frames, "2025-01-01", "2025-01-05")
+
+    assert matrix["A"]["B"] == pytest.approx(1.0)
+    assert matrix["B"]["A"] == pytest.approx(1.0)
+
+
+def test_recommendation_surfaces_headline_matching_static_benchmark_without_promoting_it():
+    module = load_research_module()
+    variant = {
+        "id": "trend_near_miss",
+        "spec": {
+            "strategy": "trend_risk_budget",
+            "trendMode": "mom12",
+            "btcCap": 0.05,
+            "volatilityLookback": 120,
+            "driftThreshold": 0.05,
+            "rsTopN": None,
+            "usRsTilt": False,
+        },
+        "summary": {"cagrPct": 13.0, "maxDrawdownPct": 19.0, "calmar": 0.68},
+        "gate": {
+            "eligible": True,
+            "targetReturnMet": False,
+            "targetDrawdownMet": False,
+            "hardDrawdownMet": True,
+        },
+    }
+    benchmark = {
+        "id": "static_stock_bond_gold_cny",
+        "gate": {
+            "eligible": True,
+            "targetReturnMet": True,
+            "targetDrawdownMet": True,
+        },
+    }
+
+    recommendation, stability = module._recommend_candidate([variant], [benchmark])
+
+    assert recommendation["status"] == "no_target_default"
+    assert recommendation["researchLeadId"] == "static_stock_bond_gold_cny"
+    assert "基准" in recommendation["reason"]
+    assert stability["pass"] is True
+
+
+def test_render_report_includes_failed_candidates_and_coverage_limitations():
+    module = load_research_module()
+    markdown = module.render_markdown_report(
+        {
+            "coverage": {
+                "commonStartDate": "2015-01-01",
+                "commonEndDate": "2026-06-05",
+                "missingStressPeriods": ["2008"],
+                "bySymbol": {},
+            },
+            "assumptions": {},
+            "variants": [
+                {
+                    "id": "bad",
+                    "summary": {"cagrPct": 9.0, "maxDrawdownPct": 25.0},
+                    "gate": {"eligible": False, "failedGates": ["hard_drawdown_limit"]},
+                    "annual": [],
+                    "rolling3": [],
+                    "rolling5": [],
+                    "costPaid": 0.0,
+                    "rebalanceCount": 0,
+                }
+            ],
+            "benchmarks": [],
+            "recommendation": {"status": "no_eligible_default", "candidateId": None},
+            "stability": {},
+            "btcSensitivity": [],
+        }
+    )
+
+    assert "2008" in markdown
+    assert "bad" in markdown
+    assert "当前没有合格默认策略" in markdown
+
+
+def test_render_report_prints_annual_rolling_cost_and_dca_results():
+    module = load_research_module()
+    markdown = module.render_markdown_report(
+        {
+            "coverage": {
+                "commonStartDate": "2015-01-01",
+                "commonEndDate": "2026-06-05",
+                "missingStressPeriods": ["2008"],
+                "bySymbol": {
+                    "SPY": {
+                        "startDate": "2000-01-03",
+                        "endDate": "2026-06-05",
+                        "rows": 6646,
+                    }
+                },
+            },
+            "variants": [
+                {
+                    "id": "candidate",
+                    "summary": {
+                        "cagrPct": 10.0,
+                        "maxDrawdownPct": 14.0,
+                        "calmar": 0.71,
+                        "worstRolling3YearReturnPct": 4.0,
+                        "worstRolling5YearReturnPct": 8.0,
+                        "longestRecoveryDays": 300,
+                    },
+                    "gate": {"eligible": True, "targetDrawdownMet": True},
+                    "annual": [{"year": "2025", "returnPct": 9.5, "maxDrawdownPct": 6.0}],
+                    "windows": {
+                        "recent3Year": {"cagrPct": 8.5, "maxDrawdownPct": 9.0},
+                        "recent5Year": {"cagrPct": 9.0, "maxDrawdownPct": 10.0},
+                        "recent10Year": {"cagrPct": 9.5, "maxDrawdownPct": 12.0},
+                    },
+                    "stressPeriods": [
+                        {
+                            "period": "2020",
+                            "available": True,
+                            "totalReturnPct": 7.0,
+                            "maxDrawdownPct": 8.0,
+                        }
+                    ],
+                    "contributions": {
+                        "categoryContribution": {
+                            "us_equity": {
+                                "returnContribution": 0.12,
+                                "riskContribution": 0.4,
+                                "drawdownContribution": -0.03,
+                            }
+                        }
+                    },
+                    "dca": {
+                        "principal": 12000,
+                        "endingValue": 13200,
+                        "principalReturnPct": 10.0,
+                        "moneyWeightedReturnPct": 8.2,
+                        "timeWeightedReturnPct": 15.0,
+                        "accountMaxDrawdownPct": 7.0,
+                    },
+                    "costPaid": 0.01,
+                    "rebalanceCount": 12,
+                    "turnover": {"totalTurnover": 1.5},
+                }
+            ],
+            "benchmarks": [],
+            "recommendation": {
+                "status": "eligible_default",
+                "candidateId": "candidate",
+                "reason": "达标。",
+            },
+            "stability": {"candidateId": "candidate", "pass": True},
+            "btcSensitivity": [],
+            "currencyContribution": {
+                "SPY": {
+                    "localReturnPct": 100.0,
+                    "cnyReturnPct": 110.0,
+                    "currencyEffectPctPoints": 10.0,
+                }
+            },
+            "assetCorrelations": {
+                "SPY": {"SPY": 1.0, "GLD": 0.2},
+                "GLD": {"SPY": 0.2, "GLD": 1.0},
+            },
+            "costSensitivity": [
+                {
+                    "feeBps": 10,
+                    "slippageBps": 10,
+                    "cagrPct": 9.8,
+                    "maxDrawdownPct": 14.2,
+                }
+            ],
+            "fxSensitivity": [
+                {
+                    "mode": "actual_cny_fx",
+                    "cagrPct": 10.0,
+                    "maxDrawdownPct": 14.0,
+                },
+                {
+                    "mode": "constant_fx_local_returns",
+                    "cagrPct": 9.0,
+                    "maxDrawdownPct": 13.5,
+                },
+            ],
+        }
+    )
+
+    assert "| 2025 | 9.50% | 6.00% |" in markdown
+    assert "| `candidate` | 4.00% | 8.00% | 300 |" in markdown
+    assert "| `candidate` | 1.50 | 12 | 1.00% |" in markdown
+    assert "| `candidate` | 12000.00 | 13200.00 | 10.00% | 8.20% | 15.00% | 7.00% |" in markdown
+    assert "| 10.00 | 10.00 | 9.80% | 14.20% |" in markdown
+    assert "| SPY | 2000-01-03 | 2026-06-05 | 6646 |" in markdown
+    assert "| `candidate` | 2020 | 7.00% | 8.00% |" in markdown
+    assert "| SPY | 100.00% | 110.00% | 10.00% |" in markdown
+    assert "| SPY | GLD | 0.20 |" in markdown
+    assert "| `candidate` | us_equity | 12.00% | 40.00% | -3.00% |" in markdown
+    assert "| constant_fx_local_returns | 9.00% | 13.50% |" in markdown
