@@ -2,6 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
 import type { Time } from 'lightweight-charts';
 import { Bell, BriefcaseBusiness, CircleOff, Eye, RefreshCw, ShieldAlert, Target } from 'lucide-react';
+import {
+  DISPLAY_SIGNAL_TONES,
+  deriveConfluenceLabel,
+  deriveDisplaySignal,
+  getWeakOpportunityHint,
+  isDefaultVisible,
+  sortSupertrendItems,
+} from '../supertrendDisplay.js';
 import { getSupertrendPollDelay, shouldRefreshOnVisibility } from '../pollingPolicy.js';
 
 const API_BASE = '/api';
@@ -69,40 +77,6 @@ const STATE_COLOR: Record<STItem['state'], string> = {
   bear_flip: 'text-red-400 border-red-500/40 bg-red-500/10',
   bull: 'text-sky-400 border-sky-500/40 bg-sky-500/10',
   bear: 'text-zinc-500 border-zinc-700 bg-zinc-800/30',
-};
-
-const ALERT_COLOR: Record<STItem['alertType'], string> = {
-  buy_candidate: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10',
-  support_test: 'text-cyan-300 border-cyan-500/35 bg-cyan-500/10',
-  sell_or_risk: 'text-red-300 border-red-500/40 bg-red-500/10',
-  resistance_test: 'text-amber-300 border-amber-500/35 bg-amber-500/10',
-  hold_bull: 'text-sky-300 border-sky-500/30 bg-sky-500/10',
-  avoid_bear: 'text-zinc-400 border-zinc-700 bg-zinc-800/30',
-  none: 'text-zinc-500 border-zinc-800 bg-zinc-900/40',
-};
-
-const OPPORTUNITY_COLOR: Record<STItem['opportunityStage'], string> = {
-  fresh_bull: 'text-emerald-200 border-emerald-500/35 bg-emerald-500/10',
-  pullback_buy_zone: 'text-cyan-200 border-cyan-500/35 bg-cyan-500/10',
-  wait_pullback: 'text-amber-200 border-amber-500/35 bg-amber-500/10',
-  extended_from_entry: 'text-amber-200 border-amber-500/35 bg-amber-500/10',
-  trend_watch: 'text-sky-200 border-sky-500/30 bg-sky-500/10',
-  invalidated: 'text-red-200 border-red-500/35 bg-red-500/10',
-  neutral: 'text-zinc-400 border-zinc-700 bg-zinc-800/30',
-};
-
-const PRIORITY_LABEL: Record<STItem['alertPriority'], string> = {
-  high: '高',
-  medium: '中',
-  low: '低',
-  none: '无',
-};
-
-const PRIORITY_RANK: Record<STItem['alertPriority'], number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-  none: 3,
 };
 
 const MARK_OPTIONS: { value: Exclude<UserMark, 'none'>; label: string; icon: typeof Eye }[] = [
@@ -258,14 +232,8 @@ const isWeeklyBear = (s: STItem) => s.weeklyState === 'bear' || s.weeklyState ==
 const isDailyBull = (s: STItem) => s.state === 'bull' || s.state === 'bull_flip';
 const isDailyBear = (s: STItem) => s.state === 'bear' || s.state === 'bear_flip';
 const isPinnedMark = (mark: UserMark | undefined) => mark === 'watch' || mark === 'holding';
-const isLowPriorityObservation = (s: STItem, mark: UserMark | undefined) => (
-  !isPinnedMark(mark) && !s.isActionable && (s.alertPriority === 'low' || s.alertPriority === 'none')
-);
 const isFocusItem = (s: STItem, mark: UserMark | undefined) => (
-  isPinnedMark(mark) || s.alertPriority === 'high' || s.isActionable
-);
-const getMarkRank = (mark: UserMark | undefined) => (
-  mark === 'holding' ? 0 : mark === 'watch' ? 1 : mark === 'none' || mark == null ? 2 : 3
+  Boolean(deriveDisplaySignal(s)) || (isPinnedMark(mark) && s.alertPriority === 'high')
 );
 
 const CROSS_FILTERS: { key: FilterType; label: string }[] = [
@@ -378,21 +346,17 @@ export function SupertrendPage() {
     });
   }
 
-  const ORDER: STItem['state'][] = ['bull_flip', 'bear_flip', 'bull', 'bear'];
-  const displayed = items
-    .filter(i => matchFilter(i, filter))
-    .sort((a, b) => {
-      const priorityDiff = PRIORITY_RANK[a.alertPriority] - PRIORITY_RANK[b.alertPriority];
-      if (priorityDiff !== 0) return priorityDiff;
-      const markDiff = getMarkRank(marks[a.symbol]) - getMarkRank(marks[b.symbol]);
-      if (markDiff !== 0) return markDiff;
-      return ORDER.indexOf(a.state) - ORDER.indexOf(b.state);
-    });
-  const lowPriorityCount = filter === 'all' ? displayed.filter(i => isLowPriorityObservation(i, marks[i.symbol])).length : 0;
+  const displayed = sortSupertrendItems(items.filter(i => matchFilter(i, filter)), marks);
+  const otherCount = filter === 'all' ? displayed.filter(i => !isDefaultVisible(i, marks[i.symbol])).length : 0;
   const visibleDisplayed = filter === 'all' && !showLowPriority
-    ? displayed.filter(i => !isLowPriorityObservation(i, marks[i.symbol]))
+    ? displayed.filter(i => isDefaultVisible(i, marks[i.symbol]))
     : displayed;
-  const onlyFoldedLowPriority = filter === 'all' && !showLowPriority && visibleDisplayed.length === 0 && lowPriorityCount > 0;
+  const onlyFoldedOther = filter === 'all' && !showLowPriority && visibleDisplayed.length === 0 && otherCount > 0;
+  const signalCounts = items.reduce<Record<string, number>>((acc, item) => {
+    const signal = deriveDisplaySignal(item);
+    if (signal) acc[signal.key] = (acc[signal.key] || 0) + 1;
+    return acc;
+  }, {});
   const dataStatus = useMemo(() => {
     const latestDataDate = items
       .map(item => item.latestDataDate)
@@ -451,20 +415,20 @@ export function SupertrendPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">可操作</div>
-          <div className="text-lg font-semibold text-zinc-100">{items.filter(i => i.isActionable).length}</div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">刚翻多</div>
+          <div className="text-lg font-semibold text-emerald-300">{signalCounts.fresh_bull || 0}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">高优先级</div>
-          <div className="text-lg font-semibold text-red-300">{items.filter(i => i.alertPriority === 'high').length}</div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">回踩买点</div>
+          <div className="text-lg font-semibold text-cyan-300">{signalCounts.pullback_buy || 0}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">支撑回踩</div>
-          <div className="text-lg font-semibold text-cyan-300">{items.filter(i => i.alertType === 'support_test').length}</div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">预备翻多</div>
+          <div className="text-lg font-semibold text-amber-300">{signalCounts.pre_bull || 0}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
           <div className="text-[10px] text-zinc-600 uppercase tracking-widest">风控</div>
-          <div className="text-lg font-semibold text-amber-300">{items.filter(i => i.alertType === 'sell_or_risk').length}</div>
+          <div className="text-lg font-semibold text-red-300">{signalCounts.risk || 0}</div>
         </div>
       </div>
 
@@ -526,16 +490,16 @@ export function SupertrendPage() {
         <div className="mb-5 rounded-xl border border-zinc-800/90 bg-zinc-950/45 px-3 py-3 sm:px-4">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex-1">
-              <div className="text-xs font-semibold text-zinc-300">日常视图：保留全量扫描，折叠低优先级观察</div>
+              <div className="text-xs font-semibold text-zinc-300">晚上复盘：优先显示明天最值得盯的买点队列</div>
               <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                近五年精简层没有同时满足收益回撤比保留 85%、总收益保留 70%、交易数下降；默认只收起低优先级卡片，不改变底层扫描覆盖。
+                默认保留刚翻多、回踩买点、预备翻多、风控，以及带高优先级信号的手动关注/持有；其他标的仍可展开查看。
               </div>
             </div>
             <button
               onClick={() => setShowLowPriority(v => !v)}
               className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:text-zinc-100 active:scale-[0.98]"
             >
-              {showLowPriority ? '收起低优先级' : `展开低优先级 ${lowPriorityCount}`}
+              {showLowPriority ? '收起其他观察' : `展开其他 ${otherCount}`}
             </button>
           </div>
         </div>
@@ -546,7 +510,17 @@ export function SupertrendPage() {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visibleDisplayed.map(item => (
+        {visibleDisplayed.map(item => {
+          const displaySignal = deriveDisplaySignal(item);
+          const weakHint = getWeakOpportunityHint(item);
+          const confluenceLabel = deriveConfluenceLabel(item);
+          const confluenceTone = item.state === 'bull_flip'
+            ? 'text-emerald-300'
+            : item.state === 'bear_flip'
+              ? 'text-red-300'
+              : 'text-zinc-500';
+
+          return (
           <div
             key={item.symbol}
             className={`rounded-xl border overflow-hidden transition-all ${
@@ -560,33 +534,25 @@ export function SupertrendPage() {
                 <span className="font-mono text-sm font-semibold text-zinc-200">{item.symbol}</span>
                 {item.alias && <span className="truncate text-xs text-zinc-500">{item.alias}</span>}
               </div>
-              <div className="ml-2 flex shrink-0 items-center gap-1.5">
-                {item.weeklyState && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${STATE_COLOR[item.weeklyState]}`}>
-                    周{STATE_LABEL[item.weeklyState]}
-                  </span>
-                )}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${STATE_COLOR[item.state]}`}>
-                  {STATE_LABEL[item.state]}
-                </span>
-              </div>
+              <span className={`ml-2 shrink-0 text-[10px] font-medium ${confluenceTone}`}>{confluenceLabel}</span>
             </div>
             <div className="px-3 py-2 border-b border-zinc-800/80">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${ALERT_COLOR[item.alertType]}`}>
-                    {item.alertType === 'sell_or_risk' ? <ShieldAlert size={11} /> : item.isActionable ? <Bell size={11} /> : <Target size={11} />}
-                    {item.alertLabel || '无信号'}
-                  </span>
-                  <span
-                    className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${OPPORTUNITY_COLOR[item.opportunityStage] || OPPORTUNITY_COLOR.neutral}`}
-                    title={item.opportunityReason}
-                  >
-                    <Target size={11} />
-                    {item.opportunityLabel || '观察'}
-                  </span>
+                  {displaySignal ? (
+                    <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${DISPLAY_SIGNAL_TONES[displaySignal.tone]}`}>
+                      {displaySignal.key === 'risk' ? <ShieldAlert size={11} /> : <Bell size={11} />}
+                      {displaySignal.label}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border border-zinc-800 bg-zinc-950/30 text-zinc-500">
+                      <Target size={11} />
+                      {item.alertLabel || '观察'}
+                    </span>
+                  )}
+                  {weakHint && <span className="text-[10px] text-zinc-500">{weakHint}</span>}
                 </div>
-                <span className="shrink-0 text-[10px] text-zinc-500">优先级 {PRIORITY_LABEL[item.alertPriority]}</span>
+                {item.alertPriority === 'high' && <span className="shrink-0 rounded border border-red-500/25 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">高</span>}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-1.5">
                 {MARK_OPTIONS.map(({ value, label, icon: Icon }) => {
@@ -659,12 +625,13 @@ export function SupertrendPage() {
               }
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {!loading && visibleDisplayed.length === 0 && (
         <div className="text-zinc-600 text-sm text-center py-16">
-          {onlyFoldedLowPriority ? '当前只有低优先级观察，已默认折叠' : '暂无符合条件的标的'}
+          {onlyFoldedOther ? '当前只有其他观察，已默认折叠' : '暂无符合条件的标的'}
         </div>
       )}
     </div>
