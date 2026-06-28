@@ -16,6 +16,7 @@ services:
     volumes:
       - ./backend/data:/app/data
       - ./backend/backtest_results:/app/backtest_results
+      - ./backend/watchlist.json:/app/watchlist.json
 
   frontend:
     build:

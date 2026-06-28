@@ -79,6 +79,26 @@ def _merge_and_clean_data(df_local: Optional[pd.DataFrame], new_df: pd.DataFrame
     return df[df.index >= earliest_allowed]
 
 
+def _detect_unadjusted_splits(df: pd.DataFrame, symbol: str) -> None:
+    """检测日线跌幅>40%且次日未反弹的异常点，可能是未复权的份额折算/拆分。"""
+    daily_ret = df['Close'].pct_change()
+    for idx in daily_ret[daily_ret < -0.40].index:
+        next_day = idx + pd.Timedelta(days=1)
+        for offset in range(1, 5):
+            check_date = idx + pd.Timedelta(days=offset)
+            if check_date in df.index:
+                recovery = (df.loc[check_date, 'Close'] - df.loc[idx, 'Close']) / df.loc[idx, 'Close']
+                break
+        else:
+            recovery = 0.0
+        if recovery < 0.05:
+            logger.warning(
+                f"{symbol}: 检测到疑似未复权事件 {idx.date()}，单日跌幅 {daily_ret[idx]*100:.1f}%，"
+                f"次交易日反弹仅 {recovery*100:.1f}%。可能是 ETF 份额折算/拆分，Yahoo Finance 未记录。"
+                f"需手工确认并修复 parquet 数据。"
+            )
+
+
 def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
     with ta_calculation_lock:
         df['EMA5'] = ta.ema(df['Close'], length=EMA_FAST_5)
@@ -244,6 +264,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
                         ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
                         df = df[ohlcv_cols]
                     df = _merge_and_clean_data(df, new_df, now)
+                    _detect_unadjusted_splits(df, symbol)
                     logger.info(f"获取 {symbol} 新数据成功, {new_df.shape[0]} 条新数据, {df.shape[0]} 条总数据")
             except Exception as e:
                 logger.error(f"获取 {symbol} 数据失败: {e}")

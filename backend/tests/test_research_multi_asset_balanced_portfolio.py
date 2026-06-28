@@ -446,6 +446,113 @@ def test_static_allocation_benchmark_keeps_rolling_metrics(monkeypatch):
     assert result["summary"]["worstRolling5YearReturnPct"] is not None
 
 
+def test_static_weight_grid_is_deterministic_complete_and_sums_to_one():
+    module = load_research_module()
+
+    first = module.build_static_weight_grid()
+    second = module.build_static_weight_grid()
+    core = [row for row in first if row["neighborhood"] == "core"]
+
+    assert first == second
+    assert len(first) == 85
+    assert len(core) == 19
+    assert len({row["id"] for row in first}) == 85
+    assert all(sum(row["weights"].values()) == pytest.approx(1.0) for row in first)
+    assert all(sum(row["offsets"].values()) == pytest.approx(0.0) for row in first)
+    assert sum(row["isBaseline"] for row in first) == 1
+
+
+def test_static_category_targets_split_a_share_and_us_weights_equally():
+    module = load_research_module()
+    date = pd.Timestamp("2025-01-31")
+    frames = {
+        symbol: pd.DataFrame({"Close": [1.0]}, index=[date])
+        for symbol in ("A1", "A2", "SPY", "QQQ", "GLD", "511010.SS")
+    }
+    metadata = {
+        "A1": {"assetClass": "a_share_equity"},
+        "A2": {"assetClass": "a_share_equity"},
+        "SPY": {"assetClass": "us_equity"},
+        "QQQ": {"assetClass": "us_equity"},
+        "GLD": {"assetClass": "gold"},
+        "511010.SS": {"assetClass": "a_bond"},
+    }
+
+    weights = module.build_static_category_target_weights(
+        frames,
+        metadata,
+        as_of=date,
+        category_weights={
+            "a_share_equity": 0.30,
+            "us_equity": 0.20,
+            "gold": 0.10,
+            "a_bond": 0.40,
+        },
+    )
+
+    assert weights == pytest.approx(
+        {
+            "A1": 0.15,
+            "A2": 0.15,
+            "SPY": 0.10,
+            "QQQ": 0.10,
+            "GLD": 0.10,
+            "511010.SS": 0.40,
+        }
+    )
+
+
+def test_static_weight_stability_requires_core_unanimity_and_broad_eighty_percent():
+    module = load_research_module()
+    grid = module.build_static_weight_grid()
+    broad_only = [row for row in grid if row["neighborhood"] == "broad"]
+    target_ids = {row["id"] for row in grid if row["neighborhood"] == "core"}
+    target_ids.update(row["id"] for row in broad_only[: 68 - len(target_ids)])
+    points = [
+        {
+            **row,
+            "summary": {
+                "cagrPct": 10.0 if row["id"] in target_ids else 7.9,
+                "maxDrawdownPct": 14.0,
+            },
+        }
+        for row in grid
+    ]
+
+    result = module.summarize_static_weight_stability(points)
+
+    assert result["core"]["pointCount"] == 19
+    assert result["core"]["targetPassRate"] == pytest.approx(1.0)
+    assert result["core"]["pass"] is True
+    assert result["broad"]["pointCount"] == 85
+    assert result["broad"]["targetPassRate"] == pytest.approx(0.8)
+    assert result["broad"]["pass"] is True
+    assert result["pass"] is True
+
+
+def test_static_weight_stability_fails_for_one_core_miss_or_one_hard_drawdown_miss():
+    module = load_research_module()
+    grid = module.build_static_weight_grid()
+    passing = [
+        {
+            **row,
+            "summary": {"cagrPct": 10.0, "maxDrawdownPct": 14.0},
+        }
+        for row in grid
+    ]
+    core_miss = [dict(row, summary=dict(row["summary"])) for row in passing]
+    core_index = next(index for index, row in enumerate(core_miss) if row["neighborhood"] == "core")
+    core_miss[core_index]["summary"]["cagrPct"] = 7.9
+    hard_miss = [dict(row, summary=dict(row["summary"])) for row in passing]
+    hard_miss[-1]["summary"]["maxDrawdownPct"] = 20.01
+
+    assert module.summarize_static_weight_stability(core_miss)["pass"] is False
+    hard_result = module.summarize_static_weight_stability(hard_miss)
+    assert hard_result["broad"]["hardDrawdownPassRate"] < 1.0
+    assert hard_result["broad"]["pass"] is False
+    assert hard_result["pass"] is False
+
+
 def test_asset_correlation_matrix_uses_cny_return_series():
     module = load_research_module()
     dates = pd.date_range("2025-01-01", periods=5, freq="D")
@@ -498,6 +605,29 @@ def test_recommendation_surfaces_headline_matching_static_benchmark_without_prom
     assert stability["pass"] is True
 
 
+def test_recommendation_promotes_static_benchmark_only_after_weight_stability_passes():
+    module = load_research_module()
+    benchmark = {
+        "id": "static_stock_bond_gold_cny",
+        "gate": {
+            "eligible": True,
+            "targetReturnMet": True,
+            "targetDrawdownMet": True,
+        },
+    }
+
+    recommendation, stability = module._recommend_candidate(
+        [],
+        [benchmark],
+        static_weight_stability={"pass": True},
+    )
+
+    assert recommendation["status"] == "eligible_static_default"
+    assert recommendation["candidateId"] == "static_stock_bond_gold_cny"
+    assert recommendation["researchLeadId"] == "static_stock_bond_gold_cny"
+    assert stability["pass"] is True
+
+
 def test_render_report_includes_failed_candidates_and_coverage_limitations():
     module = load_research_module()
     markdown = module.render_markdown_report(
@@ -531,6 +661,84 @@ def test_render_report_includes_failed_candidates_and_coverage_limitations():
     assert "2008" in markdown
     assert "bad" in markdown
     assert "当前没有合格默认策略" in markdown
+
+
+def test_render_report_includes_static_weight_stability_grid_and_verdict():
+    module = load_research_module()
+    markdown = module.render_markdown_report(
+        {
+            "coverage": {
+                "commonStartDate": "2015-01-01",
+                "commonEndDate": "2026-06-05",
+                "missingStressPeriods": ["2008"],
+                "bySymbol": {},
+            },
+            "variants": [],
+            "benchmarks": [],
+            "recommendation": {
+                "status": "eligible_static_default",
+                "candidateId": "static_stock_bond_gold_cny",
+                "reason": "静态权重稳定性通过。",
+            },
+            "stability": {},
+            "btcSensitivity": [],
+            "staticWeightStability": {
+                "pass": True,
+                "baselineWeights": {
+                    "a_share_equity": 0.20,
+                    "us_equity": 0.30,
+                    "gold": 0.20,
+                    "a_bond": 0.30,
+                },
+                "core": {
+                    "pointCount": 19,
+                    "targetPassCount": 19,
+                    "targetPassRate": 1.0,
+                    "hardDrawdownPassCount": 19,
+                    "hardDrawdownPassRate": 1.0,
+                    "cagrRangePct": [9.0, 11.5],
+                    "drawdownRangePct": [10.0, 14.5],
+                    "pass": True,
+                },
+                "broad": {
+                    "pointCount": 85,
+                    "targetPassCount": 68,
+                    "targetPassRate": 0.8,
+                    "hardDrawdownPassCount": 85,
+                    "hardDrawdownPassRate": 1.0,
+                    "cagrRangePct": [8.0, 12.0],
+                    "drawdownRangePct": [9.0, 19.0],
+                    "pass": True,
+                },
+                "points": [
+                    {
+                        "id": "static_w20_30_20_30",
+                        "weights": {
+                            "a_share_equity": 0.20,
+                            "us_equity": 0.30,
+                            "gold": 0.20,
+                            "a_bond": 0.30,
+                        },
+                        "neighborhood": "core",
+                        "summary": {
+                            "cagrPct": 11.0,
+                            "maxDrawdownPct": 12.8,
+                            "calmar": 0.86,
+                        },
+                        "targetPass": True,
+                        "hardDrawdownPass": True,
+                    }
+                ],
+            },
+        }
+    )
+
+    assert "## 静态股债金权重稳定性" in markdown
+    assert "核心邻域 CAGR 范围 9.00%～11.50%，最大回撤范围 10.00%～14.50%" in markdown
+    assert "广义邻域 CAGR 范围 8.00%～12.00%，最大回撤范围 9.00%～19.00%" in markdown
+    assert "| 核心邻域 | 19 | 19 | 100.00% | 19 | 100.00% | 通过 |" in markdown
+    assert "| 广义邻域 | 85 | 68 | 80.00% | 85 | 100.00% | 通过 |" in markdown
+    assert "| `static_w20_30_20_30` | 核心 | 20.00% | 30.00% | 20.00% | 30.00% | 11.00% | 12.80% | 0.86 | 通过 |" in markdown
 
 
 def test_render_report_prints_annual_rolling_cost_and_dca_results():

@@ -8,6 +8,7 @@ import copy
 import importlib.util
 import json
 import math
+from itertools import product
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -18,6 +19,19 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT / "backend"
 DEFAULT_CONFIG = BACKEND_DIR / "universes" / "multi_asset_balanced.json"
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
+STATIC_WEIGHT_CATEGORIES = (
+    "a_share_equity",
+    "us_equity",
+    "gold",
+    "a_bond",
+)
+STATIC_BASELINE_WEIGHTS = {
+    "a_share_equity": 0.20,
+    "us_equity": 0.30,
+    "gold": 0.20,
+    "a_bond": 0.30,
+}
+STATIC_WEIGHT_OFFSETS_PCT = (-10, -5, 0, 5, 10)
 
 
 def load_config(path: Path) -> Dict[str, object]:
@@ -1355,6 +1369,70 @@ def simulate_dca_from_equity_curve(
     return summary
 
 
+def build_static_weight_grid() -> List[Dict[str, object]]:
+    baseline_pct = {
+        category: int(round(weight * 100))
+        for category, weight in STATIC_BASELINE_WEIGHTS.items()
+    }
+    rows = []
+    for offsets_pct in product(STATIC_WEIGHT_OFFSETS_PCT, repeat=len(STATIC_WEIGHT_CATEGORIES)):
+        if sum(offsets_pct) != 0:
+            continue
+        weights_pct = {
+            category: baseline_pct[category] + offset
+            for category, offset in zip(STATIC_WEIGHT_CATEGORIES, offsets_pct)
+        }
+        weights = {
+            category: value / 100.0
+            for category, value in weights_pct.items()
+        }
+        offsets = {
+            category: offset / 100.0
+            for category, offset in zip(STATIC_WEIGHT_CATEGORIES, offsets_pct)
+        }
+        is_core = max(abs(offset) for offset in offsets_pct) <= 5
+        rows.append(
+            {
+                "id": "static_w" + "_".join(
+                    str(weights_pct[category])
+                    for category in STATIC_WEIGHT_CATEGORIES
+                ),
+                "weights": weights,
+                "offsets": offsets,
+                "neighborhood": "core" if is_core else "broad",
+                "isBaseline": all(offset == 0 for offset in offsets_pct),
+            }
+        )
+    return rows
+
+
+def build_static_category_target_weights(
+    frames: Dict[str, pd.DataFrame],
+    asset_metadata: Dict[str, Dict[str, object]],
+    as_of,
+    category_weights: Dict[str, float],
+) -> Dict[str, float]:
+    cutoff = pd.Timestamp(as_of)
+    weights: Dict[str, float] = {}
+    for category in STATIC_WEIGHT_CATEGORIES:
+        available = sorted(
+            symbol
+            for symbol, metadata in asset_metadata.items()
+            if str(metadata.get("assetClass")) == category
+            and symbol in frames
+            and not frames[symbol].loc[:cutoff].dropna(subset=["Close"]).empty
+        )
+        category_weight = float(category_weights.get(category, 0.0))
+        if not available or category_weight <= 0:
+            continue
+        per_asset = category_weight / len(available)
+        weights.update({symbol: per_asset for symbol in available})
+    residual = max(0.0, 1.0 - sum(weights.values()))
+    if residual > 1e-12:
+        weights["__CASH__"] = residual
+    return weights
+
+
 def simulate_static_allocation_benchmark(
     frames: Dict[str, pd.DataFrame],
     asset_metadata: Dict[str, Dict[str, object]],
@@ -1363,30 +1441,21 @@ def simulate_static_allocation_benchmark(
     fee_bps: float = 5.0,
     slippage_bps: float = 5.0,
     simulation_cache: Optional[Dict[str, object]] = None,
+    category_weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, object]:
-    a_share_symbols = [
-        symbol
-        for symbol, row in asset_metadata.items()
-        if str(row.get("assetClass")) == "a_share_equity" and symbol in frames
-    ]
+    target_categories = dict(category_weights or STATIC_BASELINE_WEIGHTS)
 
     def target_weight_fn(as_of):
-        available_a_share = [
-            symbol
-            for symbol in a_share_symbols
-            if not frames[symbol].loc[: pd.Timestamp(as_of)].dropna(subset=["Close"]).empty
-        ]
-        weights: Dict[str, float] = {}
-        if available_a_share:
-            per_a_share = 0.20 / len(available_a_share)
-            weights.update({symbol: per_a_share for symbol in available_a_share})
-        for symbol, weight in (("SPY", 0.15), ("QQQ", 0.15), ("GLD", 0.20), ("511010.SS", 0.30)):
-            if symbol in frames and not frames[symbol].loc[: pd.Timestamp(as_of)].dropna(subset=["Close"]).empty:
-                weights[symbol] = weight
-        residual = max(0.0, 1.0 - sum(weights.values()))
-        if residual:
-            weights["__CASH__"] = residual
-        return weights, {"source": "static_20_30_20_30"}
+        weights = build_static_category_target_weights(
+            frames,
+            asset_metadata,
+            as_of,
+            target_categories,
+        )
+        return weights, {
+            "source": "static_category_weights",
+            "categoryWeights": target_categories,
+        }
 
     result = simulate_monthly_portfolio(
         frames,
@@ -1399,6 +1468,79 @@ def simulate_static_allocation_benchmark(
     )
     result["summary"] = summarize_equity_curve(result["equityCurve"])
     return result
+
+
+def summarize_static_weight_stability(
+    points: List[Dict[str, object]],
+) -> Dict[str, object]:
+    enriched = []
+    for point in points:
+        summary = dict(point.get("summary") or {})
+        cagr = summary.get("cagrPct")
+        drawdown = summary.get("maxDrawdownPct")
+        target_pass = (
+            cagr is not None
+            and drawdown is not None
+            and 8.0 <= float(cagr) <= 12.0
+            and float(drawdown) <= 15.0
+        )
+        hard_drawdown_pass = drawdown is not None and float(drawdown) <= 20.0
+        enriched.append(
+            {
+                **point,
+                "summary": summary,
+                "targetPass": target_pass,
+                "hardDrawdownPass": hard_drawdown_pass,
+            }
+        )
+
+    def aggregate(rows: List[Dict[str, object]], require_all_targets: bool) -> Dict[str, object]:
+        point_count = len(rows)
+        target_count = sum(bool(row["targetPass"]) for row in rows)
+        hard_count = sum(bool(row["hardDrawdownPass"]) for row in rows)
+        target_rate = target_count / point_count if point_count else 0.0
+        hard_rate = hard_count / point_count if point_count else 0.0
+        cagrs = [
+            float(row["summary"]["cagrPct"])
+            for row in rows
+            if row["summary"].get("cagrPct") is not None
+        ]
+        drawdowns = [
+            float(row["summary"]["maxDrawdownPct"])
+            for row in rows
+            if row["summary"].get("maxDrawdownPct") is not None
+        ]
+        target_gate = target_count == point_count if require_all_targets else target_rate >= 0.80 - 1e-12
+        return {
+            "pointCount": point_count,
+            "targetPassCount": target_count,
+            "targetPassRate": target_rate,
+            "hardDrawdownPassCount": hard_count,
+            "hardDrawdownPassRate": hard_rate,
+            "cagrRangePct": [min(cagrs), max(cagrs)] if cagrs else None,
+            "drawdownRangePct": [min(drawdowns), max(drawdowns)] if drawdowns else None,
+            "pass": bool(point_count) and target_gate and hard_count == point_count,
+        }
+
+    core_rows = [row for row in enriched if row.get("neighborhood") == "core"]
+    core = aggregate(core_rows, require_all_targets=True)
+    broad = aggregate(enriched, require_all_targets=False)
+    return {
+        "baselineWeights": dict(STATIC_BASELINE_WEIGHTS),
+        "offsetsPctPoints": list(STATIC_WEIGHT_OFFSETS_PCT),
+        "thresholds": {
+            "targetCagrPct": [8.0, 12.0],
+            "targetMaxDrawdownPct": 15.0,
+            "hardMaxDrawdownPct": 20.0,
+            "coreTargetPassRate": 1.0,
+            "broadTargetPassRate": 0.80,
+            "broadHardDrawdownPassRate": 1.0,
+        },
+        "points": enriched,
+        "core": core,
+        "broad": broad,
+        "pass": core["pass"] and broad["pass"],
+    }
 
 
 def _slice_curve(
@@ -1707,6 +1849,7 @@ def _variant_stability(
 def _recommend_candidate(
     variants: List[Dict[str, object]],
     benchmarks: Optional[List[Dict[str, object]]] = None,
+    static_weight_stability: Optional[Dict[str, object]] = None,
 ) -> Tuple[Dict[str, object], Dict[str, object]]:
     benchmark_lead = next(
         (
@@ -1740,6 +1883,13 @@ def _recommend_candidate(
                 "candidateId": candidate["id"],
                 "reason": "达到收益和回撤目标，且相邻参数稳定。",
             }, stability
+    if benchmark_lead is not None and (static_weight_stability or {}).get("pass"):
+        return {
+            "status": "eligible_static_default",
+            "candidateId": benchmark_lead["id"],
+            "researchLeadId": benchmark_lead["id"],
+            "reason": "静态股债金基准命中收益与回撤目标，核心邻域和广义邻域权重稳定性均通过。",
+        }, dict(static_weight_stability or {})
     if default_family:
         candidate = default_family[0]
         stability = _variant_stability(variants, candidate)
@@ -1754,10 +1904,13 @@ def _recommend_candidate(
             reason_parts.append("最大回撤未达到 15% 目标")
         reason = "，".join(reason_parts) + "。"
         if benchmark_lead is not None:
-            reason += (
-                "静态股债金基准命中表面收益与回撤目标，但它是固定权重基准，"
-                "尚未完成权重稳定性验证，因此不提升为默认策略。"
-            )
+            if static_weight_stability is None:
+                reason += (
+                    "静态股债金基准命中表面收益与回撤目标，但它是固定权重基准，"
+                    "尚未完成权重稳定性验证，因此不提升为默认策略。"
+                )
+            else:
+                reason += "静态股债金基准未通过预设的核心与广义邻域权重稳定性门槛。"
         return {
             "status": "no_target_default",
             "candidateId": candidate["id"],
@@ -1784,7 +1937,10 @@ def render_markdown_report(payload: Dict[str, object]) -> str:
     benchmarks = list(payload.get("benchmarks") or [])
     recommendation = dict(payload.get("recommendation") or {})
     missing_stress = coverage.get("missingStressPeriods") or []
-    no_default = recommendation.get("status") != "eligible_default"
+    no_default = recommendation.get("status") not in {
+        "eligible_default",
+        "eligible_static_default",
+    }
     lines = [
         "# 多资产趋势风险预算平衡组合研究 2026-06-06",
         "",
@@ -1868,6 +2024,66 @@ def render_markdown_report(payload: Dict[str, object]) -> str:
             f"{_fmt(summary.get('maxDrawdownPct') or summary.get('accountMaxDrawdownPct'), suffix='%')} | "
             f"{note}{gate_note} |"
         )
+    static_weight_stability = dict(payload.get("staticWeightStability") or {})
+    if static_weight_stability:
+        core_stability = dict(static_weight_stability.get("core") or {})
+        broad_stability = dict(static_weight_stability.get("broad") or {})
+        core_cagr_range = core_stability.get("cagrRangePct") or [None, None]
+        core_drawdown_range = core_stability.get("drawdownRangePct") or [None, None]
+        broad_cagr_range = broad_stability.get("cagrRangePct") or [None, None]
+        broad_drawdown_range = broad_stability.get("drawdownRangePct") or [None, None]
+        lines.extend(
+            [
+                "",
+                "## 静态股债金权重稳定性",
+                "",
+                "- 基准权重：A股 20% / 美股 30% / 黄金 20% / A债 30%。",
+                "- 核心邻域要求全部点 CAGR 为 8%～12% 且最大回撤不超过 15%。",
+                "- 广义邻域要求至少 80% 的点达到上述目标，且全部点最大回撤不超过 20%。",
+                f"- 最终判定：{'通过' if static_weight_stability.get('pass') else '未通过'}。",
+                f"- 核心邻域 CAGR 范围 {_fmt(core_cagr_range[0], suffix='%')}～"
+                f"{_fmt(core_cagr_range[1], suffix='%')}，最大回撤范围 "
+                f"{_fmt(core_drawdown_range[0], suffix='%')}～"
+                f"{_fmt(core_drawdown_range[1], suffix='%')}。",
+                f"- 广义邻域 CAGR 范围 {_fmt(broad_cagr_range[0], suffix='%')}～"
+                f"{_fmt(broad_cagr_range[1], suffix='%')}，最大回撤范围 "
+                f"{_fmt(broad_drawdown_range[0], suffix='%')}～"
+                f"{_fmt(broad_drawdown_range[1], suffix='%')}。",
+                "",
+                "| 邻域 | 点数 | 目标达标数 | 目标达标率 | 硬回撤达标数 | 硬回撤达标率 | 判定 |",
+                "|---|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for key, label in (("core", "核心邻域"), ("broad", "广义邻域")):
+            row = dict(static_weight_stability.get(key) or {})
+            lines.append(
+                f"| {label} | {row.get('pointCount', 0)} | {row.get('targetPassCount', 0)} | "
+                f"{_fmt(float(row.get('targetPassRate') or 0) * 100, suffix='%')} | "
+                f"{row.get('hardDrawdownPassCount', 0)} | "
+                f"{_fmt(float(row.get('hardDrawdownPassRate') or 0) * 100, suffix='%')} | "
+                f"{'通过' if row.get('pass') else '未通过'} |"
+            )
+        lines.extend(
+            [
+                "",
+                "| 网格点 | 邻域 | A股 | 美股 | 黄金 | A债 | CAGR | 最大回撤 | Calmar | 目标门槛 |",
+                "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for point in static_weight_stability.get("points") or []:
+            weights = dict(point.get("weights") or {})
+            summary = dict(point.get("summary") or {})
+            lines.append(
+                f"| `{point.get('id')}` | {'核心' if point.get('neighborhood') == 'core' else '广义'} | "
+                f"{_fmt(float(weights.get('a_share_equity') or 0) * 100, suffix='%')} | "
+                f"{_fmt(float(weights.get('us_equity') or 0) * 100, suffix='%')} | "
+                f"{_fmt(float(weights.get('gold') or 0) * 100, suffix='%')} | "
+                f"{_fmt(float(weights.get('a_bond') or 0) * 100, suffix='%')} | "
+                f"{_fmt(summary.get('cagrPct'), suffix='%')} | "
+                f"{_fmt(summary.get('maxDrawdownPct'), suffix='%')} | "
+                f"{_fmt(summary.get('calmar'))} | "
+                f"{'通过' if point.get('targetPass') else '未通过'} |"
+            )
     lines.extend(
         [
             "",
@@ -2346,6 +2562,32 @@ def build_multi_asset_balanced_research(
     static_dca = simulate_dca_from_equity_curve(static_curve)
     static_dca.pop("accountCurve", None)
     static_rebalances = static_allocation["rebalances"]
+    static_grid_points = []
+    for grid_point in build_static_weight_grid():
+        if grid_point["isBaseline"]:
+            grid_run = static_allocation
+        else:
+            grid_run = simulate_static_allocation_benchmark(
+                cny_frames,
+                asset_metadata,
+                start_date,
+                end_date,
+                simulation_cache=simulation_cache,
+                category_weights=grid_point["weights"],
+            )
+        static_grid_points.append(
+            {
+                **grid_point,
+                "summary": summarize_equity_curve(
+                    grid_run["equityCurve"],
+                    include_rolling=False,
+                ),
+                "costPaid": grid_run["costPaid"],
+                "rebalanceCount": len(grid_run["rebalances"]),
+                "turnover": _turnover_stats(grid_run["rebalances"]),
+            }
+        )
+    static_weight_stability = summarize_static_weight_stability(static_grid_points)
     static_reference = next(
         row
         for row in variants
@@ -2433,7 +2675,11 @@ def build_multi_asset_balanced_research(
         _run_existing_global_rs(raw_frames, data_dir, a_share_symbols, start_date, end_date),
     ]
 
-    recommendation, stability = _recommend_candidate(variants, benchmarks)
+    recommendation, stability = _recommend_candidate(
+        variants,
+        benchmarks,
+        static_weight_stability=static_weight_stability,
+    )
     cost_sensitivity = []
     fx_sensitivity = []
     selected = next(
@@ -2580,6 +2826,7 @@ def build_multi_asset_balanced_research(
         "costSensitivity": cost_sensitivity,
         "fxSensitivity": fx_sensitivity,
         "parameterMatrix": parameter_matrix,
+        "staticWeightStability": static_weight_stability,
         "stability": stability,
         "recommendation": recommendation,
     }
