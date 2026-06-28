@@ -1,0 +1,39 @@
+{
+  "sourceRepository": "xquant",
+  "sourceCommit": "1d1b36e0fd22239767d3e2293f750ce7a01ffb61",
+  "sourceFiles": [
+    "docs/notes/q10-live-readiness-stress-review.md",
+    "outputs/q10-live-readiness-stress/latest_signal_summary.csv",
+    "outputs/q10-live-readiness-stress/latest_target_weights.csv",
+    "dashboard/public/data/strategies/btc-supertrend-satellite/paper.json"
+  ],
+  "originalScheduleAnchor": "2016-06-21",
+  "frozenReferenceSignalDate": "2026-06-15",
+  "marketDataDate": "2026-06-26",
+  "parameters": {
+    "btcCap": 0.075,
+    "riskParityWindow": 20,
+    "atrWindow": 10,
+    "atrMode": "sma",
+    "multiplier": 3.0,
+    "rebalanceSessions": 10
+  },
+  "latestObservation": {
+    "btcClose": 60016.4296875,
+    "btcSupertrendLine": 67583.05625,
+    "btcSupertrendOn": false
+  },
+  "formalSignal": {
+    "signalDate": "2026-06-15",
+    "btcClose": 66289.5,
+    "btcSupertrendLine": 70642.562890625,
+    "btcSupertrendOn": false
+  },
+  "targetWeights": {
+    "510300.SS": 0.4250033796975373,
+    "513100.SS": 0.2024960247289522,
+    "518880.SS": 0.29750059557351055,
+    "BTC-USD": 0.0,
+    "CASH": 0.075
+  }
+}

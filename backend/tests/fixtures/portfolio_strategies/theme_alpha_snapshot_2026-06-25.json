@@ -1,0 +1,60 @@
+{
+  "sourceRepository": "xquant",
+  "sourceCommit": "1d1b36e0fd22239767d3e2293f750ce7a01ffb61",
+  "sourceFiles": [
+    "docs/notes/theme-alpha-q8-signal-live-readiness-review.md",
+    "docs/notes/theme-alpha-q12-long-sample-proxy-validation-review.md",
+    "outputs/theme-alpha-q8-signal-live-readiness/latest_target_weights.csv",
+    "outputs/theme-alpha-q8-signal-live-readiness/latest_sleeve_weights.csv",
+    "outputs/theme-alpha-q8-signal-live-readiness/paper_tracking_snapshot.csv",
+    "dashboard/public/data/strategies/theme-alpha-core80-lvt20-def200-cash/paper.json"
+  ],
+  "marketDataDate": "2026-06-26",
+  "signalDate": "2026-06-25",
+  "parameters": {
+    "coreAllocation": 0.8,
+    "lvtAllocation": 0.2,
+    "maWindow": 60,
+    "momentumWindow": 63,
+    "volatilityWindow": 60,
+    "topN": 3,
+    "riskParityWindow": 20,
+    "singleAssetCap": 0.5,
+    "defenseMaWindow": 200
+  },
+  "selectedLvt": [
+    "512880.SS",
+    "513100.SS",
+    "515880.SS"
+  ],
+  "coreRiskOn": {
+    "510300.SS": true,
+    "513100.SS": true
+  },
+  "coreSleeveWeights": {
+    "510300.SS": 0.42255540630710464,
+    "513100.SS": 0.24907641917072237,
+    "518880.SS": 0.3283681745221729,
+    "CASH": 0.0
+  },
+  "lvtSleeveWeights": {
+    "512880.SS": 0.37852805267769923,
+    "513100.SS": 0.3735484699611435,
+    "515880.SS": 0.24792347736115733,
+    "CASH": 0.0
+  },
+  "targetWeights": {
+    "510300.SS": 0.33804432504568377,
+    "513100.SS": 0.2739708293288067,
+    "518880.SS": 0.26269453961773837,
+    "512400.SS": 0.0,
+    "159995.SZ": 0.0,
+    "515880.SS": 0.049584695472231474,
+    "510880.SS": 0.0,
+    "159930.SZ": 0.0,
+    "512880.SS": 0.07570561053553987,
+    "513180.SS": 0.0,
+    "512170.SS": 0.0,
+    "CASH": 0.0
+  }
+}

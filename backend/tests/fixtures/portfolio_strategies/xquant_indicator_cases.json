@@ -1,0 +1,29 @@
+{
+  "sourceRepository": "xquant",
+  "sourceCommit": "1d1b36e0fd22239767d3e2293f750ce7a01ffb61",
+  "sourceFiles": [
+    "src/xquant/indicators.py",
+    "tests/test_indicators.py",
+    "research/notebooks/q10-live-readiness-stress-practice.ipynb"
+  ],
+  "cases": [
+    {
+      "name": "uptrend",
+      "high": [10, 11, 12, 13, 14, 15],
+      "low": [9, 10, 11, 12, 13, 14],
+      "close": [9.5, 10.5, 11.5, 12.5, 13.5, 14.5],
+      "atrWindow": 2,
+      "multiplier": 1.0,
+      "direction": [false, false, false, true, true, true]
+    },
+    {
+      "name": "whipsaw",
+      "high": [101, 103, 105, 104, 102, 99, 97, 100, 104, 108, 106, 102],
+      "low": [99, 100, 102, 101, 98, 95, 93, 96, 100, 104, 101, 97],
+      "close": [100, 102, 104, 102, 99, 96, 95, 99, 103, 107, 102, 98],
+      "atrWindow": 3,
+      "multiplier": 1.5,
+      "direction": [false, false, false, false, false, false, false, false, true, true, true, false]
+    }
+  ]
+}
