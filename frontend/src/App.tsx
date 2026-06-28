@@ -8,6 +8,7 @@ const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m =
 const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').then(m => ({ default: m.WeeklyBreakoutPage })));
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
 const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
+const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -35,10 +36,11 @@ const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '�
 const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
 const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 const trendOrder = ['强势多头', '回调多头', '震荡', '潜在转空', '反弹空头', '强势空头', '潜在转多'];
-type AppTab = 'watchlist' | 'rs' | 'wbb' | 'st' | 'history';
+type AppTab = 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio';
 
 const pathToTab = (pathname: string): AppTab => {
   if (pathname === '/history-trades') return 'history';
+  if (pathname === '/portfolio-strategies') return 'portfolio';
   return 'st';
 };
 
@@ -234,7 +236,15 @@ function App() {
 
   const handleTabChange = useCallback((tab: AppTab) => {
     setActiveTab(tab);
-    const nextPath = tab === 'history' ? '/history-trades' : '/';
+    const pathMap: Record<AppTab, string> = {
+      watchlist: '/',
+      rs: '/',
+      wbb: '/',
+      st: '/',
+      history: '/history-trades',
+      portfolio: '/portfolio-strategies',
+    };
+    const nextPath = pathMap[tab];
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, '', nextPath);
     }
@@ -670,6 +680,10 @@ function App() {
       ) : activeTab === 'history' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
           <HistoryTradesPage />
+        </Suspense>
+      ) : activeTab === 'portfolio' ? (
+        <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
+          <PortfolioStrategiesPage />
         </Suspense>
       ) : (
       <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">

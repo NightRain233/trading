@@ -93,6 +93,50 @@
         "alias": "农业银行"
       },
       {
+        "symbol": "510300.SS",
+        "alias": "沪深300ETF"
+      },
+      {
+        "symbol": "513100.SS",
+        "alias": "纳指100ETF"
+      },
+      {
+        "symbol": "518880.SS",
+        "alias": "黄金ETF"
+      },
+      {
+        "symbol": "512400.SS",
+        "alias": "有色金属ETF"
+      },
+      {
+        "symbol": "159995.SZ",
+        "alias": "芯片ETF"
+      },
+      {
+        "symbol": "515880.SS",
+        "alias": "通信ETF"
+      },
+      {
+        "symbol": "510880.SS",
+        "alias": "红利ETF"
+      },
+      {
+        "symbol": "159930.SZ",
+        "alias": "能源ETF"
+      },
+      {
+        "symbol": "512880.SS",
+        "alias": "证券ETF"
+      },
+      {
+        "symbol": "513180.SS",
+        "alias": "恒生科技ETF"
+      },
+      {
+        "symbol": "512170.SS",
+        "alias": "医疗ETF"
+      },
+      {
         "symbol": "515070.SS",
         "alias": "AI ETF"
       },

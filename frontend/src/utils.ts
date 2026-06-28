@@ -271,6 +271,66 @@ export async function fetchHistoryTrades(params: {
   return await response.json();
 }
 
+import type {
+  PortfolioLedgerEvents,
+  PortfolioNavSeries,
+  PortfolioRebalanceDiff,
+  PortfolioSnapshot,
+  PortfolioStrategyItem,
+  PortfolioTargetWeights,
+} from './types';
+
+export async function fetchPortfolioStrategies(): Promise<PortfolioStrategyItem[]> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies`);
+  if (!response.ok) return [];
+  return await response.json();
+}
+
+export async function fetchPortfolioSnapshot(strategyId: string): Promise<PortfolioSnapshot | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/snapshot`);
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function refreshPortfolioStrategy(strategyId: string): Promise<PortfolioSnapshot | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/refresh`, {
+    method: 'POST',
+  });
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchPortfolioTargetWeights(strategyId: string): Promise<PortfolioTargetWeights | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/target-weights`);
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchPortfolioRebalanceDiff(strategyId: string): Promise<PortfolioRebalanceDiff | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/rebalance-diff`);
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchPortfolioLedger(
+  strategyId: string,
+  cursor?: number | null,
+): Promise<PortfolioLedgerEvents | null> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor != null) params.set('cursor', String(cursor));
+  const response = await fetch(
+    `${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/ledger?${params.toString()}`
+  );
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchPortfolioNav(strategyId: string): Promise<PortfolioNavSeries | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/nav`);
+  if (!response.ok) return null;
+  return await response.json();
+}
+
 export async function fetchHistoryTradeSymbols(): Promise<HistoryTradeSymbolOption[]> {
   try {
     const response = await fetch(`${API_BASE_URL}/history-trades/symbols`);

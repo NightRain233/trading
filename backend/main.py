@@ -35,6 +35,13 @@ from analysis import (
     refresh_symbols_async,
     refresh_symbols_sync_with_timeout,
 )
+from portfolio_strategies.registry import (
+    UnknownStrategyError,
+    ComparisonStrategyError,
+    list_strategies as list_portfolio_strategies,
+)
+from portfolio_strategies.service import PortfolioStrategyService
+from portfolio_strategies import api_models as pm
 import json
 import os
 import sqlite3
@@ -82,6 +89,19 @@ HISTORY_TRADES_CACHE_FILE = "backtest_results/history_trades_cache.sqlite"
 PREWARM_HOURS = (9, 12, 15, 21)
 PREWARM_TZ = ZoneInfo("Asia/Shanghai")
 COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
+PORTFOLIO_PAPER_DB = "backtest_results/portfolio_paper.sqlite"
+
+_portfolio_service: PortfolioStrategyService | None = None
+
+
+def _get_portfolio_service() -> PortfolioStrategyService:
+    global _portfolio_service
+    if _portfolio_service is None:
+        _portfolio_service = PortfolioStrategyService(
+            data_dir=DATA_DIR,
+            db_path=PORTFOLIO_PAPER_DB,
+        )
+    return _portfolio_service
 
 class UpdateAliasRequest(BaseModel):
     alias: str
@@ -1808,6 +1828,77 @@ def refresh_watchlist_background():
         except Exception as e:
             logger.error(f"==> [后台预热] 作业出错: {e}")
             time.sleep(30)
+
+# ---- Portfolio Strategy Paper Tracking Endpoints ----
+
+@app.get("/api/portfolio-strategies", response_model=list[pm.StrategyListItem])
+def api_list_portfolio_strategies():
+    return _get_portfolio_service().list_strategies()
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/snapshot", response_model=pm.SnapshotResponse)
+def api_portfolio_snapshot(strategy_id: str):
+    try:
+        return _get_portfolio_service().get_snapshot(strategy_id)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/target-weights", response_model=pm.TargetWeightsResponse)
+def api_portfolio_target_weights(strategy_id: str):
+    try:
+        return _get_portfolio_service().target_weights(strategy_id)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/rebalance-diff", response_model=pm.RebalanceDiffResponse)
+def api_portfolio_rebalance_diff(strategy_id: str):
+    try:
+        return _get_portfolio_service().rebalance_diff(strategy_id)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/ledger", response_model=pm.LedgerEventsResponse)
+def api_portfolio_ledger(
+    strategy_id: str,
+    limit: int = 50,
+    cursor: int | None = None,
+):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
+    try:
+        return _get_portfolio_service().ledger_events(strategy_id, limit=limit, cursor=cursor)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ComparisonStrategyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/nav", response_model=pm.NavSeriesResponse)
+def api_portfolio_nav(
+    strategy_id: str,
+    start: str | None = None,
+    end: str | None = None,
+):
+    try:
+        return _get_portfolio_service().nav_series(strategy_id, start=start, end=end)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ComparisonStrategyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/api/portfolio-strategies/{strategy_id}/refresh", response_model=pm.SnapshotResponse)
+def api_portfolio_refresh(strategy_id: str):
+    try:
+        return _get_portfolio_service().refresh(strategy_id)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ComparisonStrategyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
 
 @app.on_event("startup")
 async def startup_event():

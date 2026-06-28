@@ -27,8 +27,8 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history';
-  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history') => void;
+  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio';
+  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -71,7 +71,9 @@ export const Header: React.FC<HeaderProps> = ({
             ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-300"
             : tab === 'history'
               ? "bg-sky-500/10 border-sky-500/40 text-sky-300"
-              : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
+              : tab === 'portfolio'
+                ? "bg-violet-500/10 border-violet-500/40 text-violet-300"
+                : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
       : "btn-glass text-zinc-400 hover:text-zinc-200"
   );
 
@@ -111,6 +113,9 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             <button onClick={() => onTabChange('history')} className={tabClass('history')} title="历史买卖点复盘">
               复盘
+            </button>
+            <button onClick={() => onTabChange('portfolio')} className={tabClass('portfolio')} title="组合策略">
+              组合
             </button>
           </nav>
 

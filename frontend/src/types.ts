@@ -177,3 +177,137 @@ export interface HistoryTradeSymbolOption {
   cachedAt?: string | null;
   cacheCount: number;
 }
+
+// Portfolio Strategy Types
+
+export interface PortfolioStrategyItem {
+  strategyId: string;
+  version: string;
+  displayName: string;
+  description: string;
+  mode: 'paper' | 'comparison';
+  execution: string;
+  baseCurrency: string;
+  initialNav: number;
+  paperEnabled: boolean;
+  bootstrapped: boolean;
+  bootstrapSignalDate?: string | null;
+  bootstrapValuationDate?: string | null;
+}
+
+export interface PortfolioWeightItem {
+  symbol: string;
+  weight: number;
+  sleeve: string;
+  reason: string;
+}
+
+export interface PortfolioPositionItem {
+  symbol: string;
+  weight: number;
+  quantity: number;
+  price: number | null;
+  value: number;
+}
+
+export interface PortfolioDiagnosticItem {
+  code: string;
+  message: string;
+  symbol?: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface PortfolioAssetMeta {
+  symbol: string;
+  alias: string;
+  sleeve: string;
+  syntheticProxy: boolean;
+}
+
+export interface PortfolioSnapshot {
+  strategyId: string;
+  strategyVersion: string;
+  state: string;
+  assets: PortfolioAssetMeta[];
+  dates: {
+    marketDataDate: string | null;
+    signalDate: string | null;
+    executionDate: string | null;
+    nextCheck: string | null;
+  };
+  diagnostics: PortfolioDiagnosticItem[];
+  observation: {
+    asOfDate: string | null;
+    state: string | null;
+    reason: string | null;
+    values: Record<string, unknown>;
+  };
+  currentWeights: PortfolioPositionItem[];
+  desiredWeights: PortfolioWeightItem[];
+  executableWeights: PortfolioWeightItem[];
+  deltaWeights: Array<{ symbol: string; currentWeight: number; desiredWeight: number; delta: number }>;
+  sleeveWeights: Record<string, PortfolioWeightItem[]>;
+  nav: {
+    valuationDate?: string | null;
+    grossNav?: number | null;
+    netNav?: number | null;
+    cash?: number | null;
+    dailyReturn?: number | null;
+    cumulativeReturn?: number | null;
+    drawdown?: number | null;
+  };
+  ledger: {
+    status: string;
+    rebalanceId?: number | null;
+    signalDate?: string | null;
+  };
+  calcError?: string | null;
+}
+
+export interface PortfolioTargetWeights {
+  strategyId: string;
+  desired: PortfolioWeightItem[];
+  executable: PortfolioWeightItem[];
+}
+
+export interface PortfolioDiffRow {
+  symbol: string;
+  currentWeight: number;
+  desiredWeight: number;
+  delta: number;
+}
+
+export interface PortfolioRebalanceDiff {
+  strategyId: string;
+  rows: PortfolioDiffRow[];
+}
+
+export interface PortfolioLedgerEvent {
+  type: string;
+  id: number;
+  eventDate: string | null;
+  state: string | null;
+  reason: string | null;
+  createdAt: string | null;
+}
+
+export interface PortfolioLedgerEvents {
+  strategyId: string;
+  events: PortfolioLedgerEvent[];
+  nextCursor: number | null;
+}
+
+export interface PortfolioNavPoint {
+  valuationDate: string;
+  grossNav: number;
+  netNav: number;
+  cash: number;
+  dailyReturn: number;
+  cumulativeReturn: number;
+  drawdown: number;
+}
+
+export interface PortfolioNavSeries {
+  strategyId: string;
+  points: PortfolioNavPoint[];
+}
