@@ -229,7 +229,8 @@ def test_supertrend_scan_cache_invalidates_when_daily_parquet_mtime_changes(monk
 
 
 def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
-    index = pd.to_datetime(["2026-05-29", "2026-06-01", "2026-06-02"])
+    latest_date = pd.Timestamp.now().normalize()
+    index = pd.date_range(end=latest_date, periods=3, freq="D")
     daily = pd.DataFrame(
         {
             "Open": [9.0, 10.0, 11.0],
@@ -268,7 +269,7 @@ def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
     result = main.supertrend_scan()
 
     item = result[0]
-    assert item["latestDataDate"] == "2026-06-02"
+    assert item["latestDataDate"] == latest_date.date().isoformat()
     assert item["dataUpdatedAt"] is not None
     assert item["cacheStale"] is False
     assert item["dataStale"] is False

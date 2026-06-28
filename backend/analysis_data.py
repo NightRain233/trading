@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -6,6 +7,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 import pandas_ta as ta
+import requests
 import yfinance as yf
 
 from analysis_constants import (
@@ -22,12 +24,181 @@ from analysis_cache import (
 
 logger = logging.getLogger(__name__)
 
+A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v1"
+PRICE_JUMP_THRESHOLD = 0.40
+
 
 def _find_col(columns, prefix: str, exclude_prefixes=()) -> str | None:
     for c in columns:
         if c.startswith(prefix) and not any(c.startswith(e) for e in exclude_prefixes):
             return c
     return None
+
+
+def _is_a_share_symbol(symbol: str) -> bool:
+    normalized = symbol.upper()
+    code = normalized.split(".", 1)[0]
+    return (
+        normalized.endswith((".SS", ".SZ"))
+        and code.isdigit()
+        and len(code) == 6
+    )
+
+
+def _eastmoney_secid(symbol: str) -> Optional[str]:
+    normalized = symbol.upper()
+    code = normalized.split(".", 1)[0]
+    if normalized.endswith(".SS"):
+        return f"1.{code}"
+    if normalized.endswith(".SZ"):
+        return f"0.{code}"
+    return None
+
+
+def _fetch_eastmoney_daily(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+) -> Optional[pd.DataFrame]:
+    secid = _eastmoney_secid(symbol)
+    if not secid:
+        return None
+
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": "101",
+        "fqt": "1",
+        "beg": pd.Timestamp(start).strftime("%Y%m%d"),
+        "end": pd.Timestamp(end).strftime("%Y%m%d"),
+    }
+    payload = None
+    errors = []
+    for trust_env in (False, True):
+        with requests.Session() as session:
+            session.trust_env = trust_env
+            try:
+                response = session.get(
+                    "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+                    params=params,
+                    timeout=8,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                break
+            except Exception as exc:
+                errors.append(exc)
+
+    if payload is None:
+        logger.warning(
+            f"Eastmoney 日线下载失败 {symbol}: "
+            f"{errors[-1] if errors else 'unknown error'}"
+        )
+        return None
+
+    rows = (payload.get("data") or {}).get("klines") or []
+    records = []
+    for raw_row in rows:
+        parts = str(raw_row).split(",")
+        if len(parts) < 6:
+            continue
+        try:
+            records.append({
+                "Date": pd.to_datetime(parts[0]),
+                "Open": float(parts[1]),
+                "Close": float(parts[2]),
+                "High": float(parts[3]),
+                "Low": float(parts[4]),
+                "Volume": float(parts[5]) * 100,
+            })
+        except (TypeError, ValueError):
+            continue
+
+    if not records:
+        return None
+
+    df = pd.DataFrame.from_records(records).set_index("Date").sort_index()
+    return _drop_incomplete_ohlcv_rows(df)
+
+
+def _has_valid_price_history(
+    df: Optional[pd.DataFrame],
+    symbol: str,
+) -> bool:
+    if df is None or df.empty:
+        logger.warning(f"{symbol}: 行情为空，拒绝写入缓存")
+        return False
+
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        logger.warning(f"{symbol}: 行情缺少字段 {missing}，拒绝写入缓存")
+        return False
+
+    prices = df[["Open", "High", "Low", "Close"]]
+    if prices.isna().any().any() or (prices <= 0).any().any():
+        logger.warning(f"{symbol}: 行情包含空值或非正价格，拒绝写入缓存")
+        return False
+
+    invalid_ohlc = (
+        (df["High"] < df[["Open", "Close", "Low"]].max(axis=1))
+        | (df["Low"] > df[["Open", "Close", "High"]].min(axis=1))
+    )
+    if invalid_ohlc.any():
+        logger.warning(f"{symbol}: OHLC 关系异常，拒绝写入缓存")
+        return False
+
+    ordered_close = df.sort_index()["Close"]
+    jumps = ordered_close.pct_change().abs()
+    suspicious = jumps[jumps > PRICE_JUMP_THRESHOLD]
+    if not suspicious.empty:
+        details = ", ".join(
+            f"{pd.Timestamp(index).date()}={value * 100:.1f}%"
+            for index, value in suspicious.items()
+        )
+        logger.warning(f"{symbol}: 检测到异常价格跳变 {details}，拒绝写入缓存")
+        return False
+    return True
+
+
+def _source_metadata_path(file_path: str) -> str:
+    return f"{file_path}.source.json"
+
+
+def _has_current_data_source(file_path: str, symbol: str) -> bool:
+    if not _is_a_share_symbol(symbol):
+        return True
+    try:
+        with open(_source_metadata_path(file_path), encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        return (
+            metadata.get("symbol") == symbol.upper()
+            and metadata.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _write_data_source_metadata(file_path: str, symbol: str) -> None:
+    if not _is_a_share_symbol(symbol):
+        return
+    metadata_path = _source_metadata_path(file_path)
+    temporary_path = f"{metadata_path}.tmp"
+    payload = {
+        "symbol": symbol.upper(),
+        "sourceVersion": A_SHARE_DATA_SOURCE_VERSION,
+    }
+    with open(temporary_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+    os.replace(temporary_path, metadata_path)
+
+
+def _invalidate_data_source_metadata(file_path: str) -> None:
+    try:
+        os.remove(_source_metadata_path(file_path))
+    except FileNotFoundError:
+        pass
 
 
 def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame], Optional[datetime]]:
@@ -44,6 +215,7 @@ def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame
         df = _drop_incomplete_ohlcv_rows(df)
         if df is None or df.empty:
             return None, None
+        df = df.sort_index()
         return df, df.index[-1]
     except Exception as e:
         logger.error(f"读取 {symbol} 的 Parquet 文件失败: {e}")
@@ -51,6 +223,17 @@ def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame
 
 
 def _fetch_new_data(symbol: str, last_update: Optional[datetime], now: datetime) -> Optional[pd.DataFrame]:
+    if _is_a_share_symbol(symbol):
+        fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
+        new_df = _fetch_eastmoney_daily(
+            symbol,
+            fetch_start,
+            now + timedelta(days=1),
+        )
+        if not _has_valid_price_history(new_df, symbol):
+            return None
+        return new_df
+
     with global_download_lock:
         ticker = yf.Ticker(symbol)
         if last_update is not None:
@@ -76,7 +259,7 @@ def _merge_and_clean_data(df_local: Optional[pd.DataFrame], new_df: pd.DataFrame
         df = new_df
     df = _drop_incomplete_ohlcv_rows(df)
     earliest_allowed = now - timedelta(days=DATA_RETENTION_DAYS)
-    return df[df.index >= earliest_allowed]
+    return df[df.index >= earliest_allowed].sort_index()
 
 
 def _detect_unadjusted_splits(df: pd.DataFrame, symbol: str) -> None:
@@ -243,13 +426,19 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     symbol = symbol.upper()
     file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
     now = datetime.now()
+    is_a_share = _is_a_share_symbol(symbol)
+    source_refreshed = False
 
     with get_symbol_lock(symbol):
         df_local, last_update = _load_local_data(file_path, symbol)
 
         needs_fetch = True
         if df_local is not None and last_update is not None:
-            if time.time() - os.path.getmtime(file_path) < CACHE_DURATION_SECONDS:
+            source_is_current = _has_current_data_source(file_path, symbol)
+            if (
+                time.time() - os.path.getmtime(file_path) < CACHE_DURATION_SECONDS
+                and source_is_current
+            ):
                 needs_fetch = False
 
         if not needs_fetch and df_local is not None and 'EMA20' in df_local.columns and 'EMA5' in df_local.columns:
@@ -260,14 +449,27 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
             try:
                 new_df = _fetch_new_data(symbol, last_update, now)
                 if new_df is not None:
-                    if df is not None:
-                        ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
-                        df = df[ohlcv_cols]
-                    df = _merge_and_clean_data(df, new_df, now)
+                    if is_a_share:
+                        df = _merge_and_clean_data(None, new_df, now)
+                        source_refreshed = True
+                    else:
+                        if df is not None:
+                            ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
+                            df = df[ohlcv_cols]
+                        df = _merge_and_clean_data(df, new_df, now)
                     _detect_unadjusted_splits(df, symbol)
                     logger.info(f"获取 {symbol} 新数据成功, {new_df.shape[0]} 条新数据, {df.shape[0]} 条总数据")
             except Exception as e:
                 logger.error(f"获取 {symbol} 数据失败: {e}")
+
+            if (
+                is_a_share
+                and not source_refreshed
+                and df_local is not None
+                and 'EMA20' in df_local.columns
+                and 'EMA5' in df_local.columns
+            ):
+                return df_local.copy(), _calculate_weekly_indicators(df_local.copy())
 
         if df is None or df.empty:
             return None
@@ -276,4 +478,6 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     df = _calculate_daily_indicators(df)
     with get_symbol_lock(symbol):
         df.to_parquet(file_path)
+        if source_refreshed:
+            _write_data_source_metadata(file_path, symbol)
     return df, _calculate_weekly_indicators(df)

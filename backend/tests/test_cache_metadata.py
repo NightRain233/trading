@@ -186,7 +186,7 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertIn("TEST", analysis._memory_cache)
             self.assertEqual(analysis._memory_cache["TEST"]["timestamp"], old_mtime)
 
-    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "002119.SZ", "price": 10.7})
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "TEST", "price": 10.7})
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
@@ -200,7 +200,7 @@ class CacheMetadataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             index = pd.date_range("2026-01-01", periods=3, freq="B")
             columns = pd.MultiIndex.from_product(
-                [["002119.SZ"], ["Open", "High", "Low", "Close", "Volume"]],
+                [["TEST"], ["Open", "High", "Low", "Close", "Volume"]],
                 names=["Ticker", "Price"],
             )
             raw_download_df = pd.DataFrame(
@@ -221,11 +221,10 @@ class CacheMetadataTests(unittest.TestCase):
 
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_eastmoney_daily", return_value=None):
-                batch_fetch_and_update(["002119.SZ"])
+                 patch.object(analysis, "DATA_DIR", tmpdir):
+                batch_fetch_and_update(["TEST"])
 
-                stored = pd.read_parquet(Path(tmpdir) / "002119.SZ.parquet")
+                stored = pd.read_parquet(Path(tmpdir) / "TEST.parquet")
 
             self.assertIn("Close", stored.columns)
             self.assertAlmostEqual(float(stored["Close"].iloc[-1]), 10.7)
@@ -276,7 +275,7 @@ class CacheMetadataTests(unittest.TestCase):
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_patches_a_share_yfinance_daily_gap_with_eastmoney(
+    def test_batch_fetch_replaces_a_share_history_with_eastmoney(
         self,
         mock_download,
         mock_daily_indicators,
@@ -324,7 +323,7 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -333,12 +332,13 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertIn("2026-06-02", stored_dates)
             self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
             mock_eastmoney.assert_called_once()
+            mock_download.assert_not_called()
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.182})
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_patches_a_share_when_yfinance_lags_latest_business_day(
+    def test_batch_fetch_uses_eastmoney_when_yahoo_would_lag(
         self,
         mock_download,
         mock_daily_indicators,
@@ -392,7 +392,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -400,12 +400,13 @@ class CacheMetadataTests(unittest.TestCase):
             stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
             self.assertIn("2026-06-02", stored_dates)
             mock_eastmoney.assert_called_once()
+            mock_download.assert_not_called()
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_patches_a_share_gap_after_merging_local_cache(
+    def test_batch_fetch_replaces_local_a_share_cache_instead_of_merging(
         self,
         mock_download,
         mock_daily_indicators,
@@ -460,7 +461,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -470,12 +471,13 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertIn("2026-06-02", stored_dates)
             self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
             mock_eastmoney.assert_called_once()
+            mock_download.assert_not_called()
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_starts_from_first_local_gap_when_latest_bar_exists(
+    def test_batch_fetch_requests_full_a_share_refresh_when_local_gap_exists(
         self,
         mock_download,
         mock_daily_indicators,
@@ -547,15 +549,92 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_eastmoney_daily", create=True, return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
 
-            fallback_start = pd.Timestamp(mock_eastmoney.call_args.args[1]).date()
-            self.assertLessEqual(fallback_start.isoformat(), "2026-06-02")
+            mock_eastmoney.assert_called_once()
             stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
             self.assertIn("2026-06-02", stored_dates)
+            mock_download.assert_not_called()
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "515880.SS", "price": 1.08})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_uses_eastmoney_without_yfinance_for_a_share(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            eastmoney_df = _build_daily_df()[["Open", "High", "Low", "Close", "Volume"]]
+            weekly_df = _build_weekly_df()
+            mock_daily_indicators.side_effect = lambda df: df.assign(
+                EMA5=df["Close"],
+                EMA20=df["Close"],
+            )
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_fetch:
+                batch_fetch_and_update(["515880.SS"])
+
+            mock_fetch.assert_called_once()
+            mock_download.assert_not_called()
+            stored = pd.read_parquet(Path(tmpdir) / "515880.SS.parquet")
+            self.assertEqual(list(stored.index), list(eastmoney_df.index))
+            self.assertTrue(
+                analysis_data._has_current_data_source(
+                    str(Path(tmpdir) / "515880.SS.parquet"),
+                    "515880.SS",
+                )
+            )
+
+    @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "515880.SS", "price": 1.08})
+    @patch.object(analysis, "_calculate_weekly_indicators")
+    @patch.object(analysis, "_calculate_daily_indicators")
+    @patch.object(analysis.yf, "download")
+    def test_batch_fetch_migrates_fresh_legacy_a_share_cache(
+        self,
+        mock_download,
+        mock_daily_indicators,
+        mock_weekly_indicators,
+        _mock_summary,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy_df = _build_daily_df()
+            replacement = legacy_df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            replacement["Close"] += 0.5
+            replacement["Open"] = replacement["Close"] - 0.01
+            replacement["High"] = replacement["Close"] + 0.02
+            replacement["Low"] = replacement["Close"] - 0.02
+            weekly_df = _build_weekly_df()
+            daily_path = Path(tmpdir) / "515880.SS.parquet"
+            weekly_path = Path(tmpdir) / "515880.SS_weekly.parquet"
+            legacy_df.to_parquet(daily_path)
+            weekly_df.to_parquet(weekly_path)
+            mock_daily_indicators.side_effect = lambda df: df.assign(
+                EMA5=df["Close"],
+                EMA20=df["Close"],
+            )
+            mock_weekly_indicators.return_value = weekly_df
+
+            with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
+                 patch.object(analysis_data, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "DATA_DIR", tmpdir), \
+                 patch.object(analysis, "_fetch_new_data", return_value=replacement) as mock_fetch:
+                batch_fetch_and_update(["515880.SS"])
+
+            mock_fetch.assert_called_once()
+            mock_download.assert_not_called()
+            stored = pd.read_parquet(daily_path)
+            self.assertAlmostEqual(float(stored["Close"].iloc[-1]), float(replacement["Close"].iloc[-1]))
 
 
 if __name__ == "__main__":
