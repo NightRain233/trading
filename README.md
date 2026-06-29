@@ -59,6 +59,37 @@ make deploy-images
 
 `Makefile.local` 已被 `.gitignore` 忽略，不会提交到仓库。
 
+### 行情数据源保护
+
+后端会对东方财富和 Yahoo Finance 分别执行跨进程串行、请求间隔、重复
+抑制、指数退避和熔断。默认预热时间为 Asia/Shanghai 的 12:00、21:00，
+与每日两次复盘节奏一致。
+
+运行状态可通过以下接口查看：
+
+```bash
+curl http://127.0.0.1:8000/api/data-sources/status
+```
+
+保护参数通过 `.env` 配置。可从模板开始：
+
+```bash
+cp .env.example .env
+```
+
+东方财富出口 IP 需要冷却时，不必关闭整个服务。设置：
+
+```text
+EASTMONEY_FETCH_ENABLED=false
+```
+
+然后重启后端。已有 parquet 缓存和 Yahoo 数据仍可使用；无缓存的 A 股请求
+会返回 HTTP 503，而不是错误的 404。保持禁用 24–48 小时后，将开关改回
+`true`，先请求一个标的并检查状态接口，确认成功后再允许观察列表预热。
+
+`EASTMONEY_PROXY_MODE` 仅接受 `direct` 或 `environment`。系统不会再在一次
+失败后自动从直连切换代理，避免把请求数量翻倍。
+
 ## 项目结构
 
 ```

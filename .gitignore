@@ -33,6 +33,7 @@ backend/tests/__pycache__/
 
 # --- Local Config ---
 Makefile.local
+.env
 
 # --- Personal Data ---
 backend/watchlist.json
