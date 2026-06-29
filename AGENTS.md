@@ -8,6 +8,10 @@ A trend trading system with real-time stock analysis and visualization. The appl
 
 **Architecture**: Full-stack application with Python FastAPI backend and React TypeScript frontend, containerized with Docker.
 
+## 复盘记录
+
+分析任何标的之前，先读取 `reviews/README.md` 了解复盘目录结构，然后检查最近 3 天复盘和相关品种页面。复盘目录使用 Obsidian 格式（wikilink 互联）。
+
 ## Commands
 
 ### Development
