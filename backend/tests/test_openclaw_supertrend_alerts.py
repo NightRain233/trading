@@ -52,7 +52,9 @@ def test_daily_brief_markdown_explains_prepare_watch_is_not_a_buy_signal():
 
     markdown = openclaw_supertrend_alerts.render_daily_brief_markdown(items, title="SuperTrend Daily")
 
-    assert "## 预备观察：周多日空，等待日线翻多" in markdown
+    assert "预备观察" in markdown
     assert "现在不买" in markdown
     assert "WAIT" in markdown
+    # Verify new header format with emoji
+    assert "## 👀 预备观察：周多日空，等待日线翻多" in markdown
 
