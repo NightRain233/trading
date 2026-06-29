@@ -34,7 +34,9 @@ from analysis import (
     get_cached_batch_summaries,
     refresh_symbols_async,
     refresh_symbols_sync_with_timeout,
+    get_data_source_status,
 )
+from data_source_guard import MarketDataUnavailableError
 from portfolio_strategies.registry import (
     UnknownStrategyError,
     ComparisonStrategyError,
@@ -424,9 +426,26 @@ def resolve_symbol(q: str = ""):
     return resolve_symbol_candidates(q)
 
 
+@app.get("/api/data-sources/status")
+def api_data_source_status():
+    return get_data_source_status()
+
+
 @app.get("/api/quote/{symbol}", response_model=StockResponse)
 def get_quote(symbol: str):
-    data = analyze_stock(symbol.upper())
+    try:
+        data = analyze_stock(symbol.upper())
+    except MarketDataUnavailableError as exc:
+        headers = (
+            {"Retry-After": str(exc.retry_after)}
+            if exc.retry_after is not None
+            else None
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers=headers,
+        ) from exc
     if not data:
         raise HTTPException(status_code=404, detail="Stock not found or insufficient data")
     return data

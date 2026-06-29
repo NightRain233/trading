@@ -62,6 +62,10 @@ class ProviderRequestError(ProviderError):
     pass
 
 
+class MarketDataUnavailableError(ProviderError):
+    pass
+
+
 def _default_state() -> dict:
     return {
         "lastAttemptAt": None,

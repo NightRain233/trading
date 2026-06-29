@@ -29,8 +29,10 @@ from analysis_cache import (
     _drop_incomplete_ohlcv_rows,
 )
 from data_source_guard import (
+    MarketDataUnavailableError,
     ProviderBlockingError,
     ProviderConfig,
+    ProviderError,
     ProviderGuard,
 )
 
@@ -66,6 +68,13 @@ yahoo_guard = ProviderGuard(
     ),
     state_dir=PROVIDER_STATE_DIR,
 )
+
+
+def get_data_source_status() -> dict:
+    return {
+        "eastmoney": eastmoney_guard.status(),
+        "yahoo": yahoo_guard.status(),
+    }
 
 
 def _find_col(columns, prefix: str, exclude_prefixes=()) -> str | None:
@@ -669,6 +678,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     is_a_share = _is_a_share_symbol(symbol)
     source_refreshed = False
     last_full_refresh_at = None
+    provider_error: Optional[ProviderError] = None
 
     with get_symbol_lock(symbol):
         df_local, last_update = _load_local_data(file_path, symbol)
@@ -717,6 +727,26 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
                         df = _merge_and_clean_data(df, new_df, now)
                     _detect_unadjusted_splits(df, symbol)
                     logger.info(f"获取 {symbol} 新数据成功, {new_df.shape[0]} 条新数据, {df.shape[0]} 条总数据")
+            except ProviderError as e:
+                provider_error = e
+                logger.warning(f"获取 {symbol} 数据源不可用: {e}")
+                refreshed_local, _ = _load_local_data(file_path, symbol)
+                stale_candidate = (
+                    refreshed_local
+                    if refreshed_local is not None
+                    else df_local
+                )
+                if (
+                    stale_candidate is not None
+                    and 'EMA20' in stale_candidate.columns
+                    and 'EMA5' in stale_candidate.columns
+                ):
+                    return (
+                        stale_candidate.copy(),
+                        _calculate_weekly_indicators(
+                            stale_candidate.copy()
+                        ),
+                    )
             except Exception as e:
                 logger.error(f"获取 {symbol} 数据失败: {e}")
 
@@ -730,6 +760,17 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
                 return df_local.copy(), _calculate_weekly_indicators(df_local.copy())
 
         if df is None or df.empty:
+            if provider_error is not None:
+                raise MarketDataUnavailableError(
+                    (
+                        f"{provider_error.provider or 'market data'} "
+                        f"is unavailable: {provider_error}"
+                    ),
+                    provider=provider_error.provider,
+                    key=symbol,
+                    category=provider_error.category,
+                    retry_after=provider_error.retry_after,
+                ) from provider_error
             return None
         df = df.copy()
 
