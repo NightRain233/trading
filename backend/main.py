@@ -1698,6 +1698,8 @@ def supertrend_scan(force: bool = False):
         weekly_st_val = None
         weekly_candles = []
         weekly_just_flipped = False
+        wcur_dir = 0
+        wprev_rows = None
         weekly_path = _st_path(sym, weekly=True)
         if os.path.exists(weekly_path):
             weekly = pd.read_parquet(weekly_path)
@@ -1725,6 +1727,36 @@ def supertrend_scan(force: bool = False):
                             weekly_state = "bear"
                         weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
                         weekly_candles = _to_candles(weekly, "_wst_val", "_wst_dir", 30)
+
+        # Weekly trend age (consecutive bars in current weekly ST direction)
+        weekly_trend_age_bars = 0
+        if wcur_dir is not None and wcur_dir != 0:
+            for wdir in reversed([int(r) for r in wprev_rows["_wst_dir"].tolist()]):
+                if wdir != wcur_dir:
+                    break
+                weekly_trend_age_bars += 1
+
+        # Quality indicators from daily parquet (already pre-computed)
+        def _fv(key, default=None):
+            val = last.get(key)
+            return float(val) if pd.notna(val) else default
+
+        indicators = {
+            "adx": _fv("ADX"),
+            "rsi7": _fv("RSI_7"),
+            "rsi14": _fv("RSI_14"),
+            "rsi21": _fv("RSI_21"),
+            "macdDif": _fv("MACD_DIF"),
+            "macdDea": _fv("MACD_DEA"),
+            "macdHist": _fv("MACD_Hist"),
+            "kdjK": _fv("K"),
+            "kdjD": _fv("D"),
+            "kdjJ": _fv("J"),
+            "bollUpper": _fv("BOLL_Upper"),
+            "bollMid": _fv("BOLL_Mid"),
+            "bollLower": _fv("BOLL_Lower"),
+            "atr": _fv("ATR"),
+        }
 
         alert = classify_supertrend_alert(
             state=state,
@@ -1755,6 +1787,8 @@ def supertrend_scan(force: bool = False):
             "dataStale": data_stale,
             "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
             "dataIntegrity": data_integrity,
+            "indicators": indicators,
+            "weeklyTrendAgeBars": weekly_trend_age_bars,
             **alert,
         }
 
