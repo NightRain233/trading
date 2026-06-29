@@ -44,6 +44,7 @@ from portfolio_strategies.service import PortfolioStrategyService
 from portfolio_strategies import api_models as pm
 import json
 import os
+import fcntl
 import sqlite3
 import uuid
 import time
@@ -55,6 +56,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
 from zoneinfo import ZoneInfo
+from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS
 
 # 获取日志记录器，用于在控制台输出信息
 logger = logging.getLogger(__name__)
@@ -86,12 +88,12 @@ app.add_middleware(
 WATCHLIST_FILE = str(Path(__file__).resolve().parent / "watchlist.json")
 RS_HOLDINGS_CACHE_FILE = "backtest_results/rs_holdings_cache.json"
 HISTORY_TRADES_CACHE_FILE = "backtest_results/history_trades_cache.sqlite"
-PREWARM_HOURS = (9, 12, 15, 21)
 PREWARM_TZ = ZoneInfo("Asia/Shanghai")
 COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
 PORTFOLIO_PAPER_DB = "backtest_results/portfolio_paper.sqlite"
 
 _portfolio_service: PortfolioStrategyService | None = None
+_prewarm_leader_handle = None
 
 
 def _get_portfolio_service() -> PortfolioStrategyService:
@@ -1832,7 +1834,7 @@ def _collect_watchlist_symbols() -> List[str]:
 
 
 def refresh_watchlist_background():
-    """后台任务：固定时点预热观察列表缓存（Asia/Shanghai 09/12/15/21）。"""
+    """后台任务：固定时点预热观察列表缓存。"""
     while True:
         try:
             now_local = datetime.now(PREWARM_TZ)
@@ -1851,7 +1853,6 @@ def refresh_watchlist_background():
                 triggered = refresh_symbols_async(
                     symbols,
                     reason="scheduled_prewarm",
-                    min_interval_seconds=0,
                 )
                 if triggered:
                     logger.info(f"==> [后台预热] 已提交 {len(symbols)} 只股票刷新任务。")
@@ -1862,6 +1863,44 @@ def refresh_watchlist_background():
         except Exception as e:
             logger.error(f"==> [后台预热] 作业出错: {e}")
             time.sleep(30)
+
+
+def _try_become_prewarm_leader(lock_path: Optional[str] = None) -> bool:
+    global _prewarm_leader_handle
+    if _prewarm_leader_handle is not None:
+        return False
+
+    resolved_path = lock_path or os.path.join(
+        DATA_DIR,
+        ".provider-state",
+        "prewarm-leader.lock",
+    )
+    os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
+    handle = open(resolved_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return False
+    _prewarm_leader_handle = handle
+    return True
+
+
+def _start_background_prewarm() -> bool:
+    if not BACKGROUND_PREWARM_ENABLED:
+        logger.info("==> [系统启动] 后台预热已禁用")
+        return False
+    if not _try_become_prewarm_leader():
+        logger.info("==> [系统启动] 当前 worker 非预热 leader")
+        return False
+    bg_thread = threading.Thread(
+        target=refresh_watchlist_background,
+        daemon=True,
+        name="watchlist-prewarm",
+    )
+    bg_thread.start()
+    logger.info("==> [系统启动] 当前 worker 已成为预热 leader")
+    return True
 
 # ---- Portfolio Strategy Paper Tracking Endpoints ----
 
@@ -1938,8 +1977,7 @@ def api_portfolio_refresh(strategy_id: str):
 async def startup_event():
     """系统启动时，启动后台维护线程"""
     logger.info("==> [系统启动] 正在启动后台数据管家...")
-    bg_thread = threading.Thread(target=refresh_watchlist_background, daemon=True)
-    bg_thread.start()
+    _start_background_prewarm()
 
 
 def main(argv: Optional[List[str]] = None) -> int:
