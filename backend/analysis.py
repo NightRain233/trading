@@ -37,7 +37,7 @@ from analysis_data import (  # noqa: F401
     _load_local_data, _fetch_new_data, _merge_and_clean_data,
     _is_a_share_symbol, _fetch_eastmoney_daily,
     _has_current_data_source, _write_data_source_metadata,
-    AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION,
+    AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION, yahoo_guard,
     _calculate_daily_indicators, _calculate_weekly_indicators, fetch_stock_data,
 )
 from analysis_strategy import (  # noqa: F401
@@ -53,6 +53,11 @@ from analysis_candles import (  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _yahoo_batch_request_key(symbols: list[str]) -> str:
+    normalized = sorted({symbol.upper() for symbol in symbols})
+    return f"batch:{','.join(normalized)}"
 
 
 def _normalize_downloaded_ohlcv_columns(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -281,32 +286,38 @@ def batch_fetch_and_update(symbols: list) -> dict:
             if has_new_symbol or earliest_update is None
             else earliest_update
         )
-        with global_download_lock:
-            try:
-                start_time = time.time()
-                logger.info(f"开始 Yahoo 下载 {len(yahoo_symbols)} 只股票: {yahoo_symbols}")
-                raw = yf.download(
-                    yahoo_symbols,
-                    start=fetch_start,
-                    end=fetch_end,
-                    interval="1d",
-                    group_by="ticker",
-                    threads=True,
-                )
-                logger.info(f"Yahoo 下载完成，耗时: {time.time() - start_time:.2f}s")
-                if raw is not None and not raw.empty:
-                    if len(yahoo_symbols) == 1:
-                        downloaded_data[yahoo_symbols[0]] = raw
-                    else:
-                        for sym in yahoo_symbols:
-                            try:
-                                sym_df = raw[sym].dropna(how='all')
-                                if not sym_df.empty:
-                                    downloaded_data[sym] = sym_df
-                            except Exception:
-                                pass
-            except Exception as e:
-                logger.error(f"Yahoo 批量下载失败: {e}")
+        try:
+            def download_yahoo_batch():
+                with global_download_lock:
+                    return yf.download(
+                        yahoo_symbols,
+                        start=fetch_start,
+                        end=fetch_end,
+                        interval="1d",
+                        group_by="ticker",
+                        threads=True,
+                    )
+
+            start_time = time.time()
+            logger.info(f"开始 Yahoo 下载 {len(yahoo_symbols)} 只股票: {yahoo_symbols}")
+            raw = yahoo_guard.call(
+                _yahoo_batch_request_key(yahoo_symbols),
+                download_yahoo_batch,
+            )
+            logger.info(f"Yahoo 下载完成，耗时: {time.time() - start_time:.2f}s")
+            if raw is not None and not raw.empty:
+                if len(yahoo_symbols) == 1:
+                    downloaded_data[yahoo_symbols[0]] = raw
+                else:
+                    for sym in yahoo_symbols:
+                        try:
+                            sym_df = raw[sym].dropna(how='all')
+                            if not sym_df.empty:
+                                downloaded_data[sym] = sym_df
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"Yahoo 批量下载失败: {e}")
 
     def process_new_symbol(item):
         symbol, df_local, _ = item

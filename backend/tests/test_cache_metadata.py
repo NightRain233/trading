@@ -15,6 +15,11 @@ from analysis import batch_fetch_and_update, get_cached_batch_summaries
 from main import build_cache_headers
 
 
+class _PassThroughGuard:
+    def call(self, _key, operation):
+        return operation()
+
+
 def _build_daily_df(periods: int = 60) -> pd.DataFrame:
     index = pd.date_range("2026-01-01", periods=periods, freq="B")
     close = pd.Series([1.0 + i * 0.01 for i in range(periods)], index=index)
@@ -62,6 +67,13 @@ def _build_weekly_df() -> pd.DataFrame:
 class CacheMetadataTests(unittest.TestCase):
     def setUp(self):
         analysis._memory_cache.clear()
+        self.yahoo_guard_patcher = patch.object(
+            analysis,
+            "yahoo_guard",
+            _PassThroughGuard(),
+        )
+        self.yahoo_guard_patcher.start()
+        self.addCleanup(self.yahoo_guard_patcher.stop)
 
     def test_build_cache_headers_uses_latest_data_timestamp_for_updated_at(self):
         latest_mtime = datetime(2026, 3, 11, 22, 3, 33, tzinfo=timezone.utc).timestamp()

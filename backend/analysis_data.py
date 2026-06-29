@@ -464,13 +464,23 @@ def _fetch_new_data(
             now,
         )
 
-    with global_download_lock:
-        ticker = yf.Ticker(symbol)
-        if last_update is not None:
-            new_df = ticker.history(start=last_update, end=now, interval="1d")
-        else:
+    def download_yahoo_history() -> pd.DataFrame:
+        with global_download_lock:
+            ticker = yf.Ticker(symbol)
+            if last_update is not None:
+                return ticker.history(
+                    start=last_update,
+                    end=now,
+                    interval="1d",
+                )
             fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-            new_df = ticker.history(start=fetch_start, end=now, interval="1d")
+            return ticker.history(
+                start=fetch_start,
+                end=now,
+                interval="1d",
+            )
+
+    new_df = yahoo_guard.call(symbol, download_yahoo_history)
 
     if new_df.empty:
         return None
