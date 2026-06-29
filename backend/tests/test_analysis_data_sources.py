@@ -3,8 +3,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
+import requests
 
 import analysis_data
+from data_source_guard import ProviderBlockingError
 
 
 def _ohlcv(index, close):
@@ -101,7 +104,7 @@ def test_non_a_share_does_not_require_source_metadata(tmp_path):
 
 
 def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
-    captured = {}
+    captured = {"sessions": 0, "guard_keys": []}
 
     class FakeResponse:
         def raise_for_status(self):
@@ -120,6 +123,9 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
     class FakeSession:
         trust_env = True
 
+        def __init__(self):
+            captured["sessions"] += 1
+
         def __enter__(self):
             return self
 
@@ -130,8 +136,28 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
             captured.update(url=url, params=params, timeout=timeout, trust_env=self.trust_env)
             return FakeResponse()
 
+    class FakeGuard:
+        def call(self, key, operation):
+            captured["guard_keys"].append(key)
+            return operation()
+
     fake_requests = SimpleNamespace(Session=FakeSession)
-    with patch.object(analysis_data, "requests", fake_requests, create=True):
+    with patch.object(
+        analysis_data,
+        "requests",
+        fake_requests,
+        create=True,
+    ), patch.object(
+        analysis_data,
+        "eastmoney_guard",
+        FakeGuard(),
+        create=True,
+    ), patch.object(
+        analysis_data,
+        "EASTMONEY_PROXY_MODE",
+        "direct",
+        create=True,
+    ):
         result = analysis_data._fetch_eastmoney_daily(
             "515880.SS",
             datetime(2026, 2, 1),
@@ -140,9 +166,120 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
 
     assert captured["params"]["secid"] == "1.515880"
     assert captured["params"]["fqt"] == "1"
+    assert captured["guard_keys"] == ["515880.SS"]
+    assert captured["sessions"] == 1
+    assert captured["trust_env"] is False
     assert result.index.is_monotonic_increasing
     assert list(result.columns) == ["Open", "Close", "High", "Low", "Volume"]
     assert result.loc[pd.Timestamp("2026-02-03"), "Volume"] == 45600
+
+
+def test_fetch_eastmoney_daily_environment_route_uses_trust_env():
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "klines": [
+                        "2026-02-03,1.084,1.084,1.090,1.070,456",
+                    ]
+                }
+            }
+
+    class FakeSession:
+        trust_env = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            captured["trust_env"] = self.trust_env
+            return FakeResponse()
+
+    class FakeGuard:
+        def call(self, _key, operation):
+            return operation()
+
+    with patch.object(
+        analysis_data.requests,
+        "Session",
+        FakeSession,
+    ), patch.object(
+        analysis_data,
+        "eastmoney_guard",
+        FakeGuard(),
+        create=True,
+    ), patch.object(
+        analysis_data,
+        "EASTMONEY_PROXY_MODE",
+        "environment",
+        create=True,
+    ):
+        result = analysis_data._fetch_eastmoney_daily(
+            "515880.SS",
+            datetime(2026, 2, 1),
+            datetime(2026, 2, 5),
+        )
+
+    assert result is not None
+    assert captured["trust_env"] is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Remote end closed connection without response",
+        "Empty reply from server",
+        "Connection reset by peer",
+    ],
+)
+def test_fetch_eastmoney_daily_classifies_silent_disconnect_as_blocking(message):
+    class FakeSession:
+        trust_env = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            raise requests.ConnectionError(message)
+
+    class PassThroughGuard:
+        def call(self, _key, operation):
+            return operation()
+
+    with patch.object(
+        analysis_data.requests,
+        "Session",
+        FakeSession,
+    ), patch.object(
+        analysis_data,
+        "eastmoney_guard",
+        PassThroughGuard(),
+        create=True,
+    ):
+        with pytest.raises(ProviderBlockingError):
+            analysis_data._fetch_eastmoney_daily(
+                "515880.SS",
+                datetime(2026, 2, 1),
+                datetime(2026, 2, 5),
+            )
+
+
+def test_data_source_protection_defaults_are_safe():
+    assert analysis_data.EASTMONEY_PROXY_MODE == "direct"
+    assert analysis_data.EASTMONEY_MIN_INTERVAL_SECONDS == 1.5
+    assert analysis_data.EASTMONEY_CIRCUIT_COOLDOWN_SECONDS == 1800
+    assert analysis_data.YAHOO_MIN_INTERVAL_SECONDS == 1.0
 
 
 def test_fetch_stock_data_migrates_fresh_legacy_a_share_cache(tmp_path):

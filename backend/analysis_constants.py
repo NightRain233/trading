@@ -1,10 +1,95 @@
 import os
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
+
+
+def _env_choice(name: str, default: str, choices: set[str]) -> str:
+    value = os.getenv(name, default).strip().lower()
+    return value if value in choices else default
+
+
+def _env_hours(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        hours = tuple(sorted({int(part.strip()) for part in raw.split(",")}))
+    except (TypeError, ValueError):
+        return default
+    if not hours or any(hour < 0 or hour > 23 for hour in hours):
+        return default
+    return hours
+
+
 DATA_DIR = "data"
 CACHE_DURATION_SECONDS = 60 * 60
 ALLOW_STALE_SECONDS = 60 * 60 * 24
 DATA_RETENTION_DAYS = 1850
 REFRESH_MIN_INTERVAL_SECONDS = 60
+
+EASTMONEY_FETCH_ENABLED = _env_bool("EASTMONEY_FETCH_ENABLED", True)
+EASTMONEY_PROXY_MODE = _env_choice(
+    "EASTMONEY_PROXY_MODE",
+    "direct",
+    {"direct", "environment"},
+)
+EASTMONEY_MIN_INTERVAL_SECONDS = _env_float(
+    "EASTMONEY_MIN_INTERVAL_SECONDS",
+    1.5,
+)
+EASTMONEY_CIRCUIT_COOLDOWN_SECONDS = _env_int(
+    "EASTMONEY_CIRCUIT_COOLDOWN_SECONDS",
+    1800,
+)
+EASTMONEY_FULL_REFRESH_DAYS = _env_int(
+    "EASTMONEY_FULL_REFRESH_DAYS",
+    7,
+    minimum=1,
+)
+EASTMONEY_INCREMENTAL_OVERLAP_DAYS = _env_int(
+    "EASTMONEY_INCREMENTAL_OVERLAP_DAYS",
+    14,
+    minimum=2,
+)
+
+YAHOO_FETCH_ENABLED = _env_bool("YAHOO_FETCH_ENABLED", True)
+YAHOO_MIN_INTERVAL_SECONDS = _env_float(
+    "YAHOO_MIN_INTERVAL_SECONDS",
+    1.0,
+)
+YAHOO_CIRCUIT_COOLDOWN_SECONDS = _env_int(
+    "YAHOO_CIRCUIT_COOLDOWN_SECONDS",
+    900,
+)
+
+BACKGROUND_PREWARM_ENABLED = _env_bool("BACKGROUND_PREWARM_ENABLED", True)
+PREWARM_HOURS = _env_hours("PREWARM_HOURS", (12, 21))
 
 EMA_FAST_5 = 5
 EMA_FAST_10 = 10

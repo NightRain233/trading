@@ -12,6 +12,10 @@ import yfinance as yf
 
 from analysis_constants import (
     DATA_DIR, DATA_RETENTION_DAYS, CACHE_DURATION_SECONDS,
+    EASTMONEY_FETCH_ENABLED, EASTMONEY_PROXY_MODE,
+    EASTMONEY_MIN_INTERVAL_SECONDS, EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
+    YAHOO_FETCH_ENABLED, YAHOO_MIN_INTERVAL_SECONDS,
+    YAHOO_CIRCUIT_COOLDOWN_SECONDS,
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     ADX_PERIOD, RSI_PERIODS, MACD_FAST, MACD_SLOW, MACD_SIGNAL,
     BOLL_PERIOD, BOLL_STD, KDJ_PERIOD, KDJ_SIGNAL_K, KDJ_SIGNAL_D, ATR_PERIOD,
@@ -21,11 +25,44 @@ from analysis_cache import (
     get_symbol_lock, global_download_lock, ta_calculation_lock,
     _drop_incomplete_ohlcv_rows,
 )
+from data_source_guard import (
+    ProviderBlockingError,
+    ProviderConfig,
+    ProviderGuard,
+)
 
 logger = logging.getLogger(__name__)
 
 A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v1"
 PRICE_JUMP_THRESHOLD = 0.40
+PROVIDER_STATE_DIR = os.path.join(DATA_DIR, ".provider-state")
+
+eastmoney_guard = ProviderGuard(
+    "eastmoney",
+    ProviderConfig(
+        enabled=EASTMONEY_FETCH_ENABLED,
+        min_interval_seconds=EASTMONEY_MIN_INTERVAL_SECONDS,
+        duplicate_window_seconds=5 * 60,
+        max_retries=1,
+        backoff_seconds=1.0,
+        failure_threshold=3,
+        circuit_cooldown_seconds=EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
+    ),
+    state_dir=PROVIDER_STATE_DIR,
+)
+yahoo_guard = ProviderGuard(
+    "yahoo",
+    ProviderConfig(
+        enabled=YAHOO_FETCH_ENABLED,
+        min_interval_seconds=YAHOO_MIN_INTERVAL_SECONDS,
+        duplicate_window_seconds=5 * 60,
+        max_retries=1,
+        backoff_seconds=1.0,
+        failure_threshold=3,
+        circuit_cooldown_seconds=YAHOO_CIRCUIT_COOLDOWN_SECONDS,
+    ),
+    state_dir=PROVIDER_STATE_DIR,
+)
 
 
 def _find_col(columns, prefix: str, exclude_prefixes=()) -> str | None:
@@ -73,11 +110,9 @@ def _fetch_eastmoney_daily(
         "beg": pd.Timestamp(start).strftime("%Y%m%d"),
         "end": pd.Timestamp(end).strftime("%Y%m%d"),
     }
-    payload = None
-    errors = []
-    for trust_env in (False, True):
+    def request_and_parse() -> pd.DataFrame:
         with requests.Session() as session:
-            session.trust_env = trust_env
+            session.trust_env = EASTMONEY_PROXY_MODE == "environment"
             try:
                 response = session.get(
                     "https://push2his.eastmoney.com/api/qt/stock/kline/get",
@@ -86,40 +121,49 @@ def _fetch_eastmoney_daily(
                 )
                 response.raise_for_status()
                 payload = response.json()
-                break
             except Exception as exc:
-                errors.append(exc)
+                status_code = getattr(
+                    getattr(exc, "response", None),
+                    "status_code",
+                    None,
+                )
+                message = str(exc).lower()
+                blocking_markers = (
+                    "remote end closed",
+                    "empty reply",
+                    "connection reset",
+                )
+                if status_code in {403, 429} or any(
+                    marker in message for marker in blocking_markers
+                ):
+                    raise ProviderBlockingError(str(exc)) from exc
+                raise
 
-    if payload is None:
-        logger.warning(
-            f"Eastmoney 日线下载失败 {symbol}: "
-            f"{errors[-1] if errors else 'unknown error'}"
-        )
-        return None
+        rows = (payload.get("data") or {}).get("klines") or []
+        records = []
+        for raw_row in rows:
+            parts = str(raw_row).split(",")
+            if len(parts) < 6:
+                continue
+            try:
+                records.append({
+                    "Date": pd.to_datetime(parts[0]),
+                    "Open": float(parts[1]),
+                    "Close": float(parts[2]),
+                    "High": float(parts[3]),
+                    "Low": float(parts[4]),
+                    "Volume": float(parts[5]) * 100,
+                })
+            except (TypeError, ValueError):
+                continue
 
-    rows = (payload.get("data") or {}).get("klines") or []
-    records = []
-    for raw_row in rows:
-        parts = str(raw_row).split(",")
-        if len(parts) < 6:
-            continue
-        try:
-            records.append({
-                "Date": pd.to_datetime(parts[0]),
-                "Open": float(parts[1]),
-                "Close": float(parts[2]),
-                "High": float(parts[3]),
-                "Low": float(parts[4]),
-                "Volume": float(parts[5]) * 100,
-            })
-        except (TypeError, ValueError):
-            continue
+        if not records:
+            raise ValueError("Eastmoney payload contains no valid kline rows")
 
-    if not records:
-        return None
+        df = pd.DataFrame.from_records(records).set_index("Date").sort_index()
+        return _drop_incomplete_ohlcv_rows(df)
 
-    df = pd.DataFrame.from_records(records).set_index("Date").sort_index()
-    return _drop_incomplete_ohlcv_rows(df)
+    return eastmoney_guard.call(symbol.upper(), request_and_parse)
 
 
 def _has_valid_price_history(
