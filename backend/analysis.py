@@ -37,7 +37,7 @@ from analysis_data import (  # noqa: F401
     _load_local_data, _fetch_new_data, _merge_and_clean_data,
     _is_a_share_symbol, _fetch_eastmoney_daily,
     _has_current_data_source, _write_data_source_metadata,
-    A_SHARE_DATA_SOURCE_VERSION,
+    AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION,
     _calculate_daily_indicators, _calculate_weekly_indicators, fetch_stock_data,
 )
 from analysis_strategy import (  # noqa: F401
@@ -238,20 +238,33 @@ def batch_fetch_and_update(symbols: list) -> dict:
     yahoo_symbols = [symbol for symbol, _, _ in yahoo_items]
     fetch_end = now + timedelta(days=1)
     downloaded_data: Dict[str, pd.DataFrame] = {}
+    a_share_refresh_meta: Dict[str, AShareRefreshResult] = {}
 
     def fetch_a_share(item):
-        symbol, _, last_update = item
+        symbol, df_local, last_update = item
+        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
         try:
-            return symbol, _fetch_new_data(symbol, last_update, now)
+            return symbol, _fetch_new_data(
+                symbol,
+                last_update,
+                now,
+                df_local=df_local,
+                file_path=file_path,
+            )
         except Exception as exc:
             logger.error(f"Eastmoney 批量下载失败 {symbol}: {exc}")
             return symbol, None
 
     if a_share_items:
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            for symbol, new_df in executor.map(fetch_a_share, a_share_items):
-                if new_df is not None and not new_df.empty:
-                    downloaded_data[symbol] = new_df
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            for symbol, fetch_result in executor.map(fetch_a_share, a_share_items):
+                if isinstance(fetch_result, AShareRefreshResult):
+                    if not fetch_result.frame.empty:
+                        downloaded_data[symbol] = fetch_result.frame
+                        a_share_refresh_meta[symbol] = fetch_result
+                elif fetch_result is not None and not fetch_result.empty:
+                    # Compatibility for injected complete canonical frames.
+                    downloaded_data[symbol] = fetch_result
 
     earliest_update = None
     has_new_symbol = False
@@ -302,6 +315,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
         merged_df = df_local
         market_data_changed = df_local is None or df_local.empty
         source_refreshed = False
+        last_full_refresh_at = None
 
         with _memory_cache_lock:
             cached_entry = _memory_cache.get(symbol)
@@ -314,6 +328,12 @@ def batch_fetch_and_update(symbols: list) -> dict:
             if _is_a_share_symbol(symbol):
                 merged_df = _merge_and_clean_data(None, new_df, now)
                 source_refreshed = True
+                refresh_meta = a_share_refresh_meta.get(symbol)
+                last_full_refresh_at = (
+                    refresh_meta.last_full_refresh_at
+                    if refresh_meta is not None
+                    else now
+                )
             else:
                 base_ohlcv = _extract_ohlcv(df_local)
                 merged_df = _merge_and_clean_data(base_ohlcv, new_df, now)
@@ -327,7 +347,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
         ):
             if source_refreshed:
                 with get_symbol_lock(symbol):
-                    _write_data_source_metadata(file_path, symbol)
+                    _write_data_source_metadata(
+                        file_path,
+                        symbol,
+                        last_full_refresh_at=last_full_refresh_at,
+                    )
                 with _memory_cache_lock:
                     cached_entry["sourceVersion"] = A_SHARE_DATA_SOURCE_VERSION
             return symbol, (cached_entry["df"], cached_entry["df_weekly"], cached_entry["summary"])
@@ -345,7 +369,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
         summary = analyze_stock_summary(symbol, df, df_weekly)
         if source_refreshed:
             with get_symbol_lock(symbol):
-                _write_data_source_metadata(file_path, symbol)
+                _write_data_source_metadata(
+                    file_path,
+                    symbol,
+                    last_full_refresh_at=last_full_refresh_at,
+                )
         _cache_put(symbol, {
             "df": df, "df_weekly": df_weekly, "summary": summary,
             "timestamp": time.time(),

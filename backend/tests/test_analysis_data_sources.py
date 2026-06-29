@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -64,9 +65,17 @@ def test_fetch_new_data_uses_full_retention_eastmoney_for_a_share():
         create=True,
         return_value=eastmoney_df,
     ) as mock_eastmoney, patch.object(analysis_data.yf, "Ticker") as mock_ticker:
-        result = analysis_data._fetch_new_data("515880.SS", last_update, now)
+        result = analysis_data._fetch_new_data(
+            "515880.SS",
+            last_update,
+            now,
+            df_local=None,
+            file_path="/tmp/515880.SS.parquet",
+        )
 
-    assert result.equals(eastmoney_df)
+    assert isinstance(result, analysis_data.AShareRefreshResult)
+    assert result.frame.equals(eastmoney_df)
+    assert result.full_refresh is True
     mock_ticker.assert_not_called()
     start, end = mock_eastmoney.call_args.args[1:3]
     assert start == now - timedelta(days=analysis_data.DATA_RETENTION_DAYS)
@@ -90,8 +99,19 @@ def test_source_metadata_marks_legacy_a_share_stale(tmp_path):
 
     assert not analysis_data._has_current_data_source(str(parquet_path), "515880.SS")
 
-    analysis_data._write_data_source_metadata(str(parquet_path), "515880.SS")
+    refreshed_at = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        "515880.SS",
+        last_full_refresh_at=refreshed_at,
+    )
     assert analysis_data._has_current_data_source(str(parquet_path), "515880.SS")
+    metadata = analysis_data._read_data_source_metadata(
+        str(parquet_path),
+        "515880.SS",
+    )
+    assert metadata["sourceVersion"] == "eastmoney-qfq-v2"
+    assert metadata["lastFullRefreshAt"] == refreshed_at.isoformat()
 
     analysis_data._invalidate_data_source_metadata(str(parquet_path))
     assert not analysis_data._has_current_data_source(str(parquet_path), "515880.SS")
@@ -101,6 +121,175 @@ def test_non_a_share_does_not_require_source_metadata(tmp_path):
     parquet_path = tmp_path / "SPY.parquet"
 
     assert analysis_data._has_current_data_source(str(parquet_path), "SPY")
+
+
+def test_v1_source_metadata_is_stale_after_v2_upgrade(tmp_path):
+    parquet_path = tmp_path / "515880.SS.parquet"
+    metadata_path = tmp_path / "515880.SS.parquet.source.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "symbol": "515880.SS",
+                "sourceVersion": "eastmoney-qfq-v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not analysis_data._has_current_data_source(
+        str(parquet_path),
+        "515880.SS",
+    )
+
+
+def test_recent_v2_metadata_uses_incremental_refresh(tmp_path):
+    parquet_path = tmp_path / "515880.SS.parquet"
+    now = datetime(2026, 6, 28, 15, 0)
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        "515880.SS",
+        last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
+    )
+
+    assert not analysis_data._a_share_needs_full_refresh(
+        str(parquet_path),
+        "515880.SS",
+        now,
+    )
+
+
+def test_overdue_v2_metadata_requires_full_refresh(tmp_path):
+    parquet_path = tmp_path / "515880.SS.parquet"
+    now = datetime(2026, 6, 28, 15, 0)
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        "515880.SS",
+        last_full_refresh_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    assert analysis_data._a_share_needs_full_refresh(
+        str(parquet_path),
+        "515880.SS",
+        now,
+    )
+
+
+def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
+    symbol = "515880.SS"
+    now = datetime(2026, 6, 28, 15, 0)
+    local = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [1.00, 1.01, 1.02, 1.03],
+    )
+    incremental = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27"],
+        [1.00, 1.01, 1.02, 1.04, 1.05],
+    )
+    parquet_path = tmp_path / f"{symbol}.parquet"
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        symbol,
+        last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
+    )
+
+    with patch.object(
+        analysis_data,
+        "_fetch_eastmoney_daily",
+        return_value=incremental,
+    ) as mock_fetch:
+        result = analysis_data._fetch_a_share_refresh(
+            symbol,
+            local,
+            local.index[-1],
+            str(parquet_path),
+            now,
+        )
+
+    assert result is not None
+    assert result.full_refresh is False
+    assert result.frame.loc[pd.Timestamp("2026-06-27"), "Close"] == 1.05
+    assert mock_fetch.call_count == 1
+    start = mock_fetch.call_args.args[1]
+    assert start == local.index[-1].to_pydatetime() - timedelta(
+        days=analysis_data.EASTMONEY_INCREMENTAL_OVERLAP_DAYS
+    )
+
+
+def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
+    symbol = "515880.SS"
+    now = datetime(2026, 6, 28, 15, 0)
+    local = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [1.00, 1.01, 1.02, 1.03],
+    )
+    rebased_overlap = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [0.90, 0.91, 0.92, 1.04],
+    )
+    full_history = _ohlcv(
+        ["2026-06-20", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [0.88, 0.90, 0.91, 0.92, 1.04],
+    )
+    parquet_path = tmp_path / f"{symbol}.parquet"
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        symbol,
+        last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
+    )
+
+    with patch.object(
+        analysis_data,
+        "_fetch_eastmoney_daily",
+        side_effect=[rebased_overlap, full_history],
+    ) as mock_fetch:
+        result = analysis_data._fetch_a_share_refresh(
+            symbol,
+            local,
+            local.index[-1],
+            str(parquet_path),
+            now,
+        )
+
+    assert result is not None
+    assert result.full_refresh is True
+    assert result.frame.equals(full_history)
+    assert mock_fetch.call_count == 2
+
+
+def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):
+    symbol = "515880.SS"
+    now = datetime(2026, 6, 28, 15, 0)
+    local = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [1.00, 1.01, 1.02, 1.03],
+    )
+    incremental = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [1.00, 1.01, 1.02, 1.04],
+    )
+    parquet_path = tmp_path / f"{symbol}.parquet"
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        symbol,
+        last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
+    )
+
+    with patch.object(
+        analysis_data,
+        "_fetch_eastmoney_daily",
+        return_value=incremental,
+    ) as mock_fetch:
+        result = analysis_data._fetch_a_share_refresh(
+            symbol,
+            local,
+            local.index[-1],
+            str(parquet_path),
+            now,
+        )
+
+    assert result is not None
+    assert result.full_refresh is False
+    assert mock_fetch.call_count == 1
 
 
 def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():

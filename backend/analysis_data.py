@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
 import requests
@@ -14,6 +16,7 @@ from analysis_constants import (
     DATA_DIR, DATA_RETENTION_DAYS, CACHE_DURATION_SECONDS,
     EASTMONEY_FETCH_ENABLED, EASTMONEY_PROXY_MODE,
     EASTMONEY_MIN_INTERVAL_SECONDS, EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
+    EASTMONEY_FULL_REFRESH_DAYS, EASTMONEY_INCREMENTAL_OVERLAP_DAYS,
     YAHOO_FETCH_ENABLED, YAHOO_MIN_INTERVAL_SECONDS,
     YAHOO_CIRCUIT_COOLDOWN_SECONDS,
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
@@ -33,7 +36,7 @@ from data_source_guard import (
 
 logger = logging.getLogger(__name__)
 
-A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v1"
+A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v2"
 PRICE_JUMP_THRESHOLD = 0.40
 PROVIDER_STATE_DIR = os.path.join(DATA_DIR, ".provider-state")
 
@@ -96,6 +99,8 @@ def _fetch_eastmoney_daily(
     symbol: str,
     start: datetime,
     end: datetime,
+    *,
+    request_key: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     secid = _eastmoney_secid(symbol)
     if not secid:
@@ -163,7 +168,10 @@ def _fetch_eastmoney_daily(
         df = pd.DataFrame.from_records(records).set_index("Date").sort_index()
         return _drop_incomplete_ohlcv_rows(df)
 
-    return eastmoney_guard.call(symbol.upper(), request_and_parse)
+    return eastmoney_guard.call(
+        request_key or symbol.upper(),
+        request_and_parse,
+    )
 
 
 def _has_valid_price_history(
@@ -210,21 +218,46 @@ def _source_metadata_path(file_path: str) -> str:
     return f"{file_path}.source.json"
 
 
-def _has_current_data_source(file_path: str, symbol: str) -> bool:
+def _read_data_source_metadata(file_path: str, symbol: str) -> dict:
     if not _is_a_share_symbol(symbol):
-        return True
+        return {}
     try:
         with open(_source_metadata_path(file_path), encoding="utf-8") as handle:
             metadata = json.load(handle)
-        return (
-            metadata.get("symbol") == symbol.upper()
-            and metadata.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
-        )
+        if not isinstance(metadata, dict):
+            return {}
+        if metadata.get("symbol") != symbol.upper():
+            return {}
+        return metadata
     except (OSError, TypeError, ValueError):
-        return False
+        return {}
 
 
-def _write_data_source_metadata(file_path: str, symbol: str) -> None:
+def _has_current_data_source(file_path: str, symbol: str) -> bool:
+    if not _is_a_share_symbol(symbol):
+        return True
+    metadata = _read_data_source_metadata(file_path, symbol)
+    return metadata.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
+
+
+def _normalize_metadata_timestamp(value: datetime | str | None) -> str:
+    if value is None:
+        timestamp = datetime.now(timezone.utc)
+    else:
+        timestamp = pd.Timestamp(value).to_pydatetime()
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
+    return timestamp.isoformat()
+
+
+def _write_data_source_metadata(
+    file_path: str,
+    symbol: str,
+    *,
+    last_full_refresh_at: datetime | str | None = None,
+) -> None:
     if not _is_a_share_symbol(symbol):
         return
     metadata_path = _source_metadata_path(file_path)
@@ -232,6 +265,9 @@ def _write_data_source_metadata(file_path: str, symbol: str) -> None:
     payload = {
         "symbol": symbol.upper(),
         "sourceVersion": A_SHARE_DATA_SOURCE_VERSION,
+        "lastFullRefreshAt": _normalize_metadata_timestamp(
+            last_full_refresh_at
+        ),
     }
     with open(temporary_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
@@ -243,6 +279,35 @@ def _invalidate_data_source_metadata(file_path: str) -> None:
         os.remove(_source_metadata_path(file_path))
     except FileNotFoundError:
         pass
+
+
+def _a_share_needs_full_refresh(
+    file_path: str,
+    symbol: str,
+    now: datetime,
+) -> bool:
+    metadata = _read_data_source_metadata(file_path, symbol)
+    if metadata.get("sourceVersion") != A_SHARE_DATA_SOURCE_VERSION:
+        return True
+    last_full_raw = metadata.get("lastFullRefreshAt")
+    if not last_full_raw:
+        return True
+    try:
+        last_full = pd.Timestamp(last_full_raw)
+        now_ts = pd.Timestamp(now)
+        if last_full.tzinfo is None:
+            last_full = last_full.tz_localize("UTC")
+        else:
+            last_full = last_full.tz_convert("UTC")
+        if now_ts.tzinfo is None:
+            now_ts = now_ts.tz_localize("UTC")
+        else:
+            now_ts = now_ts.tz_convert("UTC")
+    except (TypeError, ValueError):
+        return True
+    return now_ts - last_full >= pd.Timedelta(
+        days=EASTMONEY_FULL_REFRESH_DAYS
+    )
 
 
 def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame], Optional[datetime]]:
@@ -266,17 +331,138 @@ def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame
         return None, None
 
 
-def _fetch_new_data(symbol: str, last_update: Optional[datetime], now: datetime) -> Optional[pd.DataFrame]:
-    if _is_a_share_symbol(symbol):
+@dataclass(frozen=True)
+class AShareRefreshResult:
+    frame: pd.DataFrame
+    full_refresh: bool
+    last_full_refresh_at: str
+
+
+def _extract_ohlcv_base(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if df is None or df.empty:
+        return None
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    if any(column not in df.columns for column in required):
+        return None
+    return df[required].copy()
+
+
+def _has_adjustment_rebase(
+    local: Optional[pd.DataFrame],
+    downloaded: Optional[pd.DataFrame],
+) -> bool:
+    local_ohlcv = _extract_ohlcv_base(local)
+    downloaded_ohlcv = _extract_ohlcv_base(downloaded)
+    if local_ohlcv is None or downloaded_ohlcv is None:
+        return False
+    common = local_ohlcv.index.intersection(downloaded_ohlcv.index).sort_values()
+    if len(common) <= 1:
+        return False
+    completed_common = common[:-1]
+    columns = ["Open", "High", "Low", "Close"]
+    left = local_ohlcv.loc[completed_common, columns].to_numpy(dtype=float)
+    right = downloaded_ohlcv.loc[completed_common, columns].to_numpy(
+        dtype=float
+    )
+    return not bool(np.isclose(left, right, rtol=1e-8, atol=1e-8).all())
+
+
+def _fetch_a_share_refresh(
+    symbol: str,
+    df_local: Optional[pd.DataFrame],
+    last_update: Optional[datetime],
+    file_path: str,
+    now: datetime,
+) -> Optional[AShareRefreshResult]:
+    fetch_end = now + timedelta(days=1)
+    needs_full = (
+        df_local is None
+        or last_update is None
+        or _a_share_needs_full_refresh(file_path, symbol, now)
+    )
+    metadata = _read_data_source_metadata(file_path, symbol)
+
+    if needs_full:
         fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-        new_df = _fetch_eastmoney_daily(
+        full_df = _fetch_eastmoney_daily(
             symbol,
             fetch_start,
-            now + timedelta(days=1),
+            fetch_end,
+            request_key=(
+                f"{symbol}:full:{fetch_start:%Y%m%d}:{fetch_end:%Y%m%d}"
+            ),
         )
-        if not _has_valid_price_history(new_df, symbol):
+        if not _has_valid_price_history(full_df, symbol):
             return None
-        return new_df
+        return AShareRefreshResult(
+            frame=full_df,
+            full_refresh=True,
+            last_full_refresh_at=_normalize_metadata_timestamp(now),
+        )
+
+    incremental_start = pd.Timestamp(last_update).to_pydatetime() - timedelta(
+        days=EASTMONEY_INCREMENTAL_OVERLAP_DAYS
+    )
+    incremental_df = _fetch_eastmoney_daily(
+        symbol,
+        incremental_start,
+        fetch_end,
+        request_key=(
+            f"{symbol}:incremental:"
+            f"{incremental_start:%Y%m%d}:{fetch_end:%Y%m%d}"
+        ),
+    )
+    if not _has_valid_price_history(incremental_df, symbol):
+        return None
+
+    if _has_adjustment_rebase(df_local, incremental_df):
+        fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
+        full_df = _fetch_eastmoney_daily(
+            symbol,
+            fetch_start,
+            fetch_end,
+            request_key=(
+                f"{symbol}:rebase:{fetch_start:%Y%m%d}:{fetch_end:%Y%m%d}"
+            ),
+        )
+        if not _has_valid_price_history(full_df, symbol):
+            return None
+        return AShareRefreshResult(
+            frame=full_df,
+            full_refresh=True,
+            last_full_refresh_at=_normalize_metadata_timestamp(now),
+        )
+
+    merged = _merge_and_clean_data(
+        _extract_ohlcv_base(df_local),
+        incremental_df,
+        now,
+    )
+    if not _has_valid_price_history(merged, symbol):
+        return None
+    return AShareRefreshResult(
+        frame=merged,
+        full_refresh=False,
+        last_full_refresh_at=str(metadata["lastFullRefreshAt"]),
+    )
+
+
+def _fetch_new_data(
+    symbol: str,
+    last_update: Optional[datetime],
+    now: datetime,
+    *,
+    df_local: Optional[pd.DataFrame] = None,
+    file_path: Optional[str] = None,
+) -> Optional[pd.DataFrame | AShareRefreshResult]:
+    if _is_a_share_symbol(symbol):
+        return _fetch_a_share_refresh(
+            symbol,
+            df_local,
+            last_update,
+            file_path or os.path.join(DATA_DIR, f"{symbol}.parquet"),
+            now,
+        )
 
     with global_download_lock:
         ticker = yf.Ticker(symbol)
@@ -472,6 +658,7 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     now = datetime.now()
     is_a_share = _is_a_share_symbol(symbol)
     source_refreshed = False
+    last_full_refresh_at = None
 
     with get_symbol_lock(symbol):
         df_local, last_update = _load_local_data(file_path, symbol)
@@ -491,12 +678,29 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
         df = df_local
         if needs_fetch:
             try:
-                new_df = _fetch_new_data(symbol, last_update, now)
-                if new_df is not None:
+                fetch_result = _fetch_new_data(
+                    symbol,
+                    last_update,
+                    now,
+                    df_local=df_local,
+                    file_path=file_path,
+                )
+                if fetch_result is not None:
                     if is_a_share:
+                        if isinstance(fetch_result, AShareRefreshResult):
+                            new_df = fetch_result.frame
+                            last_full_refresh_at = (
+                                fetch_result.last_full_refresh_at
+                            )
+                        else:
+                            # Compatibility for callers/tests that inject a
+                            # complete canonical A-share frame.
+                            new_df = fetch_result
+                            last_full_refresh_at = now
                         df = _merge_and_clean_data(None, new_df, now)
                         source_refreshed = True
                     else:
+                        new_df = fetch_result
                         if df is not None:
                             ohlcv_cols = [c for c in df.columns if c in ('Open', 'High', 'Low', 'Close', 'Volume')]
                             df = df[ohlcv_cols]
@@ -523,5 +727,9 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
     with get_symbol_lock(symbol):
         df.to_parquet(file_path)
         if source_refreshed:
-            _write_data_source_metadata(file_path, symbol)
+            _write_data_source_metadata(
+                file_path,
+                symbol,
+                last_full_refresh_at=last_full_refresh_at,
+            )
     return df, _calculate_weekly_indicators(df)
