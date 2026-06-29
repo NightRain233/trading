@@ -32,8 +32,8 @@
         "alias": "游戏ETF"
       },
       {
-        "symbol": "159326.SZ",
-        "alias": "电网设备ETF"
+        "symbol": "159320.SZ",
+        "alias": "电网设备ETF ✳️"
       },
       {
         "symbol": "000001.SS",
@@ -113,8 +113,8 @@
         "alias": "芯片ETF"
       },
       {
-        "symbol": "515880.SS",
-        "alias": "通信ETF"
+        "symbol": "159583.SZ",
+        "alias": "通信设备ETF ✳️"
       },
       {
         "symbol": "510880.SS",
@@ -155,6 +155,10 @@
       {
         "symbol": "588000.SS",
         "alias": "科创 50"
+      },
+      {
+        "symbol": "588890.SS",
+        "alias": "科创芯片ETF ✳️"
       },
       {
         "symbol": "002119.SZ",

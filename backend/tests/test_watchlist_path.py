@@ -48,7 +48,7 @@ class WatchlistPathTests(unittest.TestCase):
             os.chdir(original_cwd)
 
         symbols = {item["symbol"] for group in groups for item in group.get("symbols", [])}
-        self.assertIn("159326.SZ", symbols)
+        self.assertIn("159320.SZ", symbols)
 
 
 if __name__ == "__main__":
