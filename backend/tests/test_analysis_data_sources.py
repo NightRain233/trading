@@ -464,6 +464,50 @@ def test_fetch_eastmoney_daily_classifies_silent_disconnect_as_blocking(message)
             )
 
 
+@pytest.mark.parametrize("status_code", [403, 429])
+def test_fetch_eastmoney_daily_classifies_http_block_as_blocking(status_code):
+    class FakeResponse:
+        def raise_for_status(self):
+            response = requests.Response()
+            response.status_code = status_code
+            raise requests.HTTPError(
+                f"{status_code} blocked",
+                response=response,
+            )
+
+    class FakeSession:
+        trust_env = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    class PassThroughGuard:
+        def call(self, _key, operation):
+            return operation()
+
+    with patch.object(
+        analysis_data.requests,
+        "Session",
+        FakeSession,
+    ), patch.object(
+        analysis_data,
+        "eastmoney_guard",
+        PassThroughGuard(),
+    ):
+        with pytest.raises(ProviderBlockingError):
+            analysis_data._fetch_eastmoney_daily(
+                "515880.SS",
+                datetime(2026, 2, 1),
+                datetime(2026, 2, 5),
+            )
+
+
 def test_data_source_protection_defaults_are_safe():
     assert analysis_data.EASTMONEY_PROXY_MODE == "direct"
     assert analysis_data.EASTMONEY_MIN_INTERVAL_SECONDS == 1.5

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import multiprocessing
+import time
 
 import pytest
 
@@ -44,6 +46,29 @@ def build_guard(tmp_path, fake_time, **overrides) -> ProviderGuard:
         clock=fake_time.clock,
         sleep=fake_time.sleep,
     )
+
+
+def _cross_process_guard_worker(state_dir, log_path, key):
+    guard = ProviderGuard(
+        "cross-process",
+        ProviderConfig(
+            duplicate_window_seconds=0,
+            max_retries=0,
+        ),
+        state_dir=state_dir,
+    )
+
+    def operation():
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"start:{key}\n")
+            handle.flush()
+        time.sleep(0.15)
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"end:{key}\n")
+            handle.flush()
+        return key
+
+    guard.call(key, operation)
 
 
 def test_disabled_provider_never_calls_operation(tmp_path):
@@ -179,3 +204,28 @@ def test_status_sanitizes_and_truncates_last_error(tmp_path):
     assert "\n" not in status["lastErrorMessage"]
     assert len(status["lastErrorMessage"]) <= 240
     assert status["lastErrorCategory"] == "ValueError"
+
+
+def test_provider_guard_serializes_operations_across_processes(tmp_path):
+    log_path = tmp_path / "operations.log"
+    context = multiprocessing.get_context("spawn")
+    processes = [
+        context.Process(
+            target=_cross_process_guard_worker,
+            args=(str(tmp_path), str(log_path), key),
+        )
+        for key in ("A", "B")
+    ]
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=5)
+        assert process.exitcode == 0
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4
+    assert lines[0].startswith("start:")
+    assert lines[1] == lines[0].replace("start:", "end:")
+    assert lines[2].startswith("start:")
+    assert lines[3] == lines[2].replace("start:", "end:")
