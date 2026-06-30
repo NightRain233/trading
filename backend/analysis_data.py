@@ -14,6 +14,8 @@ import yfinance as yf
 
 from analysis_constants import (
     DATA_DIR, DATA_RETENTION_DAYS, CACHE_DURATION_SECONDS,
+    TICKFLOW_FETCH_ENABLED, TICKFLOW_MIN_INTERVAL_SECONDS,
+    TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
     EASTMONEY_FETCH_ENABLED, EASTMONEY_PROXY_MODE,
     EASTMONEY_MIN_INTERVAL_SECONDS, EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
     EASTMONEY_FULL_REFRESH_DAYS, EASTMONEY_INCREMENTAL_OVERLAP_DAYS,
@@ -42,6 +44,19 @@ A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v2"
 PRICE_JUMP_THRESHOLD = 0.40
 PROVIDER_STATE_DIR = os.path.join(DATA_DIR, ".provider-state")
 
+tickflow_guard = ProviderGuard(
+    "tickflow",
+    ProviderConfig(
+        enabled=TICKFLOW_FETCH_ENABLED,
+        min_interval_seconds=TICKFLOW_MIN_INTERVAL_SECONDS,
+        duplicate_window_seconds=5 * 60,
+        max_retries=1,
+        backoff_seconds=1.0,
+        failure_threshold=3,
+        circuit_cooldown_seconds=TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
+    ),
+    state_dir=PROVIDER_STATE_DIR,
+)
 eastmoney_guard = ProviderGuard(
     "eastmoney",
     ProviderConfig(
@@ -72,7 +87,7 @@ yahoo_guard = ProviderGuard(
 
 def get_data_source_status() -> dict:
     return {
-        "eastmoney": eastmoney_guard.status(),
+        "tickflow": tickflow_guard.status(),
         "yahoo": yahoo_guard.status(),
     }
 

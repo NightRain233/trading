@@ -1,3 +1,5 @@
+import importlib
+
 import analysis_constants
 
 
@@ -42,3 +44,26 @@ def test_invalid_prewarm_hours_fall_back(monkeypatch):
         "TEST_HOURS",
         (12, 21),
     ) == (12, 21)
+
+
+def test_tickflow_defaults(monkeypatch):
+    for key in (
+        "TICKFLOW_FETCH_ENABLED",
+        "TICKFLOW_BASE_URL",
+        "TICKFLOW_API_KEY",
+        "TICKFLOW_MIN_INTERVAL_SECONDS",
+        "TICKFLOW_CIRCUIT_COOLDOWN_SECONDS",
+        "TICKFLOW_INCREMENTAL_OVERLAP_DAYS",
+        "PREWARM_HOURS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    module = importlib.reload(analysis_constants)
+
+    assert module.TICKFLOW_FETCH_ENABLED is True
+    assert module.TICKFLOW_BASE_URL == "https://free-api.tickflow.org"
+    assert module.TICKFLOW_API_KEY == ""
+    assert module.TICKFLOW_MIN_INTERVAL_SECONDS == 1.0
+    assert module.TICKFLOW_CIRCUIT_COOLDOWN_SECONDS == 900
+    assert module.TICKFLOW_INCREMENTAL_OVERLAP_DAYS == 7
+    assert module.PREWARM_HOURS == (21,)

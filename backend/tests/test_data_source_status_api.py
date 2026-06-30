@@ -38,9 +38,9 @@ def _cached_daily():
 
 def test_data_source_status_endpoint_returns_both_providers(monkeypatch):
     payload = {
-        "eastmoney": {
-            "provider": "eastmoney",
-            "enabled": False,
+        "tickflow": {
+            "provider": "tickflow",
+            "enabled": True,
             "circuitState": "closed",
         },
         "yahoo": {
@@ -61,8 +61,8 @@ def test_data_source_status_endpoint_returns_both_providers(monkeypatch):
 
 def test_quote_maps_market_data_unavailable_to_503_with_retry_after():
     error = MarketDataUnavailableError(
-        "eastmoney is cooling down",
-        provider="eastmoney",
+        "tickflow is cooling down",
+        provider="tickflow",
         category="circuit_open",
         retry_after=120,
     )
@@ -73,7 +73,7 @@ def test_quote_maps_market_data_unavailable_to_503_with_retry_after():
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.headers == {"Retry-After": "120"}
-    assert "eastmoney" in exc_info.value.detail
+    assert "tickflow" in exc_info.value.detail
 
 
 def test_quote_keeps_404_for_genuine_missing_or_insufficient_symbol():
@@ -100,7 +100,7 @@ def test_provider_failure_returns_existing_stale_cache_without_rewriting(
 
     provider_error = ProviderCircuitOpenError(
         "circuit open",
-        provider="eastmoney",
+        provider="tickflow",
         key=symbol,
         category="circuit_open",
         retry_after=300,
@@ -132,7 +132,7 @@ def test_provider_failure_without_cache_raises_market_data_unavailable(
     symbol = "588890.SS"
     provider_error = ProviderCircuitOpenError(
         "circuit open",
-        provider="eastmoney",
+        provider="tickflow",
         key=symbol,
         category="circuit_open",
         retry_after=300,
@@ -150,5 +150,5 @@ def test_provider_failure_without_cache_raises_market_data_unavailable(
         with pytest.raises(MarketDataUnavailableError) as exc_info:
             analysis_data.fetch_stock_data(symbol)
 
-    assert exc_info.value.provider == "eastmoney"
+    assert exc_info.value.provider == "tickflow"
     assert exc_info.value.retry_after == 300
