@@ -489,6 +489,103 @@ def test_fetch_tickflow_daily_sends_configured_api_key():
     assert captured["headers"] == {"x-api-key": "secret-token"}
 
 
+def test_fetch_tickflow_daily_batch_uses_one_request_and_maps_symbols():
+    captured = {"guard_keys": []}
+
+    def payload(close):
+        return {
+            "timestamp": [1782748800000],
+            "open": [close - 0.01],
+            "high": [close + 0.01],
+            "low": [close - 0.02],
+            "close": [close],
+            "volume": [1000],
+        }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "510300.SH": payload(5.019),
+                    "159915.SZ": payload(4.364),
+                }
+            }
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, url, params, headers, timeout):
+            captured.update(
+                url=url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+            )
+            return FakeResponse()
+
+    class FakeGuard:
+        def call(self, key, operation):
+            captured["guard_keys"].append(key)
+            return operation()
+
+    with patch.object(
+        analysis_data.requests,
+        "Session",
+        FakeSession,
+    ), patch.object(
+        analysis_data,
+        "tickflow_guard",
+        FakeGuard(),
+    ):
+        result = analysis_data._fetch_tickflow_daily_batch(
+            ["510300.SS", "159915.SZ"],
+            datetime(2026, 6, 20),
+            datetime(2026, 7, 1),
+        )
+
+    assert captured["url"].endswith("/v1/klines/batch")
+    assert captured["params"]["symbols"] == "159915.SZ,510300.SH"
+    assert captured["params"]["adjust"] == "forward_additive"
+    assert len(captured["guard_keys"]) == 1
+    assert set(result) == {"510300.SS", "159915.SZ"}
+    assert result["510300.SS"].iloc[-1]["Close"] == 5.019
+    assert result["159915.SZ"].iloc[-1]["Volume"] == 100_000
+
+
+def test_fetch_tickflow_daily_batch_allows_partial_response():
+    with patch.object(
+        analysis_data,
+        "_request_tickflow_payload",
+        return_value={
+            "data": {
+                "510300.SH": {
+                    "timestamp": [1782748800000],
+                    "open": [5.0],
+                    "high": [5.1],
+                    "low": [4.9],
+                    "close": [5.05],
+                    "volume": [1000],
+                }
+            }
+        },
+        create=True,
+    ):
+        result = analysis_data._fetch_tickflow_daily_batch(
+            ["510300.SS", "159915.SZ"],
+            datetime(2026, 6, 20),
+            datetime(2026, 7, 1),
+        )
+
+    assert set(result) == {"510300.SS"}
+
+
 def test_parse_tickflow_payload_rejects_inconsistent_column_lengths():
     payload = {
         "data": {

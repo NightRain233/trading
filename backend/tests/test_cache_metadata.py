@@ -335,7 +335,7 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -345,6 +345,108 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
             mock_eastmoney.assert_called_once()
             mock_download.assert_not_called()
+
+    def test_batch_fetch_updates_multiple_a_shares_with_one_tickflow_request(
+        self,
+    ):
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 4, 1, 21, 0)
+
+        symbols = ["510300.SS", "159915.SZ"]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            daily = _build_daily_df()
+            weekly = _build_weekly_df()
+            last_date = daily.index[-1]
+            next_date = last_date + pd.offsets.BDay(1)
+            downloaded = {}
+
+            for offset, symbol in enumerate(symbols):
+                daily_path = data_dir / f"{symbol}.parquet"
+                weekly_path = data_dir / f"{symbol}_weekly.parquet"
+                daily.to_parquet(daily_path)
+                weekly.to_parquet(weekly_path)
+                analysis_data._write_data_source_metadata(
+                    str(daily_path),
+                    symbol,
+                    last_full_refresh_at=datetime(
+                        2026,
+                        3,
+                        1,
+                        tzinfo=timezone.utc,
+                    ),
+                )
+                old_mtime = (
+                    time.time()
+                    - analysis.CACHE_DURATION_SECONDS
+                    - 60
+                )
+                import os
+                os.utime(daily_path, (old_mtime, old_mtime))
+                os.utime(weekly_path, (old_mtime, old_mtime))
+
+                close = float(daily.iloc[-1]["Close"]) + offset * 0.1
+                downloaded[symbol] = pd.DataFrame(
+                    {
+                        "Open": [close - 0.01, close],
+                        "High": [close + 0.02, close + 0.03],
+                        "Low": [close - 0.02, close - 0.01],
+                        "Close": [close, close + 0.02],
+                        "Volume": [100000, 120000],
+                    },
+                    index=pd.to_datetime([last_date, next_date]),
+                )
+
+            with patch.object(
+                analysis_cache,
+                "DATA_DIR",
+                tmpdir,
+            ), patch.object(
+                analysis_data,
+                "DATA_DIR",
+                tmpdir,
+            ), patch.object(
+                analysis,
+                "DATA_DIR",
+                tmpdir,
+            ), patch.object(
+                analysis,
+                "datetime",
+                FixedDateTime,
+            ), patch.object(
+                analysis,
+                "_fetch_tickflow_daily_batch",
+                return_value=downloaded,
+                create=True,
+            ) as mock_batch, patch.object(
+                analysis,
+                "_fetch_new_data",
+                side_effect=AssertionError(
+                    "A-share batch path must not fetch per symbol"
+                ),
+            ), patch.object(
+                analysis,
+                "_calculate_daily_indicators",
+                side_effect=lambda frame: frame,
+            ), patch.object(
+                analysis,
+                "_calculate_weekly_indicators",
+                return_value=weekly,
+            ), patch.object(
+                analysis,
+                "analyze_stock_summary",
+                return_value={"symbol": "batch"},
+            ):
+                batch_fetch_and_update(symbols)
+
+            mock_batch.assert_called_once()
+            for symbol in symbols:
+                stored = pd.read_parquet(
+                    data_dir / f"{symbol}.parquet"
+                )
+                self.assertIn(next_date, stored.index)
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.182})
     @patch.object(analysis, "_calculate_weekly_indicators")
@@ -404,7 +506,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -473,7 +575,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -561,7 +663,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -594,7 +696,7 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_new_data", return_value=eastmoney_df) as mock_fetch:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"515880.SS": eastmoney_df}) as mock_fetch:
                 batch_fetch_and_update(["515880.SS"])
 
             mock_fetch.assert_called_once()
@@ -640,7 +742,7 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_new_data", return_value=replacement) as mock_fetch:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"515880.SS": replacement}) as mock_fetch:
                 batch_fetch_and_update(["515880.SS"])
 
             mock_fetch.assert_called_once()

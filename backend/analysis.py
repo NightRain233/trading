@@ -22,7 +22,8 @@ import yfinance as yf
 # re-exports — 保持所有现有 import 不变
 from analysis_constants import (  # noqa: F401
     DATA_DIR, CACHE_DURATION_SECONDS, ALLOW_STALE_SECONDS, DATA_RETENTION_DAYS,
-    REFRESH_MIN_INTERVAL_SECONDS, EMA_LONG_PERIOD,
+    REFRESH_MIN_INTERVAL_SECONDS, TICKFLOW_INCREMENTAL_OVERLAP_DAYS,
+    EMA_LONG_PERIOD,
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     CHART_DAYS, MINI_CHART_DAYS,
 )
@@ -36,6 +37,8 @@ from analysis_cache import (  # noqa: F401
 from analysis_data import (  # noqa: F401
     _load_local_data, _fetch_new_data, _merge_and_clean_data,
     _is_a_share_symbol, _fetch_tickflow_daily,
+    _fetch_tickflow_daily_batch, _build_a_share_refresh_result,
+    _a_share_needs_initial_full_refresh, _read_data_source_metadata,
     _has_current_data_source, _write_data_source_metadata,
     AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION, yahoo_guard,
     get_data_source_status,
@@ -246,31 +249,96 @@ def batch_fetch_and_update(symbols: list) -> dict:
     downloaded_data: Dict[str, pd.DataFrame] = {}
     a_share_refresh_meta: Dict[str, AShareRefreshResult] = {}
 
-    def fetch_a_share(item):
-        symbol, df_local, last_update = item
-        file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
-        try:
-            return symbol, _fetch_new_data(
-                symbol,
-                last_update,
-                now,
-                df_local=df_local,
-                file_path=file_path,
-            )
-        except Exception as exc:
-            logger.error(f"Eastmoney 批量下载失败 {symbol}: {exc}")
-            return symbol, None
-
     if a_share_items:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            for symbol, fetch_result in executor.map(fetch_a_share, a_share_items):
+        full_items = []
+        incremental_items = []
+        for item in a_share_items:
+            symbol, df_local, last_update = item
+            file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+            metadata = _read_data_source_metadata(file_path, symbol)
+            if metadata.get("fullRefreshRequired") is True:
+                logger.warning(
+                    "%s: 等待人工 TickFlow 全量刷新，跳过自动批量更新",
+                    symbol,
+                )
+                continue
+            if (
+                df_local is None
+                or last_update is None
+                or _a_share_needs_initial_full_refresh(
+                    file_path,
+                    symbol,
+                )
+            ):
+                full_items.append(item)
+            else:
+                incremental_items.append(item)
+
+        def fetch_tickflow_group(items, *, full_refresh):
+            if not items:
+                return
+            symbols_in_group = [item[0] for item in items]
+            if full_refresh:
+                fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
+            else:
+                fetch_start = min(
+                    item[2] for item in items if item[2] is not None
+                ) - timedelta(
+                    days=TICKFLOW_INCREMENTAL_OVERLAP_DAYS
+                )
+            request_mode = "full" if full_refresh else "incremental"
+            request_key = (
+                f"batch:{request_mode}:"
+                f"{','.join(sorted(symbols_in_group))}:"
+                f"{fetch_start:%Y%m%d}:{fetch_end:%Y%m%d}"
+            )
+            try:
+                frames = _fetch_tickflow_daily_batch(
+                    symbols_in_group,
+                    fetch_start,
+                    fetch_end,
+                    request_key=request_key,
+                )
+            except Exception as exc:
+                logger.error(
+                    "TickFlow 批量下载失败 %s: %s",
+                    symbols_in_group,
+                    exc,
+                )
+                return
+
+            for symbol, df_local, _ in items:
+                downloaded = frames.get(symbol)
+                if downloaded is None or downloaded.empty:
+                    logger.warning(
+                        "TickFlow 批量响应缺少 %s，保留原缓存",
+                        symbol,
+                    )
+                    continue
+                file_path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+                try:
+                    fetch_result = _build_a_share_refresh_result(
+                        symbol,
+                        downloaded=downloaded,
+                        df_local=df_local,
+                        file_path=file_path,
+                        now=now,
+                        full_refresh=full_refresh,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "TickFlow 数据校验失败 %s: %s",
+                        symbol,
+                        exc,
+                    )
+                    continue
                 if isinstance(fetch_result, AShareRefreshResult):
                     if not fetch_result.frame.empty:
                         downloaded_data[symbol] = fetch_result.frame
                         a_share_refresh_meta[symbol] = fetch_result
-                elif fetch_result is not None and not fetch_result.empty:
-                    # Compatibility for injected complete canonical frames.
-                    downloaded_data[symbol] = fetch_result
+
+        fetch_tickflow_group(full_items, full_refresh=True)
+        fetch_tickflow_group(incremental_items, full_refresh=False)
 
     earliest_update = None
     has_new_symbol = False
@@ -328,6 +396,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
         market_data_changed = df_local is None or df_local.empty
         source_refreshed = False
         last_full_refresh_at = None
+        last_incremental_refresh_at = None
 
         with _memory_cache_lock:
             cached_entry = _memory_cache.get(symbol)
@@ -343,6 +412,11 @@ def batch_fetch_and_update(symbols: list) -> dict:
                 refresh_meta = a_share_refresh_meta.get(symbol)
                 last_full_refresh_at = (
                     refresh_meta.last_full_refresh_at
+                    if refresh_meta is not None
+                    else now
+                )
+                last_incremental_refresh_at = (
+                    refresh_meta.last_incremental_refresh_at
                     if refresh_meta is not None
                     else now
                 )
@@ -363,6 +437,9 @@ def batch_fetch_and_update(symbols: list) -> dict:
                         file_path,
                         symbol,
                         last_full_refresh_at=last_full_refresh_at,
+                        last_incremental_refresh_at=(
+                            last_incremental_refresh_at
+                        ),
                     )
                 with _memory_cache_lock:
                     cached_entry["sourceVersion"] = A_SHARE_DATA_SOURCE_VERSION
@@ -385,6 +462,9 @@ def batch_fetch_and_update(symbols: list) -> dict:
                     file_path,
                     symbol,
                     last_full_refresh_at=last_full_refresh_at,
+                    last_incremental_refresh_at=(
+                        last_incremental_refresh_at
+                    ),
                 )
         _cache_put(symbol, {
             "df": df, "df_weekly": df_weekly, "summary": summary,

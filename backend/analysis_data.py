@@ -153,6 +153,47 @@ def _parse_tickflow_payload(payload: dict) -> pd.DataFrame:
     return _drop_incomplete_ohlcv_rows(normalized)
 
 
+def _request_tickflow_payload(
+    path: str,
+    params: dict,
+    *,
+    request_key: str,
+) -> dict:
+    headers = (
+        {"x-api-key": TICKFLOW_API_KEY}
+        if TICKFLOW_API_KEY
+        else {}
+    )
+
+    def request() -> dict:
+        with requests.Session() as session:
+            try:
+                response = session.get(
+                    f"{TICKFLOW_BASE_URL}{path}",
+                    params=params,
+                    headers=headers,
+                    timeout=8,
+                )
+                response.raise_for_status()
+                return response.json()
+            except Exception as exc:
+                status_code = getattr(
+                    getattr(exc, "response", None),
+                    "status_code",
+                    None,
+                )
+                if status_code in {403, 429}:
+                    raise ProviderBlockingError(
+                        str(exc),
+                        provider="tickflow",
+                        key=request_key,
+                        category=f"http_{status_code}",
+                    ) from exc
+                raise
+
+    return tickflow_guard.call(request_key, request)
+
+
 def _fetch_tickflow_daily(
     symbol: str,
     start: datetime,
@@ -171,44 +212,57 @@ def _fetch_tickflow_daily(
         "start_time": _to_tickflow_ms(start),
         "end_time": _to_tickflow_ms(end),
     }
-    headers = (
-        {"x-api-key": TICKFLOW_API_KEY}
-        if TICKFLOW_API_KEY
-        else {}
+    payload = _request_tickflow_payload(
+        "/v1/klines",
+        params,
+        request_key=request_key or symbol.upper(),
+    )
+    return _parse_tickflow_payload(payload)
+
+
+def _fetch_tickflow_daily_batch(
+    symbols: list[str],
+    start: datetime,
+    end: datetime,
+    *,
+    request_key: Optional[str] = None,
+) -> dict[str, pd.DataFrame]:
+    provider_to_internal = {
+        provider_symbol: symbol.upper()
+        for symbol in symbols
+        if (provider_symbol := _tickflow_symbol(symbol)) is not None
+    }
+    if not provider_to_internal:
+        return {}
+
+    provider_symbols = sorted(provider_to_internal)
+    params = {
+        "symbols": ",".join(provider_symbols),
+        "period": "1d",
+        "adjust": "forward_additive",
+        "start_time": _to_tickflow_ms(start),
+        "end_time": _to_tickflow_ms(end),
+    }
+    key = request_key or (
+        f"batch:{','.join(provider_symbols)}:"
+        f"{params['start_time']}:{params['end_time']}"
+    )
+    payload = _request_tickflow_payload(
+        "/v1/klines/batch",
+        params,
+        request_key=key,
     )
 
-    def request_and_parse() -> pd.DataFrame:
-        with requests.Session() as session:
-            try:
-                response = session.get(
-                    f"{TICKFLOW_BASE_URL}/v1/klines",
-                    params=params,
-                    headers=headers,
-                    timeout=8,
-                )
-                response.raise_for_status()
-                payload = response.json()
-            except Exception as exc:
-                status_code = getattr(
-                    getattr(exc, "response", None),
-                    "status_code",
-                    None,
-                )
-                if status_code in {403, 429}:
-                    raise ProviderBlockingError(
-                        str(exc),
-                        provider="tickflow",
-                        key=request_key or symbol.upper(),
-                        category=f"http_{status_code}",
-                    ) from exc
-                raise
-
-        return _parse_tickflow_payload(payload)
-
-    return tickflow_guard.call(
-        request_key or symbol.upper(),
-        request_and_parse,
-    )
+    response_data = payload.get("data") or {}
+    result: dict[str, pd.DataFrame] = {}
+    for provider_symbol, internal_symbol in provider_to_internal.items():
+        symbol_payload = response_data.get(provider_symbol)
+        if not isinstance(symbol_payload, dict):
+            continue
+        result[internal_symbol] = _parse_tickflow_payload(
+            {"data": symbol_payload}
+        )
+    return result
 
 
 def _has_valid_price_history(
@@ -427,6 +481,68 @@ def _has_adjustment_rebase(
     )
 
 
+def _build_a_share_refresh_result(
+    symbol: str,
+    *,
+    downloaded: pd.DataFrame,
+    df_local: Optional[pd.DataFrame],
+    file_path: str,
+    now: datetime,
+    full_refresh: bool,
+) -> Optional[AShareRefreshResult]:
+    if not _has_valid_price_history(downloaded, symbol):
+        return None
+
+    metadata = _read_data_source_metadata(file_path, symbol)
+    if not full_refresh and metadata.get("fullRefreshRequired") is True:
+        raise AShareFullRefreshRequiredError(
+            f"{symbol} requires a manual full TickFlow refresh",
+            provider="tickflow",
+            key=symbol,
+            category="full_refresh_required",
+        )
+
+    refresh_timestamp = _normalize_metadata_timestamp(now)
+    if full_refresh:
+        return AShareRefreshResult(
+            frame=downloaded,
+            full_refresh=True,
+            last_full_refresh_at=refresh_timestamp,
+            last_incremental_refresh_at=refresh_timestamp,
+        )
+
+    if _has_adjustment_rebase(df_local, downloaded):
+        _mark_full_refresh_required(
+            file_path,
+            symbol,
+            reason="overlap_changed",
+            detected_at=now,
+        )
+        raise AShareFullRefreshRequiredError(
+            f"{symbol} TickFlow overlap changed; manual full refresh required",
+            provider="tickflow",
+            key=symbol,
+            category="full_refresh_required",
+        )
+
+    merged = _merge_and_clean_data(
+        _extract_ohlcv_base(df_local),
+        downloaded,
+        now,
+    )
+    if not _has_valid_price_history(merged, symbol):
+        return None
+    last_full_refresh_at = metadata.get("lastFullRefreshAt")
+    if not last_full_refresh_at:
+        return None
+    return AShareRefreshResult(
+        frame=merged,
+        full_refresh=False,
+        last_full_refresh_at=str(last_full_refresh_at),
+        last_incremental_refresh_at=refresh_timestamp,
+    )
+
+
 def _fetch_a_share_refresh(
     symbol: str,
     df_local: Optional[pd.DataFrame],
@@ -436,10 +552,7 @@ def _fetch_a_share_refresh(
 ) -> Optional[AShareRefreshResult]:
     fetch_end = now + timedelta(days=1)
     metadata = _read_data_source_metadata(file_path, symbol)
-    if (
-        metadata.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
-        and metadata.get("fullRefreshRequired") is True
-    ):
+    if metadata.get("fullRefreshRequired") is True:
         raise AShareFullRefreshRequiredError(
             f"{symbol} requires a manual full TickFlow refresh",
             provider="tickflow",
@@ -463,13 +576,13 @@ def _fetch_a_share_refresh(
                 f"{symbol}:full:{fetch_start:%Y%m%d}:{fetch_end:%Y%m%d}"
             ),
         )
-        if not _has_valid_price_history(full_df, symbol):
-            return None
-        return AShareRefreshResult(
-            frame=full_df,
+        return _build_a_share_refresh_result(
+            symbol,
+            downloaded=full_df,
+            df_local=df_local,
+            file_path=file_path,
+            now=now,
             full_refresh=True,
-            last_full_refresh_at=_normalize_metadata_timestamp(now),
-            last_incremental_refresh_at=_normalize_metadata_timestamp(now),
         )
 
     incremental_start = pd.Timestamp(last_update).to_pydatetime() - timedelta(
@@ -484,35 +597,13 @@ def _fetch_a_share_refresh(
             f"{incremental_start:%Y%m%d}:{fetch_end:%Y%m%d}"
         ),
     )
-    if not _has_valid_price_history(incremental_df, symbol):
-        return None
-
-    if _has_adjustment_rebase(df_local, incremental_df):
-        _mark_full_refresh_required(
-            file_path,
-            symbol,
-            reason="overlap_changed",
-            detected_at=now,
-        )
-        raise AShareFullRefreshRequiredError(
-            f"{symbol} TickFlow overlap changed; manual full refresh required",
-            provider="tickflow",
-            key=symbol,
-            category="full_refresh_required",
-        )
-
-    merged = _merge_and_clean_data(
-        _extract_ohlcv_base(df_local),
-        incremental_df,
-        now,
-    )
-    if not _has_valid_price_history(merged, symbol):
-        return None
-    return AShareRefreshResult(
-        frame=merged,
+    return _build_a_share_refresh_result(
+        symbol,
+        downloaded=incremental_df,
+        df_local=df_local,
+        file_path=file_path,
+        now=now,
         full_refresh=False,
-        last_full_refresh_at=str(metadata["lastFullRefreshAt"]),
-        last_incremental_refresh_at=_normalize_metadata_timestamp(now),
     )
 
 
