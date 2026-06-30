@@ -10,8 +10,8 @@ def _release_test_leader():
     main._prewarm_leader_handle = None
 
 
-def test_default_prewarm_schedule_is_twice_daily():
-    assert main.PREWARM_HOURS == (12, 21)
+def test_default_prewarm_schedule_is_evening_only():
+    assert main.PREWARM_HOURS == (21,)
 
 
 def test_only_one_prewarm_leader_can_hold_lock(tmp_path):

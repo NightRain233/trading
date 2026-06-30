@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "backfill_historical_data.py"
@@ -66,13 +67,23 @@ def test_backfill_symbol_keeps_history_before_retention_window(monkeypatch):
     assert not weekly.empty
 
 
-def test_backfill_a_share_uses_eastmoney_when_yfinance_is_empty(monkeypatch):
+def test_backfill_a_share_uses_tickflow_without_yfinance(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir)
-        eastmoney = _ohlcv([10, 11], start="2015-01-01")
+        tickflow = _ohlcv([10, 11], start="2015-01-01")
 
-        monkeypatch.setattr(backfill_historical_data.analysis.yf, "download", lambda *args, **kwargs: pd.DataFrame())
-        monkeypatch.setattr(backfill_historical_data.analysis, "_fetch_eastmoney_daily", lambda *args, **kwargs: eastmoney)
+        monkeypatch.setattr(
+            backfill_historical_data.analysis.yf,
+            "download",
+            lambda *args, **kwargs: pytest.fail(
+                "Yahoo must not fetch A-share history"
+            ),
+        )
+        monkeypatch.setattr(
+            backfill_historical_data.analysis,
+            "_fetch_tickflow_daily",
+            lambda *args, **kwargs: tickflow,
+        )
         monkeypatch.setattr(backfill_historical_data.analysis, "_calculate_daily_indicators", lambda df: df)
         monkeypatch.setattr(backfill_historical_data.analysis, "_calculate_weekly_indicators", lambda df: df.tail(1))
 
@@ -86,5 +97,6 @@ def test_backfill_a_share_uses_eastmoney_when_yfinance_is_empty(monkeypatch):
         stored = pd.read_parquet(data_dir / "510300.SS.parquet")
 
     assert result["status"] == "updated"
+    assert result["usedTickFlow"] is True
     assert stored.index.min() == pd.Timestamp("2015-01-01")
     assert len(stored) == 2

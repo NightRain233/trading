@@ -122,7 +122,7 @@ def run_migration(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Refresh persisted A-share data from Eastmoney.",
+        description="Refresh persisted A-share data from TickFlow.",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--data-dir", type=Path, default=Path(DATA_DIR))

@@ -287,7 +287,7 @@ class CacheMetadataTests(unittest.TestCase):
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_replaces_a_share_history_with_eastmoney(
+    def test_batch_fetch_replaces_a_share_history_with_tickflow(
         self,
         mock_download,
         mock_daily_indicators,
@@ -318,7 +318,7 @@ class CacheMetadataTests(unittest.TestCase):
                 },
                 index=pd.to_datetime(["2026-06-01", "2026-06-03"]),
             )
-            eastmoney_df = pd.DataFrame(
+            tickflow_df = pd.DataFrame(
                 {
                     "Open": [1.179],
                     "High": [1.191],
@@ -335,7 +335,7 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": tickflow_df}) as mock_tickflow:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -343,7 +343,7 @@ class CacheMetadataTests(unittest.TestCase):
             stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
             self.assertIn("2026-06-02", stored_dates)
             self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
-            mock_eastmoney.assert_called_once()
+            mock_tickflow.assert_called_once()
             mock_download.assert_not_called()
 
     def test_batch_fetch_updates_multiple_a_shares_with_one_tickflow_request(
@@ -452,7 +452,7 @@ class CacheMetadataTests(unittest.TestCase):
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_uses_eastmoney_when_yahoo_would_lag(
+    def test_batch_fetch_uses_tickflow_when_yahoo_would_lag(
         self,
         mock_download,
         mock_daily_indicators,
@@ -488,7 +488,7 @@ class CacheMetadataTests(unittest.TestCase):
                 },
                 index=pd.to_datetime(["2026-06-01"]),
             )
-            eastmoney_df = pd.DataFrame(
+            tickflow_df = pd.DataFrame(
                 {
                     "Open": [1.179],
                     "High": [1.191],
@@ -506,14 +506,14 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": tickflow_df}) as mock_tickflow:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
 
             stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
             self.assertIn("2026-06-02", stored_dates)
-            mock_eastmoney.assert_called_once()
+            mock_tickflow.assert_called_once()
             mock_download.assert_not_called()
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
@@ -557,7 +557,7 @@ class CacheMetadataTests(unittest.TestCase):
                 },
                 index=pd.to_datetime(["2026-06-03"]),
             )
-            eastmoney_df = pd.DataFrame(
+            tickflow_df = pd.DataFrame(
                 {
                     "Open": [1.166, 1.179, 1.180],
                     "High": [1.184, 1.191, 1.180],
@@ -575,7 +575,7 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": tickflow_df}) as mock_tickflow:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
@@ -584,7 +584,7 @@ class CacheMetadataTests(unittest.TestCase):
             self.assertIn("2026-06-01", stored_dates)
             self.assertIn("2026-06-02", stored_dates)
             self.assertAlmostEqual(float(stored.loc[pd.Timestamp("2026-06-02"), "Close"]), 1.182)
-            mock_eastmoney.assert_called_once()
+            mock_tickflow.assert_called_once()
             mock_download.assert_not_called()
 
     @patch.object(analysis, "analyze_stock_summary", return_value={"symbol": "512890.SS", "price": 1.164})
@@ -646,7 +646,7 @@ class CacheMetadataTests(unittest.TestCase):
                 },
                 index=pd.to_datetime(["2026-06-03"]),
             )
-            eastmoney_df = pd.DataFrame(
+            tickflow_df = pd.DataFrame(
                 {
                     "Open": [1.179],
                     "High": [1.191],
@@ -663,12 +663,12 @@ class CacheMetadataTests(unittest.TestCase):
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "datetime", FixedDateTime), \
-                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": eastmoney_df}) as mock_eastmoney:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"512890.SS": tickflow_df}) as mock_tickflow:
                 batch_fetch_and_update(["512890.SS"])
 
                 stored = pd.read_parquet(daily_path)
 
-            mock_eastmoney.assert_called_once()
+            mock_tickflow.assert_called_once()
             stored_dates = {pd.Timestamp(ts).date().isoformat() for ts in stored.index}
             self.assertIn("2026-06-02", stored_dates)
             mock_download.assert_not_called()
@@ -677,7 +677,7 @@ class CacheMetadataTests(unittest.TestCase):
     @patch.object(analysis, "_calculate_weekly_indicators")
     @patch.object(analysis, "_calculate_daily_indicators")
     @patch.object(analysis.yf, "download")
-    def test_batch_fetch_uses_eastmoney_without_yfinance_for_a_share(
+    def test_batch_fetch_uses_tickflow_without_yfinance_for_a_share(
         self,
         mock_download,
         mock_daily_indicators,
@@ -685,7 +685,7 @@ class CacheMetadataTests(unittest.TestCase):
         _mock_summary,
     ):
         with tempfile.TemporaryDirectory() as tmpdir:
-            eastmoney_df = _build_daily_df()[["Open", "High", "Low", "Close", "Volume"]]
+            tickflow_df = _build_daily_df()[["Open", "High", "Low", "Close", "Volume"]]
             weekly_df = _build_weekly_df()
             mock_daily_indicators.side_effect = lambda df: df.assign(
                 EMA5=df["Close"],
@@ -696,13 +696,13 @@ class CacheMetadataTests(unittest.TestCase):
             with patch.object(analysis_cache, "DATA_DIR", tmpdir), \
                  patch.object(analysis_data, "DATA_DIR", tmpdir), \
                  patch.object(analysis, "DATA_DIR", tmpdir), \
-                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"515880.SS": eastmoney_df}) as mock_fetch:
+                 patch.object(analysis, "_fetch_tickflow_daily_batch", return_value={"515880.SS": tickflow_df}) as mock_fetch:
                 batch_fetch_and_update(["515880.SS"])
 
             mock_fetch.assert_called_once()
             mock_download.assert_not_called()
             stored = pd.read_parquet(Path(tmpdir) / "515880.SS.parquet")
-            self.assertEqual(list(stored.index), list(eastmoney_df.index))
+            self.assertEqual(list(stored.index), list(tickflow_df.index))
             self.assertTrue(
                 analysis_data._has_current_data_source(
                     str(Path(tmpdir) / "515880.SS.parquet"),

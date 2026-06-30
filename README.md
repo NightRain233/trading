@@ -61,9 +61,10 @@ make deploy-images
 
 ### 行情数据源保护
 
-后端会对东方财富和 Yahoo Finance 分别执行跨进程串行、请求间隔、重复
-抑制、指数退避和熔断。默认预热时间为 Asia/Shanghai 的 12:00、21:00，
-与每日两次复盘节奏一致。
+后端使用 TickFlow 的收盘后历史日 K 作为 A 股和 ETF 主源，Yahoo Finance
+继续负责美股、黄金、加密货币等非 A 股。两个 provider 都有跨进程串行、
+请求间隔、重复抑制、指数退避和熔断保护。默认只在 Asia/Shanghai 的
+21:00 预热一次。
 
 运行状态可通过以下接口查看：
 
@@ -77,18 +78,25 @@ curl http://127.0.0.1:8000/api/data-sources/status
 cp .env.example .env
 ```
 
-东方财富出口 IP 需要冷却时，不必关闭整个服务。设置：
+需要暂停 TickFlow 自动更新时，设置：
 
 ```text
-EASTMONEY_FETCH_ENABLED=false
+TICKFLOW_FETCH_ENABLED=false
 ```
 
-然后重启后端。已有 parquet 缓存和 Yahoo 数据仍可使用；无缓存的 A 股请求
-会返回 HTTP 503，而不是错误的 404。保持禁用 24–48 小时后，将开关改回
-`true`，先请求一个标的并检查状态接口，确认成功后再允许观察列表预热。
+然后重启后端。已有 Parquet 缓存和 Yahoo 数据仍可使用；无缓存的 A 股请求
+会返回 HTTP 503，而不是错误的 404。
 
-`EASTMONEY_PROXY_MODE` 仅接受 `direct` 或 `environment`。系统不会再在一次
-失败后自动从直连切换代理，避免把请求数量翻倍。
+日常更新只拉取最近 7 个自然日并校验重叠区间。如果发现复权基准变化，
+系统会保留旧缓存并等待人工全量校准：
+
+```bash
+cd backend
+uv run python refresh_a_share_data.py --force
+```
+
+新标的首次加入时会自动获取完整保留窗口。TickFlow 免费日 K 盘中不会实时
+更新，因此本项目只在晚间使用已完成的交易日数据。
 
 ## 项目结构
 

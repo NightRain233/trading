@@ -87,10 +87,10 @@ def _download_yfinance(symbol: str, start: str, end: str) -> Optional[pd.DataFra
     return _normalize_downloaded(raw, symbol)
 
 
-def _download_eastmoney_if_applicable(symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
+def _download_tickflow_if_applicable(symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
     if not analysis._is_a_share_symbol(symbol):
         return None
-    return analysis._fetch_eastmoney_daily(
+    return analysis._fetch_tickflow_daily(
         symbol,
         pd.Timestamp(start).to_pydatetime(),
         (pd.Timestamp(end) + pd.Timedelta(days=1)).to_pydatetime(),
@@ -121,9 +121,14 @@ def backfill_symbol(
     weekly_path = data_dir / f"{symbol}_weekly.parquet"
 
     local = _load_local_ohlcv(daily_path)
-    yfinance_frame = _download_yfinance(symbol, start, end)
-    eastmoney_frame = _download_eastmoney_if_applicable(symbol, start, end)
-    merged = _merge_full_history(local, yfinance_frame, eastmoney_frame)
+    is_a_share = analysis._is_a_share_symbol(symbol)
+    yfinance_frame = (
+        None
+        if is_a_share
+        else _download_yfinance(symbol, start, end)
+    )
+    tickflow_frame = _download_tickflow_if_applicable(symbol, start, end)
+    merged = _merge_full_history(local, yfinance_frame, tickflow_frame)
 
     if sleep_seconds > 0:
         time.sleep(sleep_seconds)
@@ -135,7 +140,7 @@ def backfill_symbol(
             "rows": 0,
             "startDate": None,
             "endDate": None,
-            "usedEastmoney": eastmoney_frame is not None and not eastmoney_frame.empty,
+            "usedTickFlow": tickflow_frame is not None and not tickflow_frame.empty,
             "usedYfinance": yfinance_frame is not None and not yfinance_frame.empty,
         }
 
@@ -143,6 +148,13 @@ def backfill_symbol(
     weekly = analysis._calculate_weekly_indicators(daily.copy())
     daily.to_parquet(daily_path)
     weekly.to_parquet(weekly_path)
+    if is_a_share and tickflow_frame is not None and not tickflow_frame.empty:
+        analysis._write_data_source_metadata(
+            str(daily_path),
+            symbol,
+            last_full_refresh_at=pd.Timestamp(end).to_pydatetime(),
+            last_incremental_refresh_at=pd.Timestamp(end).to_pydatetime(),
+        )
 
     return {
         "symbol": symbol,
@@ -151,7 +163,7 @@ def backfill_symbol(
         "weeklyRows": int(len(weekly)),
         "startDate": daily.index.min().date().isoformat(),
         "endDate": daily.index.max().date().isoformat(),
-        "usedEastmoney": eastmoney_frame is not None and not eastmoney_frame.empty,
+        "usedTickFlow": tickflow_frame is not None and not tickflow_frame.empty,
         "usedYfinance": yfinance_frame is not None and not yfinance_frame.empty,
     }
 

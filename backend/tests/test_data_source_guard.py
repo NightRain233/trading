@@ -40,7 +40,7 @@ def build_guard(tmp_path, fake_time, **overrides) -> ProviderGuard:
     )
     assert not overrides
     return ProviderGuard(
-        "eastmoney",
+        "tickflow",
         config,
         state_dir=tmp_path,
         clock=fake_time.clock,
