@@ -35,7 +35,7 @@ from analysis_cache import (  # noqa: F401
 )
 from analysis_data import (  # noqa: F401
     _load_local_data, _fetch_new_data, _merge_and_clean_data,
-    _is_a_share_symbol, _fetch_eastmoney_daily,
+    _is_a_share_symbol, _fetch_tickflow_daily,
     _has_current_data_source, _write_data_source_metadata,
     AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION, yahoo_guard,
     get_data_source_status,

@@ -54,17 +54,17 @@ def test_load_local_data_sorts_legacy_parquet_before_finding_last_update(tmp_pat
     assert last_update == pd.Timestamp("2026-06-27")
 
 
-def test_fetch_new_data_uses_full_retention_eastmoney_for_a_share():
+def test_fetch_new_data_uses_full_retention_tickflow_for_a_share():
     now = datetime(2026, 6, 28, 15, 30)
     last_update = datetime(2026, 6, 27)
-    eastmoney_df = _ohlcv(["2026-06-26"], [1.08])
+    tickflow_df = _ohlcv(["2026-06-26"], [1.08])
 
     with patch.object(
         analysis_data,
-        "_fetch_eastmoney_daily",
+        "_fetch_tickflow_daily",
         create=True,
-        return_value=eastmoney_df,
-    ) as mock_eastmoney, patch.object(analysis_data.yf, "Ticker") as mock_ticker:
+        return_value=tickflow_df,
+    ) as mock_tickflow, patch.object(analysis_data.yf, "Ticker") as mock_ticker:
         result = analysis_data._fetch_new_data(
             "515880.SS",
             last_update,
@@ -74,10 +74,10 @@ def test_fetch_new_data_uses_full_retention_eastmoney_for_a_share():
         )
 
     assert isinstance(result, analysis_data.AShareRefreshResult)
-    assert result.frame.equals(eastmoney_df)
+    assert result.frame.equals(tickflow_df)
     assert result.full_refresh is True
     mock_ticker.assert_not_called()
-    start, end = mock_eastmoney.call_args.args[1:3]
+    start, end = mock_tickflow.call_args.args[1:3]
     assert start == now - timedelta(days=analysis_data.DATA_RETENTION_DAYS)
     assert end == now + timedelta(days=1)
 
@@ -194,7 +194,8 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
 
     with patch.object(
         analysis_data,
-        "_fetch_eastmoney_daily",
+        "_fetch_tickflow_daily",
+        create=True,
         return_value=incremental,
     ) as mock_fetch:
         result = analysis_data._fetch_a_share_refresh(
@@ -211,7 +212,7 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
     assert mock_fetch.call_count == 1
     start = mock_fetch.call_args.args[1]
     assert start == local.index[-1].to_pydatetime() - timedelta(
-        days=analysis_data.EASTMONEY_INCREMENTAL_OVERLAP_DAYS
+        days=analysis_data.TICKFLOW_INCREMENTAL_OVERLAP_DAYS
     )
 
 
@@ -239,7 +240,8 @@ def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
 
     with patch.object(
         analysis_data,
-        "_fetch_eastmoney_daily",
+        "_fetch_tickflow_daily",
+        create=True,
         side_effect=[rebased_overlap, full_history],
     ) as mock_fetch:
         result = analysis_data._fetch_a_share_refresh(
@@ -276,7 +278,8 @@ def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):
 
     with patch.object(
         analysis_data,
-        "_fetch_eastmoney_daily",
+        "_fetch_tickflow_daily",
+        create=True,
         return_value=incremental,
     ) as mock_fetch:
         result = analysis_data._fetch_a_share_refresh(
@@ -292,7 +295,13 @@ def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):
     assert mock_fetch.call_count == 1
 
 
-def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
+def test_tickflow_symbol_mapping():
+    assert analysis_data._tickflow_symbol("588890.SS") == "588890.SH"
+    assert analysis_data._tickflow_symbol("159583.SZ") == "159583.SZ"
+    assert analysis_data._tickflow_symbol("SPY") is None
+
+
+def test_fetch_tickflow_daily_requests_forward_additive_and_normalizes_rows():
     captured = {"sessions": 0, "guard_keys": []}
 
     class FakeResponse:
@@ -302,10 +311,13 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
         def json(self):
             return {
                 "data": {
-                    "klines": [
-                        "2026-02-04,1.050,1.051,1.060,1.040,123",
-                        "2026-02-03,1.084,1.084,1.090,1.070,456",
-                    ]
+                    "timestamp": [1782748800000],
+                    "open": [5.50],
+                    "high": [5.60],
+                    "low": [5.45],
+                    "close": [5.57],
+                    "volume": [379147],
+                    "amount": [211000000.0],
                 }
             }
 
@@ -321,8 +333,14 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
         def __exit__(self, *_args):
             return False
 
-        def get(self, url, params, timeout):
-            captured.update(url=url, params=params, timeout=timeout, trust_env=self.trust_env)
+        def get(self, url, params, headers, timeout):
+            captured.update(
+                url=url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+                trust_env=self.trust_env,
+            )
             return FakeResponse()
 
     class FakeGuard:
@@ -338,32 +356,35 @@ def test_fetch_eastmoney_daily_requests_qfq_and_normalizes_rows():
         create=True,
     ), patch.object(
         analysis_data,
-        "eastmoney_guard",
+        "tickflow_guard",
         FakeGuard(),
         create=True,
     ), patch.object(
         analysis_data,
-        "EASTMONEY_PROXY_MODE",
-        "direct",
+        "TICKFLOW_API_KEY",
+        "",
         create=True,
     ):
-        result = analysis_data._fetch_eastmoney_daily(
-            "515880.SS",
-            datetime(2026, 2, 1),
-            datetime(2026, 2, 5),
+        result = analysis_data._fetch_tickflow_daily(
+            "588890.SS",
+            datetime(2026, 6, 20),
+            datetime(2026, 7, 1),
         )
 
-    assert captured["params"]["secid"] == "1.515880"
-    assert captured["params"]["fqt"] == "1"
-    assert captured["guard_keys"] == ["515880.SS"]
+    assert captured["url"] == "https://free-api.tickflow.org/v1/klines"
+    assert captured["params"]["symbol"] == "588890.SH"
+    assert captured["params"]["period"] == "1d"
+    assert captured["params"]["adjust"] == "forward_additive"
+    assert captured["headers"] == {}
+    assert captured["guard_keys"] == ["588890.SS"]
     assert captured["sessions"] == 1
-    assert captured["trust_env"] is False
     assert result.index.is_monotonic_increasing
-    assert list(result.columns) == ["Open", "Close", "High", "Low", "Volume"]
-    assert result.loc[pd.Timestamp("2026-02-03"), "Volume"] == 45600
+    assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert list(result.index) == [pd.Timestamp("2026-06-30")]
+    assert result.iloc[0]["Volume"] == 37_914_700
 
 
-def test_fetch_eastmoney_daily_environment_route_uses_trust_env():
+def test_fetch_tickflow_daily_sends_configured_api_key():
     captured = {}
 
     class FakeResponse:
@@ -373,9 +394,12 @@ def test_fetch_eastmoney_daily_environment_route_uses_trust_env():
         def json(self):
             return {
                 "data": {
-                    "klines": [
-                        "2026-02-03,1.084,1.084,1.090,1.070,456",
-                    ]
+                    "timestamp": [1782748800000],
+                    "open": [5.50],
+                    "high": [5.60],
+                    "low": [5.45],
+                    "close": [5.57],
+                    "volume": [379147],
                 }
             }
 
@@ -388,8 +412,8 @@ def test_fetch_eastmoney_daily_environment_route_uses_trust_env():
         def __exit__(self, *_args):
             return False
 
-        def get(self, *_args, **_kwargs):
-            captured["trust_env"] = self.trust_env
+        def get(self, *_args, **kwargs):
+            captured["headers"] = kwargs["headers"]
             return FakeResponse()
 
     class FakeGuard:
@@ -402,70 +426,43 @@ def test_fetch_eastmoney_daily_environment_route_uses_trust_env():
         FakeSession,
     ), patch.object(
         analysis_data,
-        "eastmoney_guard",
+        "tickflow_guard",
         FakeGuard(),
         create=True,
     ), patch.object(
         analysis_data,
-        "EASTMONEY_PROXY_MODE",
-        "environment",
+        "TICKFLOW_API_KEY",
+        "secret-token",
         create=True,
     ):
-        result = analysis_data._fetch_eastmoney_daily(
-            "515880.SS",
+        result = analysis_data._fetch_tickflow_daily(
+            "588890.SS",
             datetime(2026, 2, 1),
             datetime(2026, 2, 5),
         )
 
     assert result is not None
-    assert captured["trust_env"] is True
+    assert captured["headers"] == {"x-api-key": "secret-token"}
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "Remote end closed connection without response",
-        "Empty reply from server",
-        "Connection reset by peer",
-    ],
-)
-def test_fetch_eastmoney_daily_classifies_silent_disconnect_as_blocking(message):
-    class FakeSession:
-        trust_env = False
+def test_parse_tickflow_payload_rejects_inconsistent_column_lengths():
+    payload = {
+        "data": {
+            "timestamp": [1782748800000],
+            "open": [5.50],
+            "high": [5.60],
+            "low": [5.45],
+            "close": [5.57],
+            "volume": [],
+        }
+    }
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def get(self, *_args, **_kwargs):
-            raise requests.ConnectionError(message)
-
-    class PassThroughGuard:
-        def call(self, _key, operation):
-            return operation()
-
-    with patch.object(
-        analysis_data.requests,
-        "Session",
-        FakeSession,
-    ), patch.object(
-        analysis_data,
-        "eastmoney_guard",
-        PassThroughGuard(),
-        create=True,
-    ):
-        with pytest.raises(ProviderBlockingError):
-            analysis_data._fetch_eastmoney_daily(
-                "515880.SS",
-                datetime(2026, 2, 1),
-                datetime(2026, 2, 5),
-            )
+    with pytest.raises(ValueError, match="inconsistent"):
+        analysis_data._parse_tickflow_payload(payload)
 
 
 @pytest.mark.parametrize("status_code", [403, 429])
-def test_fetch_eastmoney_daily_classifies_http_block_as_blocking(status_code):
+def test_fetch_tickflow_daily_classifies_http_block_as_blocking(status_code):
     class FakeResponse:
         def raise_for_status(self):
             response = requests.Response()
@@ -497,11 +494,11 @@ def test_fetch_eastmoney_daily_classifies_http_block_as_blocking(status_code):
         FakeSession,
     ), patch.object(
         analysis_data,
-        "eastmoney_guard",
+        "tickflow_guard",
         PassThroughGuard(),
     ):
         with pytest.raises(ProviderBlockingError):
-            analysis_data._fetch_eastmoney_daily(
+            analysis_data._fetch_tickflow_daily(
                 "515880.SS",
                 datetime(2026, 2, 1),
                 datetime(2026, 2, 5),
@@ -509,9 +506,9 @@ def test_fetch_eastmoney_daily_classifies_http_block_as_blocking(status_code):
 
 
 def test_data_source_protection_defaults_are_safe():
-    assert analysis_data.EASTMONEY_PROXY_MODE == "direct"
-    assert analysis_data.EASTMONEY_MIN_INTERVAL_SECONDS == 1.5
-    assert analysis_data.EASTMONEY_CIRCUIT_COOLDOWN_SECONDS == 1800
+    assert analysis_data.TICKFLOW_BASE_URL == "https://free-api.tickflow.org"
+    assert analysis_data.TICKFLOW_MIN_INTERVAL_SECONDS == 1.0
+    assert analysis_data.TICKFLOW_CIRCUIT_COOLDOWN_SECONDS == 900
     assert analysis_data.YAHOO_MIN_INTERVAL_SECONDS == 1.0
 
 
@@ -548,7 +545,7 @@ def test_fetch_stock_data_migrates_fresh_legacy_a_share_cache(tmp_path):
     assert analysis_data._has_current_data_source(str(file_path), "515880.SS")
 
 
-def test_fetch_stock_data_keeps_legacy_cache_when_eastmoney_fails(tmp_path):
+def test_fetch_stock_data_keeps_legacy_cache_when_tickflow_fails(tmp_path):
     legacy = _ohlcv(["2026-01-02", "2026-01-05"], [3.10, 3.16]).assign(
         EMA5=3.13,
         EMA20=3.13,

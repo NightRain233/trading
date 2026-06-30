@@ -14,10 +14,9 @@ import yfinance as yf
 
 from analysis_constants import (
     DATA_DIR, DATA_RETENTION_DAYS, CACHE_DURATION_SECONDS,
-    TICKFLOW_FETCH_ENABLED, TICKFLOW_MIN_INTERVAL_SECONDS,
-    TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
-    EASTMONEY_FETCH_ENABLED, EASTMONEY_PROXY_MODE,
-    EASTMONEY_MIN_INTERVAL_SECONDS, EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
+    TICKFLOW_FETCH_ENABLED, TICKFLOW_BASE_URL, TICKFLOW_API_KEY,
+    TICKFLOW_MIN_INTERVAL_SECONDS, TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
+    TICKFLOW_INCREMENTAL_OVERLAP_DAYS,
     EASTMONEY_FULL_REFRESH_DAYS, EASTMONEY_INCREMENTAL_OVERLAP_DAYS,
     YAHOO_FETCH_ENABLED, YAHOO_MIN_INTERVAL_SECONDS,
     YAHOO_CIRCUIT_COOLDOWN_SECONDS,
@@ -54,19 +53,6 @@ tickflow_guard = ProviderGuard(
         backoff_seconds=1.0,
         failure_threshold=3,
         circuit_cooldown_seconds=TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
-    ),
-    state_dir=PROVIDER_STATE_DIR,
-)
-eastmoney_guard = ProviderGuard(
-    "eastmoney",
-    ProviderConfig(
-        enabled=EASTMONEY_FETCH_ENABLED,
-        min_interval_seconds=EASTMONEY_MIN_INTERVAL_SECONDS,
-        duplicate_window_seconds=5 * 60,
-        max_retries=1,
-        backoff_seconds=1.0,
-        failure_threshold=3,
-        circuit_cooldown_seconds=EASTMONEY_CIRCUIT_COOLDOWN_SECONDS,
     ),
     state_dir=PROVIDER_STATE_DIR,
 )
@@ -109,43 +95,95 @@ def _is_a_share_symbol(symbol: str) -> bool:
     )
 
 
-def _eastmoney_secid(symbol: str) -> Optional[str]:
+def _tickflow_symbol(symbol: str) -> Optional[str]:
     normalized = symbol.upper()
-    code = normalized.split(".", 1)[0]
     if normalized.endswith(".SS"):
-        return f"1.{code}"
+        return f"{normalized[:-3]}.SH"
     if normalized.endswith(".SZ"):
-        return f"0.{code}"
+        return normalized
     return None
 
 
-def _fetch_eastmoney_daily(
+def _to_tickflow_ms(value: datetime) -> int:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("Asia/Shanghai")
+    else:
+        timestamp = timestamp.tz_convert("Asia/Shanghai")
+    return int(timestamp.timestamp() * 1000)
+
+
+def _tickflow_timestamp(value: int) -> pd.Timestamp:
+    return (
+        pd.to_datetime(value, unit="ms", utc=True)
+        .tz_convert("Asia/Shanghai")
+        .tz_localize(None)
+        .normalize()
+    )
+
+
+def _parse_tickflow_payload(payload: dict) -> pd.DataFrame:
+    data = payload.get("data") or {}
+    required = ("timestamp", "open", "high", "low", "close", "volume")
+    lengths = {len(data.get(name) or []) for name in required}
+    if lengths == {0}:
+        return pd.DataFrame(
+            columns=["Open", "High", "Low", "Close", "Volume"],
+            index=pd.DatetimeIndex([], name="Date"),
+        )
+    if len(lengths) != 1 or 0 in lengths:
+        raise ValueError(
+            "TickFlow payload columns have inconsistent lengths"
+        )
+
+    frame = pd.DataFrame(
+        {
+            "Date": [
+                _tickflow_timestamp(value)
+                for value in data["timestamp"]
+            ],
+            "Open": data["open"],
+            "High": data["high"],
+            "Low": data["low"],
+            "Close": data["close"],
+            "Volume": np.asarray(data["volume"], dtype=float) * 100,
+        }
+    )
+    normalized = frame.set_index("Date").sort_index()
+    return _drop_incomplete_ohlcv_rows(normalized)
+
+
+def _fetch_tickflow_daily(
     symbol: str,
     start: datetime,
     end: datetime,
     *,
     request_key: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
-    secid = _eastmoney_secid(symbol)
-    if not secid:
+    provider_symbol = _tickflow_symbol(symbol)
+    if provider_symbol is None:
         return None
 
     params = {
-        "secid": secid,
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-        "klt": "101",
-        "fqt": "1",
-        "beg": pd.Timestamp(start).strftime("%Y%m%d"),
-        "end": pd.Timestamp(end).strftime("%Y%m%d"),
+        "symbol": provider_symbol,
+        "period": "1d",
+        "adjust": "forward_additive",
+        "start_time": _to_tickflow_ms(start),
+        "end_time": _to_tickflow_ms(end),
     }
+    headers = (
+        {"x-api-key": TICKFLOW_API_KEY}
+        if TICKFLOW_API_KEY
+        else {}
+    )
+
     def request_and_parse() -> pd.DataFrame:
         with requests.Session() as session:
-            session.trust_env = EASTMONEY_PROXY_MODE == "environment"
             try:
                 response = session.get(
-                    "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+                    f"{TICKFLOW_BASE_URL}/v1/klines",
                     params=params,
+                    headers=headers,
                     timeout=8,
                 )
                 response.raise_for_status()
@@ -156,43 +194,18 @@ def _fetch_eastmoney_daily(
                     "status_code",
                     None,
                 )
-                message = str(exc).lower()
-                blocking_markers = (
-                    "remote end closed",
-                    "empty reply",
-                    "connection reset",
-                )
-                if status_code in {403, 429} or any(
-                    marker in message for marker in blocking_markers
-                ):
-                    raise ProviderBlockingError(str(exc)) from exc
+                if status_code in {403, 429}:
+                    raise ProviderBlockingError(
+                        str(exc),
+                        provider="tickflow",
+                        key=request_key or symbol.upper(),
+                        category=f"http_{status_code}",
+                    ) from exc
                 raise
 
-        rows = (payload.get("data") or {}).get("klines") or []
-        records = []
-        for raw_row in rows:
-            parts = str(raw_row).split(",")
-            if len(parts) < 6:
-                continue
-            try:
-                records.append({
-                    "Date": pd.to_datetime(parts[0]),
-                    "Open": float(parts[1]),
-                    "Close": float(parts[2]),
-                    "High": float(parts[3]),
-                    "Low": float(parts[4]),
-                    "Volume": float(parts[5]) * 100,
-                })
-            except (TypeError, ValueError):
-                continue
+        return _parse_tickflow_payload(payload)
 
-        if not records:
-            raise ValueError("Eastmoney payload contains no valid kline rows")
-
-        df = pd.DataFrame.from_records(records).set_index("Date").sort_index()
-        return _drop_incomplete_ohlcv_rows(df)
-
-    return eastmoney_guard.call(
+    return tickflow_guard.call(
         request_key or symbol.upper(),
         request_and_parse,
     )
@@ -408,7 +421,7 @@ def _fetch_a_share_refresh(
 
     if needs_full:
         fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-        full_df = _fetch_eastmoney_daily(
+        full_df = _fetch_tickflow_daily(
             symbol,
             fetch_start,
             fetch_end,
@@ -425,9 +438,9 @@ def _fetch_a_share_refresh(
         )
 
     incremental_start = pd.Timestamp(last_update).to_pydatetime() - timedelta(
-        days=EASTMONEY_INCREMENTAL_OVERLAP_DAYS
+        days=TICKFLOW_INCREMENTAL_OVERLAP_DAYS
     )
-    incremental_df = _fetch_eastmoney_daily(
+    incremental_df = _fetch_tickflow_daily(
         symbol,
         incremental_start,
         fetch_end,
@@ -441,7 +454,7 @@ def _fetch_a_share_refresh(
 
     if _has_adjustment_rebase(df_local, incremental_df):
         fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-        full_df = _fetch_eastmoney_daily(
+        full_df = _fetch_tickflow_daily(
             symbol,
             fetch_start,
             fetch_end,
