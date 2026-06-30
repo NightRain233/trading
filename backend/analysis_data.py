@@ -209,6 +209,7 @@ def _fetch_tickflow_daily(
         "symbol": provider_symbol,
         "period": "1d",
         "adjust": "forward_additive",
+        "count": 10000,
         "start_time": _to_tickflow_ms(start),
         "end_time": _to_tickflow_ms(end),
     }
@@ -240,6 +241,7 @@ def _fetch_tickflow_daily_batch(
         "symbols": ",".join(provider_symbols),
         "period": "1d",
         "adjust": "forward_additive",
+        "count": 10000,
         "start_time": _to_tickflow_ms(start),
         "end_time": _to_tickflow_ms(end),
     }
@@ -463,12 +465,11 @@ def _has_adjustment_rebase(
     if local_ohlcv is None or downloaded_ohlcv is None:
         return False
     common = local_ohlcv.index.intersection(downloaded_ohlcv.index).sort_values()
-    if len(common) <= 1:
+    if len(common) == 0:
         return False
-    completed_common = common[:-1]
     columns = ["Open", "High", "Low", "Close"]
-    left = local_ohlcv.loc[completed_common, columns].to_numpy(dtype=float)
-    right = downloaded_ohlcv.loc[completed_common, columns].to_numpy(
+    left = local_ohlcv.loc[common, columns].to_numpy(dtype=float)
+    right = downloaded_ohlcv.loc[common, columns].to_numpy(
         dtype=float
     )
     return not bool(

@@ -183,7 +183,7 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
     )
     incremental = _ohlcv(
         ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27"],
-        [1.00033, 1.01033, 1.02033, 1.04, 1.05],
+        [1.00033, 1.01033, 1.02033, 1.03033, 1.05],
     )
     parquet_path = tmp_path / f"{symbol}.parquet"
     analysis_data._write_data_source_metadata(
@@ -302,7 +302,7 @@ def test_pending_manual_full_refresh_does_not_retry_automatically(tmp_path):
     mock_fetch.assert_not_called()
 
 
-def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):
+def test_single_overlap_change_requires_manual_full_refresh(tmp_path):
     symbol = "515880.SS"
     now = datetime(2026, 6, 28, 15, 0)
     local = _ohlcv(
@@ -326,16 +326,17 @@ def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):
         create=True,
         return_value=incremental,
     ) as mock_fetch:
-        result = analysis_data._fetch_a_share_refresh(
-            symbol,
-            local,
-            local.index[-1],
-            str(parquet_path),
-            now,
-        )
+        with pytest.raises(
+            analysis_data.AShareFullRefreshRequiredError
+        ):
+            analysis_data._fetch_a_share_refresh(
+                symbol,
+                local,
+                local.index[-1],
+                str(parquet_path),
+                now,
+            )
 
-    assert result is not None
-    assert result.full_refresh is False
     assert mock_fetch.call_count == 1
 
 
@@ -419,6 +420,7 @@ def test_fetch_tickflow_daily_requests_forward_additive_and_normalizes_rows():
     assert captured["params"]["symbol"] == "588890.SH"
     assert captured["params"]["period"] == "1d"
     assert captured["params"]["adjust"] == "forward_additive"
+    assert captured["params"]["count"] == 10000
     assert captured["headers"] == {}
     assert captured["guard_keys"] == ["588890.SS"]
     assert captured["sessions"] == 1
@@ -553,6 +555,7 @@ def test_fetch_tickflow_daily_batch_uses_one_request_and_maps_symbols():
     assert captured["url"].endswith("/v1/klines/batch")
     assert captured["params"]["symbols"] == "159915.SZ,510300.SH"
     assert captured["params"]["adjust"] == "forward_additive"
+    assert captured["params"]["count"] == 10000
     assert len(captured["guard_keys"]) == 1
     assert set(result) == {"510300.SS", "159915.SZ"}
     assert result["510300.SS"].iloc[-1]["Close"] == 5.019

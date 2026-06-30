@@ -363,7 +363,7 @@ class CacheMetadataTests(unittest.TestCase):
             next_date = last_date + pd.offsets.BDay(1)
             downloaded = {}
 
-            for offset, symbol in enumerate(symbols):
+            for symbol in symbols:
                 daily_path = data_dir / f"{symbol}.parquet"
                 weekly_path = data_dir / f"{symbol}_weekly.parquet"
                 daily.to_parquet(daily_path)
@@ -387,7 +387,7 @@ class CacheMetadataTests(unittest.TestCase):
                 os.utime(daily_path, (old_mtime, old_mtime))
                 os.utime(weekly_path, (old_mtime, old_mtime))
 
-                close = float(daily.iloc[-1]["Close"]) + offset * 0.1
+                close = float(daily.iloc[-1]["Close"])
                 downloaded[symbol] = pd.DataFrame(
                     {
                         "Open": [close - 0.01, close],
