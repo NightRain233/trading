@@ -110,8 +110,10 @@ def test_source_metadata_marks_legacy_a_share_stale(tmp_path):
         str(parquet_path),
         "515880.SS",
     )
-    assert metadata["sourceVersion"] == "eastmoney-qfq-v2"
+    assert metadata["sourceVersion"] == "tickflow-forward-additive-v1"
     assert metadata["lastFullRefreshAt"] == refreshed_at.isoformat()
+    assert "lastIncrementalRefreshAt" in metadata
+    assert metadata["fullRefreshRequired"] is False
 
     analysis_data._invalidate_data_source_metadata(str(parquet_path))
     assert not analysis_data._has_current_data_source(str(parquet_path), "515880.SS")
@@ -123,14 +125,14 @@ def test_non_a_share_does_not_require_source_metadata(tmp_path):
     assert analysis_data._has_current_data_source(str(parquet_path), "SPY")
 
 
-def test_v1_source_metadata_is_stale_after_v2_upgrade(tmp_path):
+def test_eastmoney_source_metadata_is_stale_after_tickflow_upgrade(tmp_path):
     parquet_path = tmp_path / "515880.SS.parquet"
     metadata_path = tmp_path / "515880.SS.parquet.source.json"
     metadata_path.write_text(
         json.dumps(
             {
                 "symbol": "515880.SS",
-                "sourceVersion": "eastmoney-qfq-v1",
+                "sourceVersion": "eastmoney-qfq-v2",
             }
         ),
         encoding="utf-8",
@@ -142,7 +144,7 @@ def test_v1_source_metadata_is_stale_after_v2_upgrade(tmp_path):
     )
 
 
-def test_recent_v2_metadata_uses_incremental_refresh(tmp_path):
+def test_current_tickflow_metadata_uses_incremental_refresh(tmp_path):
     parquet_path = tmp_path / "515880.SS.parquet"
     now = datetime(2026, 6, 28, 15, 0)
     analysis_data._write_data_source_metadata(
@@ -151,14 +153,13 @@ def test_recent_v2_metadata_uses_incremental_refresh(tmp_path):
         last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
     )
 
-    assert not analysis_data._a_share_needs_full_refresh(
+    assert not analysis_data._a_share_needs_initial_full_refresh(
         str(parquet_path),
         "515880.SS",
-        now,
     )
 
 
-def test_overdue_v2_metadata_requires_full_refresh(tmp_path):
+def test_old_tickflow_full_refresh_date_does_not_force_periodic_full(tmp_path):
     parquet_path = tmp_path / "515880.SS.parquet"
     now = datetime(2026, 6, 28, 15, 0)
     analysis_data._write_data_source_metadata(
@@ -167,10 +168,9 @@ def test_overdue_v2_metadata_requires_full_refresh(tmp_path):
         last_full_refresh_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
     )
 
-    assert analysis_data._a_share_needs_full_refresh(
+    assert not analysis_data._a_share_needs_initial_full_refresh(
         str(parquet_path),
         "515880.SS",
-        now,
     )
 
 
@@ -183,7 +183,7 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
     )
     incremental = _ohlcv(
         ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27"],
-        [1.00, 1.01, 1.02, 1.04, 1.05],
+        [1.00033, 1.01033, 1.02033, 1.04, 1.05],
     )
     parquet_path = tmp_path / f"{symbol}.parquet"
     analysis_data._write_data_source_metadata(
@@ -208,6 +208,9 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
 
     assert result is not None
     assert result.full_refresh is False
+    assert result.last_incremental_refresh_at == now.replace(
+        tzinfo=timezone.utc
+    ).isoformat()
     assert result.frame.loc[pd.Timestamp("2026-06-27"), "Close"] == 1.05
     assert mock_fetch.call_count == 1
     start = mock_fetch.call_args.args[1]
@@ -216,7 +219,7 @@ def test_stable_overlap_merges_incrementally_without_full_rebase(tmp_path):
     )
 
 
-def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
+def test_changed_completed_overlap_requires_manual_full_refresh(tmp_path):
     symbol = "515880.SS"
     now = datetime(2026, 6, 28, 15, 0)
     local = _ohlcv(
@@ -226,10 +229,6 @@ def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
     rebased_overlap = _ohlcv(
         ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
         [0.90, 0.91, 0.92, 1.04],
-    )
-    full_history = _ohlcv(
-        ["2026-06-20", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
-        [0.88, 0.90, 0.91, 0.92, 1.04],
     )
     parquet_path = tmp_path / f"{symbol}.parquet"
     analysis_data._write_data_source_metadata(
@@ -242,9 +241,57 @@ def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
         analysis_data,
         "_fetch_tickflow_daily",
         create=True,
-        side_effect=[rebased_overlap, full_history],
+        return_value=rebased_overlap,
     ) as mock_fetch:
-        result = analysis_data._fetch_a_share_refresh(
+        with pytest.raises(
+            analysis_data.AShareFullRefreshRequiredError
+        ) as exc_info:
+            analysis_data._fetch_a_share_refresh(
+                symbol,
+                local,
+                local.index[-1],
+                str(parquet_path),
+                now,
+            )
+
+    assert exc_info.value.provider == "tickflow"
+    assert exc_info.value.category == "full_refresh_required"
+    assert mock_fetch.call_count == 1
+    metadata = analysis_data._read_data_source_metadata(
+        str(parquet_path),
+        symbol,
+    )
+    assert metadata["fullRefreshRequired"] is True
+    assert metadata["fullRefreshReason"] == "overlap_changed"
+
+
+def test_pending_manual_full_refresh_does_not_retry_automatically(tmp_path):
+    symbol = "515880.SS"
+    now = datetime(2026, 6, 28, 15, 0)
+    local = _ohlcv(
+        ["2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"],
+        [1.00, 1.01, 1.02, 1.03],
+    )
+    parquet_path = tmp_path / f"{symbol}.parquet"
+    analysis_data._write_data_source_metadata(
+        str(parquet_path),
+        symbol,
+        last_full_refresh_at=datetime(2026, 6, 25, tzinfo=timezone.utc),
+    )
+    analysis_data._mark_full_refresh_required(
+        str(parquet_path),
+        symbol,
+        reason="overlap_changed",
+        detected_at=now,
+    )
+
+    with patch.object(
+        analysis_data,
+        "_fetch_tickflow_daily",
+    ) as mock_fetch, pytest.raises(
+        analysis_data.AShareFullRefreshRequiredError
+    ):
+        analysis_data._fetch_a_share_refresh(
             symbol,
             local,
             local.index[-1],
@@ -252,10 +299,7 @@ def test_changed_completed_overlap_triggers_full_rebase(tmp_path):
             now,
         )
 
-    assert result is not None
-    assert result.full_refresh is True
-    assert result.frame.equals(full_history)
-    assert mock_fetch.call_count == 2
+    mock_fetch.assert_not_called()
 
 
 def test_newest_overlap_change_does_not_trigger_full_rebase(tmp_path):

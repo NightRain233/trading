@@ -17,7 +17,6 @@ from analysis_constants import (
     TICKFLOW_FETCH_ENABLED, TICKFLOW_BASE_URL, TICKFLOW_API_KEY,
     TICKFLOW_MIN_INTERVAL_SECONDS, TICKFLOW_CIRCUIT_COOLDOWN_SECONDS,
     TICKFLOW_INCREMENTAL_OVERLAP_DAYS,
-    EASTMONEY_FULL_REFRESH_DAYS, EASTMONEY_INCREMENTAL_OVERLAP_DAYS,
     YAHOO_FETCH_ENABLED, YAHOO_MIN_INTERVAL_SECONDS,
     YAHOO_CIRCUIT_COOLDOWN_SECONDS,
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
@@ -39,7 +38,8 @@ from data_source_guard import (
 
 logger = logging.getLogger(__name__)
 
-A_SHARE_DATA_SOURCE_VERSION = "eastmoney-qfq-v2"
+A_SHARE_DATA_SOURCE_VERSION = "tickflow-forward-additive-v1"
+TICKFLOW_OVERLAP_ATOL = 5e-4
 PRICE_JUMP_THRESHOLD = 0.40
 PROVIDER_STATE_DIR = os.path.join(DATA_DIR, ".provider-state")
 
@@ -294,21 +294,53 @@ def _write_data_source_metadata(
     symbol: str,
     *,
     last_full_refresh_at: datetime | str | None = None,
+    last_incremental_refresh_at: datetime | str | None = None,
+    full_refresh_required: bool = False,
 ) -> None:
     if not _is_a_share_symbol(symbol):
         return
-    metadata_path = _source_metadata_path(file_path)
-    temporary_path = f"{metadata_path}.tmp"
     payload = {
         "symbol": symbol.upper(),
         "sourceVersion": A_SHARE_DATA_SOURCE_VERSION,
+        "fullRefreshRequired": full_refresh_required,
         "lastFullRefreshAt": _normalize_metadata_timestamp(
             last_full_refresh_at
         ),
+        "lastIncrementalRefreshAt": _normalize_metadata_timestamp(
+            last_incremental_refresh_at
+        ),
     }
+    _atomic_write_source_metadata(file_path, payload)
+
+
+def _atomic_write_source_metadata(file_path: str, payload: dict) -> None:
+    metadata_path = _source_metadata_path(file_path)
+    temporary_path = f"{metadata_path}.tmp"
     with open(temporary_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
     os.replace(temporary_path, metadata_path)
+
+
+def _mark_full_refresh_required(
+    file_path: str,
+    symbol: str,
+    *,
+    reason: str,
+    detected_at: datetime,
+) -> None:
+    metadata = _read_data_source_metadata(file_path, symbol)
+    metadata.update(
+        {
+            "symbol": symbol.upper(),
+            "sourceVersion": A_SHARE_DATA_SOURCE_VERSION,
+            "fullRefreshRequired": True,
+            "fullRefreshReason": reason,
+            "fullRefreshDetectedAt": _normalize_metadata_timestamp(
+                detected_at
+            ),
+        }
+    )
+    _atomic_write_source_metadata(file_path, metadata)
 
 
 def _invalidate_data_source_metadata(file_path: str) -> None:
@@ -318,33 +350,12 @@ def _invalidate_data_source_metadata(file_path: str) -> None:
         pass
 
 
-def _a_share_needs_full_refresh(
+def _a_share_needs_initial_full_refresh(
     file_path: str,
     symbol: str,
-    now: datetime,
 ) -> bool:
     metadata = _read_data_source_metadata(file_path, symbol)
-    if metadata.get("sourceVersion") != A_SHARE_DATA_SOURCE_VERSION:
-        return True
-    last_full_raw = metadata.get("lastFullRefreshAt")
-    if not last_full_raw:
-        return True
-    try:
-        last_full = pd.Timestamp(last_full_raw)
-        now_ts = pd.Timestamp(now)
-        if last_full.tzinfo is None:
-            last_full = last_full.tz_localize("UTC")
-        else:
-            last_full = last_full.tz_convert("UTC")
-        if now_ts.tzinfo is None:
-            now_ts = now_ts.tz_localize("UTC")
-        else:
-            now_ts = now_ts.tz_convert("UTC")
-    except (TypeError, ValueError):
-        return True
-    return now_ts - last_full >= pd.Timedelta(
-        days=EASTMONEY_FULL_REFRESH_DAYS
-    )
+    return metadata.get("sourceVersion") != A_SHARE_DATA_SOURCE_VERSION
 
 
 def _load_local_data(file_path: str, symbol: str) -> Tuple[Optional[pd.DataFrame], Optional[datetime]]:
@@ -373,6 +384,11 @@ class AShareRefreshResult:
     frame: pd.DataFrame
     full_refresh: bool
     last_full_refresh_at: str
+    last_incremental_refresh_at: str
+
+
+class AShareFullRefreshRequiredError(ProviderError):
+    pass
 
 
 def _extract_ohlcv_base(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
@@ -401,7 +417,14 @@ def _has_adjustment_rebase(
     right = downloaded_ohlcv.loc[completed_common, columns].to_numpy(
         dtype=float
     )
-    return not bool(np.isclose(left, right, rtol=1e-8, atol=1e-8).all())
+    return not bool(
+        np.isclose(
+            left,
+            right,
+            rtol=1e-8,
+            atol=TICKFLOW_OVERLAP_ATOL,
+        ).all()
+    )
 
 
 def _fetch_a_share_refresh(
@@ -412,12 +435,23 @@ def _fetch_a_share_refresh(
     now: datetime,
 ) -> Optional[AShareRefreshResult]:
     fetch_end = now + timedelta(days=1)
+    metadata = _read_data_source_metadata(file_path, symbol)
+    if (
+        metadata.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
+        and metadata.get("fullRefreshRequired") is True
+    ):
+        raise AShareFullRefreshRequiredError(
+            f"{symbol} requires a manual full TickFlow refresh",
+            provider="tickflow",
+            key=symbol,
+            category="full_refresh_required",
+        )
+
     needs_full = (
         df_local is None
         or last_update is None
-        or _a_share_needs_full_refresh(file_path, symbol, now)
+        or _a_share_needs_initial_full_refresh(file_path, symbol)
     )
-    metadata = _read_data_source_metadata(file_path, symbol)
 
     if needs_full:
         fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
@@ -435,6 +469,7 @@ def _fetch_a_share_refresh(
             frame=full_df,
             full_refresh=True,
             last_full_refresh_at=_normalize_metadata_timestamp(now),
+            last_incremental_refresh_at=_normalize_metadata_timestamp(now),
         )
 
     incremental_start = pd.Timestamp(last_update).to_pydatetime() - timedelta(
@@ -453,21 +488,17 @@ def _fetch_a_share_refresh(
         return None
 
     if _has_adjustment_rebase(df_local, incremental_df):
-        fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-        full_df = _fetch_tickflow_daily(
+        _mark_full_refresh_required(
+            file_path,
             symbol,
-            fetch_start,
-            fetch_end,
-            request_key=(
-                f"{symbol}:rebase:{fetch_start:%Y%m%d}:{fetch_end:%Y%m%d}"
-            ),
+            reason="overlap_changed",
+            detected_at=now,
         )
-        if not _has_valid_price_history(full_df, symbol):
-            return None
-        return AShareRefreshResult(
-            frame=full_df,
-            full_refresh=True,
-            last_full_refresh_at=_normalize_metadata_timestamp(now),
+        raise AShareFullRefreshRequiredError(
+            f"{symbol} TickFlow overlap changed; manual full refresh required",
+            provider="tickflow",
+            key=symbol,
+            category="full_refresh_required",
         )
 
     merged = _merge_and_clean_data(
@@ -481,6 +512,7 @@ def _fetch_a_share_refresh(
         frame=merged,
         full_refresh=False,
         last_full_refresh_at=str(metadata["lastFullRefreshAt"]),
+        last_incremental_refresh_at=_normalize_metadata_timestamp(now),
     )
 
 
