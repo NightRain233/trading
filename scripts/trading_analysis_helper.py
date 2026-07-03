@@ -19,6 +19,9 @@ Usage:
 
   # Market overview (scan + portfolio combined, compact)
   uv run python scripts/trading_analysis_helper.py --query overview
+
+  # Weekly BOLL squeeze/breakout scan
+  uv run python scripts/trading_analysis_helper.py --query squeeze
 """
 
 import argparse
@@ -176,6 +179,8 @@ def _build_symbol_entry(m: dict) -> dict:
         "kdjJ": ind.get("kdjJ"),
         "weeklyStVal": m.get("weeklyStVal"),
         "close": m.get("close"),
+        "bollWidth": m.get("bollWidth"),
+        "bollSqueeze": m.get("bollSqueeze", False),
     }
     return entry
 
@@ -254,6 +259,17 @@ def query_scan(api_base: str, timeout: float, grouped: bool = True) -> dict:
                     float(i.get("distanceToSupertrendPct") or 999999),
                 ),
             )
+
+    # BOLL squeeze candidates (not already in higher-priority groups)
+    squeezing = [
+        i for i in items
+        if i.get("symbol") not in assigned and i.get("bollSqueeze")
+    ]
+    if squeezing:
+        groups["squeeze_alerts"] = sorted(
+            squeezing,
+            key=lambda i: float(i.get("bollWidth") or 999),
+        )
 
     # Remaining actionable
     other = [
@@ -334,6 +350,22 @@ def query_portfolio(api_base: str, timeout: float, strategy_id: Optional[str] = 
 # ---------------------------------------------------------------------------
 
 
+def query_squeeze(api_base: str, timeout: float) -> dict:
+    """Scan for weekly BOLL squeeze/breakout/pullback candidates."""
+    items = _api_get(api_base, "/weekly-breakout/scan", timeout)
+    result: dict[str, Any] = {
+        "total": len(items),
+        "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+    }
+    grouped: dict[str, list[dict]] = {"squeeze": [], "breakout": [], "pullback": [], "exit": [], "neutral": []}
+    for r in items:
+        state = r.get("state", "neutral")
+        if state in grouped:
+            grouped[state].append(r)
+    result["groups"] = grouped
+    return result
+
+
 def query_overview(api_base: str, timeout: float) -> dict:
     """Get a compact market overview: scan summary + portfolio summary."""
     import concurrent.futures
@@ -363,7 +395,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument(
         "--query",
-        choices=("stock", "scan", "portfolio", "overview"),
+        choices=("stock", "scan", "portfolio", "overview", "squeeze"),
         required=True,
         help="What to query.",
     )
@@ -384,6 +416,8 @@ def main() -> int:
             result = query_portfolio(args.api_base, args.timeout, args.strategy)
         elif args.query == "overview":
             result = query_overview(args.api_base, args.timeout)
+        elif args.query == "squeeze":
+            result = query_squeeze(args.api_base, args.timeout)
         else:
             return 1
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:

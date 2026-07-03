@@ -1779,6 +1779,24 @@ def supertrend_scan(force: bool = False):
             "atr": _fv("ATR"),
         }
 
+        # Daily BOLL squeeze detection
+        boll_upper = _fv("BOLL_Upper")
+        boll_lower = _fv("BOLL_Lower")
+        boll_mid = _fv("BOLL_Mid")
+        boll_width = None
+        is_squeeze = False
+        if all(v is not None for v in (boll_upper, boll_lower, boll_mid)) and boll_mid != 0:
+            boll_width = (boll_upper - boll_lower) / boll_mid
+            # Compare to 20-period mean bandwidth
+            recent = daily.dropna(subset=["BOLL_Upper", "BOLL_Lower", "BOLL_Mid"]).tail(20)
+            if len(recent) >= 10:
+                recent_bw = (recent["BOLL_Upper"] - recent["BOLL_Lower"]) / recent["BOLL_Mid"].replace(0, float("nan"))
+                avg_bw = recent_bw.mean()
+                if pd.notna(avg_bw) and avg_bw > 0:
+                    is_squeeze = bool(boll_width < avg_bw * 0.85)
+        indicators["bollWidth"] = boll_width
+        indicators["bollSqueeze"] = is_squeeze
+
         alert = classify_supertrend_alert(
             state=state,
             weekly_state=weekly_state,
@@ -1809,6 +1827,8 @@ def supertrend_scan(force: bool = False):
             "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
             "dataIntegrity": data_integrity,
             "indicators": indicators,
+            "bollWidth": boll_width,
+            "bollSqueeze": is_squeeze,
             "weeklyTrendAgeBars": weekly_trend_age_bars,
             **alert,
         }

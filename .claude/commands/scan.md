@@ -3,7 +3,10 @@
 Scan all watchlist symbols with quality indicators, smart filtering, and market environment context.
 
 **Steps:**
-1. Run: `uv run python scripts/trading_analysis_helper.py --api-base http://8.153.71.148/api --query scan --grouped`
+1. Run BOTH queries in parallel:
+   - `uv run python scripts/trading_analysis_helper.py --api-base http://8.153.71.148/api --query scan --grouped`
+   - `uv run python scripts/trading_analysis_helper.py --api-base http://8.153.71.148/api --query squeeze`
+   (Or use local API if remote is stale: `--api-base http://127.0.0.1:8000/api`)
 2. Present the **Market Environment** section first — this sets the tone for everything else.
    - Show 5 indices (上证, 沪深300, 中证500, 科创50, 中证2000) in a compact table
    - Each with: direction, ADX, RSI(21), MACD direction, KDJ
@@ -13,7 +16,12 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
    - 🔥 **新仓候选** (new_entries) — show ALL, never collapse
    - ⚠️ **逼近变盘** (flip_proximity) — show ALL (within 0.5 ATR of ST, can flip any day)
    - 🛡️ **持仓/风控** (position_mgmt) — show ALL
+   - 🗜️ **BOLL 挤压** (squeeze_alerts + weekly squeeze) — show ALL daily squeeze candidates; cross-reference with weekly squeeze results
+     - Flag any symbol that appears in BOTH daily and weekly squeeze (dual-timeframe squeeze = strongest signal)
+     - For each: show direction, ADX, BOLL bandwidth, which squeeze(s) detected
+     - Note: squeeze signals are directional hints, not entry signals — wait for breakout confirmation
    - 👀 **预备观察** (prepare_watch) — show top 5 closest to flipping, collapse rest as "其余 X 个略"
+     - Flag any prepare_watch symbols that ALSO have bollSqueeze=true — these are the ones to watch closest
    - 📈 **趋势延续 — 值得关注** (background) — sorted by ADX descending; these passed the "worthy" filter:
      - Within 2 ATR of ST (pullback near support)
      - OR ADX > 35 (strong trend)
@@ -26,9 +34,9 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 
 4. For each displayed symbol, use compact format:
    ```
-   SYMBOL Alias  方向(age)  ADXxx  RSIxx  MACD↑/↓  Kxx  距x.xATR  周xw
+   SYMBOL Alias  方向(age)  ADXxx  RSIxx  MACD↑/↓  Kxx  距x.xATR  周xw  [🗜️bw% if squeezing]
    ```
-   - Add a brief note only if there's something actionable (e.g. "回调接近支撑", "MACD 刚死叉")
+   - Add a brief note only if there's something actionable (e.g. "回调接近支撑", "MACD 刚死叉", "日线+周线双挤压")
    - Don't narrate symbols that are simply holding
 
 5. Highlight the top 3-5 most actionable items with concise reasoning.
@@ -36,7 +44,7 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 6. Summarize: "Today's key takeaway is..."
 
 **Smart filtering rules:**
-- `new_entries`, `flip_proximity`, `position_mgmt`: always show ALL
+- `new_entries`, `flip_proximity`, `position_mgmt`, `squeeze_alerts`: always show ALL
 - `prepare_watch`: show top 5 (closest to ST), collapse rest
 - `background`: show only "worthy" ones (filtered by helper). These are sorted by ADX desc.
 - `background_quiet`: collapsed count only. DON'T list individual symbols unless user asks.
@@ -48,6 +56,8 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 - MACD dir: ↑ = expanding (bullish momentum), ↓ = contracting (weakening), → = flat
 - KDJ: K>80 = overbought zone, K<20 = oversold zone
 - Distance ATR: <1 = very close (can flip), 1-2 = pullback zone, 2-3 = extended, >3 = very extended
+- BOLL bandwidth: <10% = tight squeeze (变盘在即), 10-15% = moderate, >20% = expanding (趋势加速)
+- Dual squeeze: 日线+周线同时挤压 = 最强变盘信号，突破后行情级别更大
 
 **Tips:**
 - Use `--api-base` to switch between local/remote
