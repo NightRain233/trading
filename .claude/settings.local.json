@@ -1,9 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)",
-      "*",
-      "WebSearch"
+      "Bash",
+      "WebSearch",
+      "Skill(update-config)",
+      "WebFetch(domain:finance.sina.com.cn)",
+      "WebFetch(domain:www.csindex.com.cn)",
+      "WebFetch(domain:quote.eastmoney.com)"
     ]
   }
 }
