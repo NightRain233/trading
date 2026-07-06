@@ -46,6 +46,10 @@
       {
         "symbol": "510500.SS",
         "alias": "中证 500"
+      },
+      {
+        "symbol": "MU",
+        "alias": ""
       }
     ],
     "collapsed": false
