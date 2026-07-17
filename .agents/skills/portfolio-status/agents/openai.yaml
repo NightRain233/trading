@@ -1,0 +1,4 @@
+interface:
+  display_name: "组合策略状态"
+  short_description: "检查纸面组合策略的净值、仓位、再平衡计划与运行状态"
+  default_prompt: "Use $portfolio-status to check all paper-tracked portfolio strategies."

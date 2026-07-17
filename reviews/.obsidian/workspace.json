@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "科创芯片ETF-588890.md",
+                "file": "通信设备ETF-159583.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "科创芯片ETF-588890"
+              "title": "通信设备ETF-159583"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "科创芯片ETF-588890.md",
+                "file": "通信设备ETF-159583.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "科创芯片ETF-588890 的反向链接列表"
+              "title": "通信设备ETF-159583 的反向链接列表"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "科创芯片ETF-588890.md",
+                "file": "通信设备ETF-159583.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "科创芯片ETF-588890 的出链列表"
+              "title": "通信设备ETF-159583 的出链列表"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "科创芯片ETF-588890.md",
+                "file": "通信设备ETF-159583.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "科创芯片ETF-588890 的大纲"
+              "title": "通信设备ETF-159583 的大纲"
             }
           }
         ]
@@ -185,13 +185,19 @@
   },
   "active": "84452f1196b5ca73",
   "lastOpenFiles": [
+    "2026-07-11.md",
+    "2026-07-09.md",
+    "2026-07-07.md",
+    "2026-07-06.md",
+    "科创芯片ETF-588890.md",
+    "电网设备ETF-159320.md",
+    "下周关注.md",
+    "2026-07-05.md",
     "2026-07-03.md",
     "2026-06-30.md",
     "持仓总览.md",
     "2026-06-28.md",
     "2026-06-29.md",
-    "科创芯片ETF-588890.md",
-    "电网设备ETF-159320.md",
     "README.md"
   ]
 }

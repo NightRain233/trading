@@ -3,17 +3,20 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
-ENV HTTP_PROXY=${HTTP_PROXY} \
-    HTTPS_PROXY=${HTTPS_PROXY}
+# Proxy only used during build (ARG), NOT baked into runtime ENV
+# to avoid SSL issues with data fetching (curl-cffi + proxy = TLS errors)
 
 WORKDIR /app
+
+# Use Tsinghua PyPI mirror (for servers without direct PyPI access)
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
 # Copy only the files needed for installation to optimize cache
 COPY pyproject.toml uv.lock ./
-# Install dependencies using uv sync --frozen (no dev dependencies)
-RUN uv sync --frozen --no-install-project --no-dev
+# Install dependencies (without --frozen: lockfile pins files.pythonhosted.org URLs unreachable from China servers)
+RUN uv sync --no-install-project --no-dev
 
 COPY . .
 

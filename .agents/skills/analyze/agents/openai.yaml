@@ -1,0 +1,4 @@
+interface:
+  display_name: "分析标的"
+  short_description: "调用交易分析接口深度分析指定股票或ETF的趋势机会与风险"
+  default_prompt: "Use $analyze to analyze a stock or ETF with the project trading indicators."

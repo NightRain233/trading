@@ -185,8 +185,9 @@ def _build_symbol_entry(m: dict) -> dict:
     return entry
 
 
-def query_scan(api_base: str, timeout: float, grouped: bool = True) -> dict:
-    items = _api_get(api_base, "/supertrend/scan?force=false", timeout)
+def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool = False) -> dict:
+    force_str = "true" if force else "false"
+    items = _api_get(api_base, f"/supertrend/scan?force={force_str}", timeout)
     result: dict[str, Any] = {
         "total": len(items),
         "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
@@ -366,12 +367,12 @@ def query_squeeze(api_base: str, timeout: float) -> dict:
     return result
 
 
-def query_overview(api_base: str, timeout: float) -> dict:
+def query_overview(api_base: str, timeout: float, force: bool = False) -> dict:
     """Get a compact market overview: scan summary + portfolio summary."""
     import concurrent.futures
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        scan_future = executor.submit(query_scan, api_base, timeout, grouped=True)
+        scan_future = executor.submit(query_scan, api_base, timeout, grouped=True, force=force)
         portfolio_future = executor.submit(query_portfolio, api_base, timeout)
 
         scan = scan_future.result()
@@ -402,6 +403,7 @@ def main() -> int:
     parser.add_argument("--symbol", help="Stock symbol (required for --query stock).")
     parser.add_argument("--strategy", help="Strategy ID (optional for --query portfolio).")
     parser.add_argument("--grouped", action=argparse.BooleanOptionalAction, default=True, help="Group scan results.")
+    parser.add_argument("--force", action="store_true", default=False, help="Force refresh cached scan data.")
     args = parser.parse_args()
 
     try:
@@ -411,7 +413,7 @@ def main() -> int:
                 return 1
             result = query_stock(args.api_base, args.symbol, args.timeout)
         elif args.query == "scan":
-            result = query_scan(args.api_base, args.timeout, grouped=args.grouped)
+            result = query_scan(args.api_base, args.timeout, grouped=args.grouped, force=args.force)
         elif args.query == "portfolio":
             result = query_portfolio(args.api_base, args.timeout, args.strategy)
         elif args.query == "overview":

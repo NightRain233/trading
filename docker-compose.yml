@@ -11,8 +11,6 @@ services:
     restart: always
     network_mode: "host"
     environment:
-      - HTTP_PROXY=http://127.0.0.1:7890
-      - HTTPS_PROXY=http://127.0.0.1:7890
       - TICKFLOW_FETCH_ENABLED=${TICKFLOW_FETCH_ENABLED:-true}
       - TICKFLOW_BASE_URL=${TICKFLOW_BASE_URL:-https://free-api.tickflow.org}
       - TICKFLOW_API_KEY=${TICKFLOW_API_KEY:-}
@@ -24,6 +22,9 @@ services:
       - YAHOO_CIRCUIT_COOLDOWN_SECONDS=${YAHOO_CIRCUIT_COOLDOWN_SECONDS:-900}
       - BACKGROUND_PREWARM_ENABLED=${BACKGROUND_PREWARM_ENABLED:-true}
       - PREWARM_HOURS=${PREWARM_HOURS:-21}
+      - HTTP_PROXY=http://127.0.0.1:7890
+      - HTTPS_PROXY=http://127.0.0.1:7890
+      - NO_PROXY=127.0.0.1,localhost,.cn,.com.cn,free-api.tickflow.org
     volumes:
       - ./backend/data:/app/data
       - ./backend/backtest_results:/app/backtest_results

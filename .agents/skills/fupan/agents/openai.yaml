@@ -1,0 +1,4 @@
+interface:
+  display_name: "每日复盘"
+  short_description: "将交易分析、操作决策与明日关注整理成结构化每日复盘文档"
+  default_prompt: "Use $fupan to turn this trading discussion into today’s review notes."
