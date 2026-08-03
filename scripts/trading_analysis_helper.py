@@ -143,11 +143,15 @@ GROUP_RULES = [
 def _build_symbol_entry(m: dict) -> dict:
     """Build a compact symbol entry with quality indicators."""
     ind = m.get("indicators", {})
-    # Determine MACD direction from histogram
-    macd_hist = float(ind.get("macdHist") or 0)
-    if macd_hist > 0.001:
+    # Direction means the histogram is rising/falling, not merely positive/negative.
+    macd_delta = ind.get("macdHistDelta")
+    macd_prev = ind.get("macdHistPrev")
+    tolerance = max(1e-9, abs(float(macd_prev or 0)) * 0.01)
+    if macd_delta is None:
+        macd_dir = None
+    elif float(macd_delta) > tolerance:
         macd_dir = "↑"
-    elif macd_hist < -0.001:
+    elif float(macd_delta) < -tolerance:
         macd_dir = "↓"
     else:
         macd_dir = "→"
@@ -173,6 +177,8 @@ def _build_symbol_entry(m: dict) -> dict:
         "rsi21": ind.get("rsi21"),
         "rsi7": ind.get("rsi7"),
         "macdHist": ind.get("macdHist"),
+        "macdHistPrev": macd_prev,
+        "macdHistDelta": macd_delta,
         "macdDir": macd_dir,
         "kdjK": ind.get("kdjK"),
         "kdjD": ind.get("kdjD"),
@@ -181,6 +187,14 @@ def _build_symbol_entry(m: dict) -> dict:
         "close": m.get("close"),
         "bollWidth": m.get("bollWidth"),
         "bollSqueeze": m.get("bollSqueeze", False),
+        "weeklyBoll": m.get("weeklyBoll"),
+        "monthlyBoll": m.get("monthlyBoll"),
+        "volumeContext": m.get("volumeContext"),
+        "latestDataDate": m.get("latestDataDate"),
+        "dataUpdatedAt": m.get("dataUpdatedAt"),
+        "cacheStale": m.get("cacheStale"),
+        "dataStale": m.get("dataStale"),
+        "dataIntegrity": m.get("dataIntegrity"),
     }
     return entry
 
@@ -206,6 +220,7 @@ def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool 
         if sym in item_map:
             m = item_map[sym]
             ind = m.get("indicators", {})
+            entry = _build_symbol_entry(m)
             market_symbols.append({
                 "symbol": sym,
                 "alias": m.get("alias", "") or MARKET_INDEX_LABELS.get(sym, ""),
@@ -217,9 +232,20 @@ def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool 
                 "adx": ind.get("adx"),
                 "rsi21": ind.get("rsi21"),
                 "macdHist": ind.get("macdHist"),
+                "macdHistPrev": ind.get("macdHistPrev"),
+                "macdHistDelta": ind.get("macdHistDelta"),
+                "macdDir": entry.get("macdDir"),
                 "kdjK": ind.get("kdjK"),
                 "kdjD": ind.get("kdjD"),
                 "kdjJ": ind.get("kdjJ"),
+                "weeklyBoll": m.get("weeklyBoll"),
+                "monthlyBoll": m.get("monthlyBoll"),
+                "volumeContext": m.get("volumeContext"),
+                "latestDataDate": m.get("latestDataDate"),
+                "dataUpdatedAt": m.get("dataUpdatedAt"),
+                "cacheStale": m.get("cacheStale"),
+                "dataStale": m.get("dataStale"),
+                "dataIntegrity": m.get("dataIntegrity"),
             })
     result["market"] = {
         "indices": market_symbols,

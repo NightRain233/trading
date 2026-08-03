@@ -55,7 +55,7 @@ import threading
 import hashlib
 import pandas as pd
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from email.utils import formatdate
 from zoneinfo import ZoneInfo
 from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS
@@ -1557,6 +1557,162 @@ def _st_data_stale(latest_data_date: Optional[str], integrity: dict) -> bool:
     return (now_local - latest).days > 3
 
 
+def _st_boll_context(
+    close: pd.Series,
+    period: int = 20,
+    std_multiplier: float = 2.0,
+    as_of: Optional[str] = None,
+) -> dict:
+    """Return a JSON-safe BOLL snapshot for one resampled close series."""
+    clean = pd.to_numeric(close, errors="coerce").dropna()
+    result = {
+        "upper": None,
+        "mid": None,
+        "lower": None,
+        "width": None,
+        "distanceToMidPct": None,
+        "position": None,
+        "midSlopePct": None,
+        "midDirection": None,
+        "slopeSampleSufficient": len(clean) > period,
+        "period": period,
+        "sampleSize": int(len(clean)),
+        "asOf": as_of or (pd.Timestamp(clean.index[-1]).date().isoformat() if not clean.empty else None),
+    }
+    if len(clean) < period:
+        return result
+
+    window = clean.tail(period)
+    current = float(window.iloc[-1])
+    mid = float(window.mean())
+    std = float(window.std(ddof=0))
+    upper = mid + std_multiplier * std
+    lower = mid - std_multiplier * std
+    mid_slope_pct = None
+    mid_direction = None
+    if len(clean) > period:
+        previous_mid = float(clean.iloc[-period - 1:-1].mean())
+        if previous_mid != 0:
+            mid_slope_pct = (mid - previous_mid) / previous_mid * 100
+            if mid_slope_pct > 0.05:
+                mid_direction = "rising"
+            elif mid_slope_pct < -0.05:
+                mid_direction = "falling"
+            else:
+                mid_direction = "flat"
+
+    if current > upper:
+        position = "above_upper"
+    elif current >= mid:
+        position = "upper_half"
+    elif current >= lower:
+        position = "lower_half"
+    else:
+        position = "below_lower"
+
+    result.update({
+        "upper": upper,
+        "mid": mid,
+        "lower": lower,
+        "width": (upper - lower) / mid if mid != 0 else None,
+        "distanceToMidPct": (current - mid) / mid * 100 if mid != 0 else None,
+        "position": position,
+        "midSlopePct": mid_slope_pct,
+        "midDirection": mid_direction,
+    })
+    return result
+
+
+def _st_volume_session_complete(
+    symbol: str,
+    as_of: Optional[str],
+    now: Optional[datetime] = None,
+) -> Optional[bool]:
+    """Return whether a daily volume bar belongs to a completed market session."""
+    if not as_of:
+        return None
+    try:
+        session_date = datetime.fromisoformat(as_of).date()
+    except ValueError:
+        return None
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=PREWARM_TZ)
+
+    normalized = symbol.strip().upper()
+    if normalized.endswith("-USD"):
+        utc_now = current.astimezone(timezone.utc)
+        return session_date < utc_now.date()
+
+    if normalized.endswith((".SS", ".SZ")):
+        local_now = current.astimezone(PREWARM_TZ)
+        close_cutoff = datetime_time(15, 10)
+    else:
+        local_now = current.astimezone(ZoneInfo("America/New_York"))
+        close_cutoff = datetime_time(17, 10) if normalized.endswith("=F") else datetime_time(16, 10)
+
+    if session_date < local_now.date():
+        return True
+    if session_date > local_now.date():
+        return False
+    return local_now.time().replace(tzinfo=None) >= close_cutoff
+
+
+def _st_multitimeframe_context(
+    daily: pd.DataFrame,
+    symbol: str = "",
+    now: Optional[datetime] = None,
+) -> dict:
+    """Build weekly/monthly BOLL structure plus comparable daily volume context."""
+    empty_boll = _st_boll_context(pd.Series(dtype=float))
+    empty_volume = {
+        "current": None,
+        "ma20": None,
+        "ratio20": None,
+        "ratio20Completed": None,
+        "sessionComplete": None,
+        "period": 20,
+        "asOf": None,
+    }
+    if daily is None or daily.empty or "Close" not in daily.columns:
+        return {
+            "weeklyBoll": empty_boll,
+            "monthlyBoll": empty_boll.copy(),
+            "volumeContext": empty_volume,
+        }
+
+    ordered = daily.sort_index()
+    close = pd.to_numeric(ordered["Close"], errors="coerce").dropna()
+    weekly_close = close.resample("W").last().dropna()
+    monthly_close = close.resample("ME").last().dropna()
+    latest_close_date = pd.Timestamp(close.index[-1]).date().isoformat() if not close.empty else None
+
+    volume_context = empty_volume.copy()
+    if "Volume" in ordered.columns:
+        volume = pd.to_numeric(ordered["Volume"], errors="coerce").dropna()
+        if not volume.empty:
+            current = float(volume.iloc[-1])
+            ma20 = float(volume.tail(20).mean())
+            volume_as_of = pd.Timestamp(volume.index[-1]).date().isoformat()
+            session_complete = _st_volume_session_complete(symbol, volume_as_of, now=now)
+            ratio20 = current / ma20 if ma20 > 0 else None
+            volume_context.update({
+                "current": current,
+                "ma20": ma20,
+                "ratio20": ratio20,
+                "ratio20Completed": ratio20 if session_complete else None,
+                "sessionComplete": session_complete,
+                "asOf": volume_as_of,
+            })
+
+    return {
+        "weeklyBoll": _st_boll_context(weekly_close, as_of=latest_close_date),
+        "monthlyBoll": _st_boll_context(monthly_close, as_of=latest_close_date),
+        "volumeContext": volume_context,
+    }
+
+
 def _st_scan_signature(symbols: List[str]) -> list:
     signature = []
     for sym in symbols:
@@ -1762,6 +1918,14 @@ def supertrend_scan(force: bool = False):
             val = last.get(key)
             return float(val) if pd.notna(val) else default
 
+        macd_hist_rows = (
+            pd.to_numeric(daily.loc[:last.name, "MACD_Hist"], errors="coerce").dropna().tail(2)
+            if "MACD_Hist" in daily.columns
+            else pd.Series(dtype=float)
+        )
+        macd_hist_prev = float(macd_hist_rows.iloc[-2]) if len(macd_hist_rows) >= 2 else None
+        macd_hist_current = _fv("MACD_Hist")
+
         indicators = {
             "adx": _fv("ADX"),
             "rsi7": _fv("RSI_7"),
@@ -1769,7 +1933,13 @@ def supertrend_scan(force: bool = False):
             "rsi21": _fv("RSI_21"),
             "macdDif": _fv("MACD_DIF"),
             "macdDea": _fv("MACD_DEA"),
-            "macdHist": _fv("MACD_Hist"),
+            "macdHist": macd_hist_current,
+            "macdHistPrev": macd_hist_prev,
+            "macdHistDelta": (
+                macd_hist_current - macd_hist_prev
+                if macd_hist_current is not None and macd_hist_prev is not None
+                else None
+            ),
             "kdjK": _fv("K"),
             "kdjD": _fv("D"),
             "kdjJ": _fv("J"),
@@ -1796,6 +1966,7 @@ def supertrend_scan(force: bool = False):
                     is_squeeze = bool(boll_width < avg_bw * 0.85)
         indicators["bollWidth"] = boll_width
         indicators["bollSqueeze"] = is_squeeze
+        multitimeframe_context = _st_multitimeframe_context(daily, symbol=sym)
 
         alert = classify_supertrend_alert(
             state=state,
@@ -1829,6 +2000,7 @@ def supertrend_scan(force: bool = False):
             "indicators": indicators,
             "bollWidth": boll_width,
             "bollSqueeze": is_squeeze,
+            **multitimeframe_context,
             "weeklyTrendAgeBars": weekly_trend_age_bars,
             **alert,
         }

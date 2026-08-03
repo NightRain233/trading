@@ -9,11 +9,14 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 
 **Steps:**
 1. Run: `uv run python scripts/trading_analysis_helper.py --api-base http://8.153.71.148/api --query scan --grouped`
-2. Present the **Market Environment** section first — this sets the tone for everything else.
+2. Verify data dates before interpreting signals.
+   - Check `latestDataDate`, `dataStale`, and `dataIntegrity` across the displayed symbols; an HTTP success is not proof that every symbol is current.
+   - State the snapshot date. If dates are mixed or stale, identify the affected symbols and do not present them as current buy/risk conclusions until refreshed.
+3. Present the **Market Environment** section first — this sets the tone for everything else.
    - Show 5 indices (上证, 沪深300, 中证500, 科创50, 中证2000) in a compact table
-   - Each with: direction, ADX, RSI(21), MACD direction, KDJ
+   - Each with: direction, ADX, RSI(21), MACD direction, KDJ, distance to and direction of weekly/monthly BOLL mid, and completed-session 20-day volume ratio
    - Provide a 1-line overall tone assessment
-3. Present findings organized by priority:
+4. Present findings organized by priority:
 
    - 🔥 **新仓候选** (new_entries) — show ALL, never collapse
    - ⚠️ **逼近变盘** (flip_proximity) — show ALL (within 0.5 ATR of ST, can flip any day)
@@ -36,17 +39,29 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
      - Only mention specific names if user asks
    - 📋 **其他** (other_actionable) — if any
 
-4. For each displayed symbol, use compact format:
+5. For each displayed symbol, use compact format:
    ```
-   SYMBOL Alias  方向(age)  ADXxx  RSIxx  MACD↑/↓  Kxx  距x.xATR  周xw
+   SYMBOL Alias  方向(age)  ADXxx  RSIxx  MACD↑/↓  Kxx  距x.xATR  周xw  周中↑/→/↓±x%  月中↑/→/↓±x%  量x.x
    ```
    - Add a brief note only if there's something actionable (e.g. "回调接近支撑", "MACD 刚死叉")
    - Don't narrate symbols that are simply holding
    - For `yellow_watch`, make the daily/weekly mismatch explicit, e.g. `日多(15) · 周空(28w)  ADX32  距1.3ATR  靠近日线支撑，等确认`.
+   - For `new_entries`, `flip_proximity`, `position_mgmt`, and `yellow_watch`, add one compact structure line with actual lower/mid/upper values and mid direction: `周BOLL 下/中↑/上 · 月BOLL 下/中→/上 · 量 当前/20日均=倍数`.
+   - For lower-priority background symbols, show the extra structure line only when price is outside a band, within 2% of a weekly/monthly mid, or the completed-session volume ratio is abnormal (`≤0.8` or `≥1.5`).
 
-5. Highlight the top 3-5 most actionable items with concise reasoning.
+6. Apply weekly/monthly BOLL and volume as confirmation context, not independent trading permission:
+   - `weeklyBoll` and `monthlyBoll` use 20 periods and 2 standard deviations. Use `distanceToMidPct`, `position`, `midSlopePct`, and `midDirection` to explain structure; positive mid distance means price is above the midline, while `rising/flat/falling` maps to `↑/→/↓`.
+   - Above both weekly and monthly mids with flat or rising mids is a structural tailwind. Price above a falling mid is only an early recovery, not confirmed strength; below either mid is a resistance/risk flag. None of these overrides the formal “weekly direction, daily timing” entry rule.
+   - An upper-band break is not automatically overbought, and a lower-band touch is not automatically a buy. Read it together with trend direction, band position, and volume.
+   - Only evaluate volume when `volumeContext.sessionComplete` is `true`. Before the close it is `false`: write “量能未完成”, and do not use the partial `ratio20` for ranking, confirmation, or rejection.
+   - After the close, use `volumeContext.ratio20Completed`, not raw volume or the diagnostic-only `ratio20`, for cross-symbol comparison: `≥1.5` = clearly expanding, `0.8-1.5` = normal, `≤0.8` = contracting. Confirm that `volumeContext.asOf` matches the completed session being discussed.
+   - A bullish flip/breakout with expanding volume gets stronger confirmation; a pullback near support with contracting volume is healthier. A support break or bearish flip with expanding volume is a stronger risk signal.
+   - Weekly/monthly bars may still be in progress. Treat their BOLL values as provisional until the respective period closes.
+   - If `sampleSize < 20` or BOLL values are null, write “历史不足” and make no BOLL inference. At exactly 20 samples the bands are valid but `slopeSampleSufficient` is false, so describe the mid direction as “方向历史不足”.
 
-6. Summarize: "Today's key takeaway is..."
+7. Highlight the top 3-5 most actionable items with concise reasoning. Rank formal signal validity first, then weekly/monthly structure and volume confirmation.
+
+8. Summarize: "Today's key takeaway is..."
 
 **Smart filtering rules:**
 - `new_entries`, `flip_proximity`, `position_mgmt`: always show ALL
@@ -59,8 +74,8 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 
 **Quality tags reference:**
 - ADX: >35 = strong trend 🔥, 25-35 = trending, <25 = weak/choppy ⚠️
-- RSI(21): >75 = overbought, <45 = oversold (in uptrend this is a buy zone)
-- MACD dir: ↑ = expanding (bullish momentum), ↓ = contracting (weakening), → = flat
+- RSI(21): >75 = overbought, <45 = 上升趋势中的回踩观察区（不是独立买点）
+- MACD dir: compare `macdHist` with `macdHistPrev`; ↑ = histogram rising (bullish momentum improving), ↓ = histogram falling (bearish momentum strengthening), → = materially flat. Use a zero-axis crossing for “金叉/死叉”; an arrow alone is not a crossover.
 - KDJ: K>80 = overbought zone, K<20 = oversold zone
 - Distance ATR: <1 = very close (can flip), 1-2 = pullback zone, 2-3 = extended, >3 = very extended
 

@@ -5,9 +5,127 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import analysis
 import main
+
+
+def test_supertrend_multitimeframe_context_returns_boll_and_volume_ratio():
+    index = pd.bdate_range("2024-01-02", periods=460)
+    close = pd.Series(range(100, 560), index=index, dtype=float)
+    volume = pd.Series([100.0] * 459 + [200.0], index=index)
+    daily = pd.DataFrame({"Close": close, "Volume": volume})
+
+    context = main._st_multitimeframe_context(
+        daily,
+        symbol="510300.SS",
+        now=datetime(2026, 8, 3, 16, 0, tzinfo=main.PREWARM_TZ),
+    )
+
+    assert context["weeklyBoll"]["mid"] is not None
+    assert context["weeklyBoll"]["position"] == "upper_half"
+    assert context["weeklyBoll"]["midDirection"] == "rising"
+    assert context["weeklyBoll"]["midSlopePct"] > 0
+    assert context["weeklyBoll"]["asOf"] == index[-1].date().isoformat()
+    assert context["monthlyBoll"]["mid"] is not None
+    assert context["monthlyBoll"]["position"] == "upper_half"
+    assert context["monthlyBoll"]["midDirection"] == "rising"
+    assert context["monthlyBoll"]["midSlopePct"] > 0
+    assert context["monthlyBoll"]["asOf"] == index[-1].date().isoformat()
+    assert context["volumeContext"]["current"] == 200.0
+    assert context["volumeContext"]["ma20"] == 105.0
+    assert context["volumeContext"]["ratio20"] == 200.0 / 105.0
+    assert context["volumeContext"]["ratio20Completed"] == 200.0 / 105.0
+    assert context["volumeContext"]["sessionComplete"] is True
+    assert context["volumeContext"]["asOf"] == index[-1].date().isoformat()
+
+
+def test_supertrend_boll_context_detects_falling_midline():
+    close = pd.Series(
+        [100.0] * 20 + [80.0],
+        index=pd.date_range("2025-01-01", periods=21, freq="ME"),
+    )
+
+    context = main._st_boll_context(close)
+
+    assert context["mid"] == 99.0
+    assert context["midSlopePct"] == -1.0
+    assert context["midDirection"] == "falling"
+    assert context["slopeSampleSufficient"] is True
+
+
+def test_supertrend_boll_context_marks_direction_history_at_exactly_twenty_samples():
+    close = pd.Series(
+        range(100, 120),
+        index=pd.date_range("2024-01-31", periods=20, freq="ME"),
+        dtype=float,
+    )
+
+    context = main._st_boll_context(close)
+
+    assert context["mid"] is not None
+    assert context["midDirection"] is None
+    assert context["slopeSampleSufficient"] is False
+
+
+def test_supertrend_volume_context_excludes_incomplete_session_ratio():
+    index = pd.to_datetime(["2026-08-02", "2026-08-03"])
+    daily = pd.DataFrame(
+        {"Close": [100.0, 101.0], "Volume": [100.0, 200.0]},
+        index=index,
+    )
+
+    context = main._st_multitimeframe_context(
+        daily,
+        symbol="510300.SS",
+        now=datetime(2026, 8, 3, 14, 0, tzinfo=main.PREWARM_TZ),
+    )
+
+    assert context["volumeContext"]["ratio20"] is not None
+    assert context["volumeContext"]["ratio20Completed"] is None
+    assert context["volumeContext"]["sessionComplete"] is False
+
+
+def test_supertrend_volume_session_completion_uses_market_clock():
+    shanghai = main.PREWARM_TZ
+    new_york = main.ZoneInfo("America/New_York")
+
+    assert main._st_volume_session_complete(
+        "510300.SS", "2026-08-03", datetime(2026, 8, 3, 15, 9, tzinfo=shanghai)
+    ) is False
+    assert main._st_volume_session_complete(
+        "510300.SS", "2026-08-03", datetime(2026, 8, 3, 15, 10, tzinfo=shanghai)
+    ) is True
+    assert main._st_volume_session_complete(
+        "SPY", "2026-08-03", datetime(2026, 8, 3, 16, 9, tzinfo=new_york)
+    ) is False
+    assert main._st_volume_session_complete(
+        "SPY", "2026-08-03", datetime(2026, 8, 3, 16, 10, tzinfo=new_york)
+    ) is True
+    assert main._st_volume_session_complete(
+        "BTC-USD", "2026-08-03", datetime(2026, 8, 3, 23, 59, tzinfo=main.timezone.utc)
+    ) is False
+    assert main._st_volume_session_complete(
+        "BTC-USD", "2026-08-03", datetime(2026, 8, 4, 0, 0, tzinfo=main.timezone.utc)
+    ) is True
+
+
+def test_supertrend_multitimeframe_context_marks_insufficient_boll_history():
+    index = pd.bdate_range("2026-01-02", periods=30)
+    daily = pd.DataFrame(
+        {"Close": range(100, 130), "Volume": [100.0] * 30},
+        index=index,
+    )
+
+    context = main._st_multitimeframe_context(daily)
+
+    assert context["weeklyBoll"]["mid"] is None
+    assert context["weeklyBoll"]["midDirection"] is None
+    assert context["weeklyBoll"]["sampleSize"] < 20
+    assert context["monthlyBoll"]["mid"] is None
+    assert context["monthlyBoll"]["midDirection"] is None
+    assert context["monthlyBoll"]["sampleSize"] < 20
 
 
 def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
@@ -19,6 +137,7 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
             "Low": [9.5, 8.8, 10.5],
             "Close": [10.5, 9.2, 11.5],
             "ATR": [1.0, 1.0, 1.0],
+            "MACD_Hist": [0.2, 0.1, 0.3],
         },
         index=index,
     )
@@ -44,6 +163,8 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
 
     times = [candle["time"] for candle in result[0]["candles"]]
     assert times == sorted(times)
+    assert result[0]["indicators"]["macdHistPrev"] == 0.2
+    assert result[0]["indicators"]["macdHistDelta"] == pytest.approx(0.1)
 
 
 def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
