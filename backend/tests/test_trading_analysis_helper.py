@@ -31,6 +31,27 @@ def test_build_symbol_entry_uses_histogram_change_for_macd_direction():
     assert falling["macdDir"] == "↓"
 
 
+def test_build_symbol_entry_preserves_macd_divergence_without_changing_groups():
+    divergence = {
+        "daily": {
+            "confirmed": {
+                "type": "bullish",
+                "status": "confirmed",
+                "decisionRole": "wait_for_trend_confirmation",
+            },
+            "candidate": None,
+        }
+    }
+
+    entry = helper._build_symbol_entry({
+        "symbol": "TEST",
+        "macdDivergence": divergence,
+        "indicators": {},
+    })
+
+    assert entry["macdDivergence"] == divergence
+
+
 def test_grouped_market_indices_include_integrity_and_macd_metadata(monkeypatch):
     item = {
         "symbol": helper.MARKET_INDICES[0],

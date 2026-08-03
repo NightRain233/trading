@@ -165,6 +165,8 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
     assert times == sorted(times)
     assert result[0]["indicators"]["macdHistPrev"] == 0.2
     assert result[0]["indicators"]["macdHistDelta"] == pytest.approx(0.1)
+    assert result[0]["macdDivergence"]["daily"]["confirmed"] is None
+    assert result[0]["macdDivergence"]["policy"]["confirmedOnlyForDecision"] is True
 
 
 def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monkeypatch, tmp_path):

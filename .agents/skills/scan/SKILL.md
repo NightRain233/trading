@@ -14,7 +14,7 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
    - State the snapshot date. If dates are mixed or stale, identify the affected symbols and do not present them as current buy/risk conclusions until refreshed.
 3. Present the **Market Environment** section first — this sets the tone for everything else.
    - Show 5 indices (上证, 沪深300, 中证500, 科创50, 中证2000) in a compact table
-   - Each with: direction, ADX, RSI(21), MACD direction, KDJ, distance to and direction of weekly/monthly BOLL mid, and completed-session 20-day volume ratio
+   - Each with: direction, ADX, RSI(21), MACD direction, confirmed MACD divergence when present, KDJ, distance to and direction of weekly/monthly BOLL mid, and completed-session 20-day volume ratio
    - Provide a 1-line overall tone assessment
 4. Present findings organized by priority:
 
@@ -44,6 +44,8 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
    SYMBOL Alias  方向(age)  ADXxx  RSIxx  MACD↑/↓  Kxx  距x.xATR  周xw  周中↑/→/↓±x%  月中↑/→/↓±x%  量x.x
    ```
    - Add a brief note only if there's something actionable (e.g. "回调接近支撑", "MACD 刚死叉")
+   - Append confirmed divergence compactly when present: `日MACD确认底背离（6/12→7/03，7/08确认）· 价格-4.2% · DIF抬高` or the weekly equivalent.
+   - Candidate divergence (`status=candidate`) must be labelled `疑似…，右侧尚缺N根确认——仅预警，不参与决策`; never let it change grouping, ranking, or an action recommendation.
    - Don't narrate symbols that are simply holding
    - For `yellow_watch`, make the daily/weekly mismatch explicit, e.g. `日多(15) · 周空(28w)  ADX32  距1.3ATR  靠近日线支撑，等确认`.
    - For `new_entries`, `flip_proximity`, `position_mgmt`, and `yellow_watch`, add one compact structure line with actual lower/mid/upper values and mid direction: `周BOLL 下/中↑/上 · 月BOLL 下/中→/上 · 量 当前/20日均=倍数`.
@@ -76,6 +78,7 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
 - ADX: >35 = strong trend 🔥, 25-35 = trending, <25 = weak/choppy ⚠️
 - RSI(21): >75 = overbought, <45 = 上升趋势中的回踩观察区（不是独立买点）
 - MACD dir: compare `macdHist` with `macdHistPrev`; ↑ = histogram rising (bullish momentum improving), ↓ = histogram falling (bearish momentum strengthening), → = materially flat. Use a zero-axis crossing for “金叉/死叉”; an arrow alone is not a crossover.
+- MACD divergence: only `macdDivergence.*.confirmed` may be used as supporting evidence. Daily bullish divergence can improve `只观察` to `等确认`, but still requires a daily bullish flip/support confirmation. Daily bearish divergence is a risk warning, not an automatic sell. Weekly bullish divergence remains “周线未确认，跟踪不建仓” until the weekly trend turns bullish. Weekly bearish divergence downgrades new-entry priority and raises holding vigilance, while a formal exit still requires the existing ST rule. Candidate divergence is display-only.
 - KDJ: K>80 = overbought zone, K<20 = oversold zone
 - Distance ATR: <1 = very close (can flip), 1-2 = pullback zone, 2-3 = extended, >3 = very extended
 

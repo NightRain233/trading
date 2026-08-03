@@ -128,6 +128,11 @@ class CacheMetadataTests(unittest.TestCase):
 
         self.assertIsNone(summary["weeklyMA5"])
         self.assertIsNone(summary["weeklyMacdHist"])
+        self.assertIn("macdDivergence", summary)
+        self.assertEqual(
+            summary["macdDivergence"]["policy"]["bearishDecisionRole"],
+            "risk_warning_only",
+        )
 
     def test_analyze_stock_summary_ignores_incomplete_trailing_daily_row(self):
         daily_df = _build_daily_df()

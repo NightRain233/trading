@@ -35,6 +35,8 @@ from analysis import (
     refresh_symbols_async,
     refresh_symbols_sync_with_timeout,
     get_data_source_status,
+    build_macd_divergence_summary,
+    is_daily_session_complete,
 )
 from data_source_guard import MarketDataUnavailableError
 from portfolio_strategies.registry import (
@@ -55,7 +57,7 @@ import threading
 import hashlib
 import pandas as pd
 from contextlib import contextmanager
-from datetime import datetime, time as datetime_time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
 from zoneinfo import ZoneInfo
 from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS
@@ -331,6 +333,7 @@ class StockResponse(BaseModel):
     resonanceExitSignal: Optional[bool] = None
     resonanceExitLevel: Optional[str] = None
     resonanceExitReason: Optional[str] = None
+    macdDivergence: Optional[dict] = None
 
 class Group(BaseModel):
     id: str
@@ -1629,34 +1632,7 @@ def _st_volume_session_complete(
     now: Optional[datetime] = None,
 ) -> Optional[bool]:
     """Return whether a daily volume bar belongs to a completed market session."""
-    if not as_of:
-        return None
-    try:
-        session_date = datetime.fromisoformat(as_of).date()
-    except ValueError:
-        return None
-
-    current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=PREWARM_TZ)
-
-    normalized = symbol.strip().upper()
-    if normalized.endswith("-USD"):
-        utc_now = current.astimezone(timezone.utc)
-        return session_date < utc_now.date()
-
-    if normalized.endswith((".SS", ".SZ")):
-        local_now = current.astimezone(PREWARM_TZ)
-        close_cutoff = datetime_time(15, 10)
-    else:
-        local_now = current.astimezone(ZoneInfo("America/New_York"))
-        close_cutoff = datetime_time(17, 10) if normalized.endswith("=F") else datetime_time(16, 10)
-
-    if session_date < local_now.date():
-        return True
-    if session_date > local_now.date():
-        return False
-    return local_now.time().replace(tzinfo=None) >= close_cutoff
+    return is_daily_session_complete(symbol, as_of, now=now)
 
 
 def _st_multitimeframe_context(
@@ -1874,6 +1850,7 @@ def supertrend_scan(force: bool = False):
         weekly_state = None
         weekly_st_val = None
         weekly_candles = []
+        weekly = None
         weekly_just_flipped = False
         wcur_dir = 0
         wprev_rows = None
@@ -1966,6 +1943,7 @@ def supertrend_scan(force: bool = False):
                     is_squeeze = bool(boll_width < avg_bw * 0.85)
         indicators["bollWidth"] = boll_width
         indicators["bollSqueeze"] = is_squeeze
+        macd_divergence = build_macd_divergence_summary(sym, daily, weekly)
         multitimeframe_context = _st_multitimeframe_context(daily, symbol=sym)
 
         alert = classify_supertrend_alert(
@@ -1998,6 +1976,7 @@ def supertrend_scan(force: bool = False):
             "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
             "dataIntegrity": data_integrity,
             "indicators": indicators,
+            "macdDivergence": macd_divergence,
             "bollWidth": boll_width,
             "bollSqueeze": is_squeeze,
             **multitimeframe_context,

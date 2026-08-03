@@ -25,6 +25,47 @@ export interface Candle {
   st_dir?: number;
 }
 
+export interface MacdDivergenceSignal {
+  type: 'bullish' | 'bearish';
+  status: 'candidate' | 'confirmed';
+  timeframe: 'daily' | 'weekly';
+  firstPivotDate: string;
+  secondPivotDate: string;
+  firstDifDate: string;
+  secondDifDate: string;
+  confirmedAt: string | null;
+  priceChangePct: number;
+  difChangeNormalizedPct: number;
+  firstDif: number;
+  secondDif: number;
+  histogramConfirms: boolean | null;
+  zeroAxisContext: 'same_side' | 'mixed';
+  confidence: 'strong' | 'standard';
+  missingRightBars: number;
+  expiresAfterBars: number;
+  decisionRole:
+    | 'display_only'
+    | 'risk_warning_only'
+    | 'wait_for_trend_confirmation';
+}
+
+export interface MacdDivergenceTimeframe {
+  asOf: string | null;
+  confirmed: MacdDivergenceSignal | null;
+  candidate: MacdDivergenceSignal | null;
+}
+
+export interface MacdDivergenceSummary {
+  daily: MacdDivergenceTimeframe;
+  weekly: MacdDivergenceTimeframe;
+  policy: {
+    confirmedOnlyForDecision: true;
+    candidateDecisionRole: 'display_only';
+    bullishDecisionRole: 'wait_for_trend_confirmation';
+    bearishDecisionRole: 'risk_warning_only';
+  };
+}
+
 export interface StockData {
   symbol: string;
   name: string;
@@ -67,6 +108,7 @@ export interface StockData {
   resonanceExitSignal?: boolean;
   resonanceExitLevel?: 'none' | 'warn' | 'hard';
   resonanceExitReason?: string;
+  macdDivergence?: MacdDivergenceSummary;
 }
 
 export interface WatchlistItem {

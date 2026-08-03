@@ -54,6 +54,10 @@ from analysis_candles import (  # noqa: F401
     _build_candles, _build_mini_candles,
     _sanitize_candle_df, _ensure_time_ascending, _to_json_safe_records,
 )
+from analysis_divergence import (  # noqa: F401
+    build_macd_divergence_summary,
+    is_daily_session_complete,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -116,6 +120,7 @@ def _build_summary_dict(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) 
     resonance = _evaluate_resonance_strategy(df, df_weekly)
     resonance_v2 = _evaluate_resonance_strategy_v2(df, df_weekly)
     resonance_exit = _evaluate_resonance_exit_no_position(df, df_weekly)
+    macd_divergence = build_macd_divergence_summary(symbol, df, df_weekly)
 
     return _make_json_safe({
         "symbol": symbol, "name": symbol,
@@ -141,6 +146,7 @@ def _build_summary_dict(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) 
         "resonanceExitSignal": resonance_exit["exitSignal"],
         "resonanceExitLevel": resonance_exit["exitLevel"],
         "resonanceExitReason": resonance_exit["exitReason"],
+        "macdDivergence": macd_divergence,
         "_rsi_period": rsi_period,
         **weekly_status,
     })
