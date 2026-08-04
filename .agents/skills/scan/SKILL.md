@@ -46,6 +46,12 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
    - Add a brief note only if there's something actionable (e.g. "回调接近支撑", "MACD 刚死叉")
    - Append confirmed divergence compactly when present: `日MACD确认底背离（6/12→7/03，7/08确认）· 价格-4.2% · DIF抬高` or the weekly equivalent.
    - Candidate divergence (`status=candidate`) must be labelled `疑似…，右侧尚缺N根确认——仅预警，不参与决策`; never let it change grouping, ranking, or an action recommendation.
+   - **入场方式标签**（右侧交易两种做法，给每个可行动标的标注）:
+     - `⭐突破入场` — 周多 + 日线刚翻多（trendAgeBars ≤ 3）: 趋势刚启动，突破确认位即进场
+     - `⭐回踩入场` — 周多 + 日多已走一段（trendAgeBars > 3）+ 距ST 1-2 ATR: 趋势确认后等回踩支撑不破再进
+     - `⭐突破+回踩` — 同时满足两者条件时标注（大盘强时突破优先级略高）
+     - 大盘弱（上证 bear/bear_flip）时: 突破容易被诱多，优先标注回踩；大盘强时两者都给
+     - 判定依据: 使用该symbol的 `trendAgeBars`（日线趋势持续天数）和 `distanceToSupertrendAtr`
    - Don't narrate symbols that are simply holding
    - For `yellow_watch`, make the daily/weekly mismatch explicit, e.g. `日多(15) · 周空(28w)  ADX32  距1.3ATR  靠近日线支撑，等确认`.
    - For `new_entries`, `flip_proximity`, `position_mgmt`, and `yellow_watch`, add one compact structure line with actual lower/mid/upper values and mid direction: `周BOLL 下/中↑/上 · 月BOLL 下/中→/上 · 量 当前/20日均=倍数`.
