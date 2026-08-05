@@ -63,6 +63,7 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
      - 🔴 **保命模式** — 月线中轨↘下降: 停止一切买入逻辑，切换为"逢反弹减仓"，任何反弹是离场机会不是买入机会
      - 🚨 **无条件离场** — 股债双杀（股市跌+债券也跌，TLT/国债ETF同跌）: 流动性危机信号，清仓离场不问理由
      - 规则: "等回踩/等突破"的右侧逻辑只允许在🟢模式使用；🔴模式下禁止用回踩逻辑接飞刀
+     - **关键教训（SPY 2026-08 V型反转案例）**: 月线中轨走平/上升（🟢模式）+ 周线多头未破时，日线回调到布林下轨附近+缩量=**机会而非风险**。强趋势市场（尤其美股）经常不给回踩机会直接V型拉走——此时"等回踩"会踏空。🟢模式下，周线多头+日线跌至周/月布林下轨附近缩量企稳，可视为"突破+回踩"合并候选，不必死等标准回踩。
    - Don't narrate symbols that are simply holding
    - For `yellow_watch`, make the daily/weekly mismatch explicit, e.g. `日多(15) · 周空(28w)  ADX32  距1.3ATR  靠近日线支撑，等确认`.
    - For `new_entries`, `flip_proximity`, `position_mgmt`, and `yellow_watch`, add one compact structure line with actual lower/mid/upper values and mid direction: `周BOLL 下/中↑/上 · 月BOLL 下/中→/上 · 量 当前/20日均=倍数`.
