@@ -52,6 +52,17 @@ Scan all watchlist symbols with quality indicators, smart filtering, and market 
      - `⭐突破+回踩` — 同时满足两者条件时标注（大盘强时突破优先级略高）
      - 大盘弱（上证 bear/bear_flip）时: 突破容易被诱多，优先标注回踩；大盘强时两者都给
      - 判定依据: 使用该symbol的 `trendAgeBars`（日线趋势持续天数）和 `distanceToSupertrendAtr`
+     - **分批入场三步**（突破/回踩不必二选一，用仓位解决）:
+       - 第1步（突破试探）: 大盘转强 + 日线翻多站稳2天 → 先进1/3试探仓
+       - 第2步（回踩加仓）: 回踩趋势线不破 → 加1/3
+       - 第3步（趋势确认）: 周线转多 → 加到目标仓位
+       - 回踩等不来也不踏空（已有一份仓在车上），回踩来了成本更优
+   - **牛熊模式切换**（最重要，放在分析最前面）:
+     - 判定依据: 月线布林中轨方向（midSlopePct/midDirection）+ 股债跷跷板
+     - 🟢 **找买点模式** — 月线中轨↑或走平: 正常使用突破/回踩入场逻辑
+     - 🔴 **保命模式** — 月线中轨↘下降: 停止一切买入逻辑，切换为"逢反弹减仓"，任何反弹是离场机会不是买入机会
+     - 🚨 **无条件离场** — 股债双杀（股市跌+债券也跌，TLT/国债ETF同跌）: 流动性危机信号，清仓离场不问理由
+     - 规则: "等回踩/等突破"的右侧逻辑只允许在🟢模式使用；🔴模式下禁止用回踩逻辑接飞刀
    - Don't narrate symbols that are simply holding
    - For `yellow_watch`, make the daily/weekly mismatch explicit, e.g. `日多(15) · 周空(28w)  ADX32  距1.3ATR  靠近日线支撑，等确认`.
    - For `new_entries`, `flip_proximity`, `position_mgmt`, and `yellow_watch`, add one compact structure line with actual lower/mid/upper values and mid direction: `周BOLL 下/中↑/上 · 月BOLL 下/中→/上 · 量 当前/20日均=倍数`.
