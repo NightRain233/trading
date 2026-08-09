@@ -28,6 +28,23 @@ def _item(symbol, *, state, weekly_state, alert_type, priority="medium", actiona
     }
 
 
+def test_fetch_supertrend_scan_reads_items_from_schema_v2_envelope(monkeypatch):
+    item = _item(
+        "SPY",
+        state="bull_flip",
+        weekly_state="bull",
+        alert_type="buy_candidate",
+        priority="high",
+    )
+    monkeypatch.setattr(
+        openclaw_supertrend_alerts,
+        "_api_get",
+        lambda *args, **kwargs: {"schemaVersion": 2, "items": [item]},
+    )
+
+    assert openclaw_supertrend_alerts.fetch_supertrend_scan("http://example.test/api", 1.0) == [item]
+
+
 def test_daily_brief_groups_new_entries_prepare_watch_and_risk_sections():
     items = [
         _item("OLD", state="bull", weekly_state="bull", alert_type="hold_bull", priority="low", distance=9.0),
@@ -57,4 +74,3 @@ def test_daily_brief_markdown_explains_prepare_watch_is_not_a_buy_signal():
     assert "WAIT" in markdown
     # Verify new header format with emoji
     assert "## 👀 预备观察：周多日空，等待日线翻多" in markdown
-

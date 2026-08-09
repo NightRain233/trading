@@ -32,6 +32,8 @@ interface STItem {
   stVal: number | null;
   candles: STCandle[];
   weeklyState: 'bull_flip' | 'bear_flip' | 'bull' | 'bear' | null;
+  weeklyProvisionalState?: 'bull_flip' | 'bear_flip' | 'bull' | 'bear' | null;
+  weeklyPeriodComplete?: boolean | null;
   weeklyStVal: number | null;
   weeklyCandles: STCandle[];
   justFlipped: boolean;
@@ -57,11 +59,48 @@ interface STItem {
   cacheStale?: boolean;
   dataStale?: boolean;
   refreshTriggered?: boolean;
+  dailySessionComplete?: boolean | null;
+  market?: string;
+  marketMode?: 'seek' | 'cautious' | 'survival' | 'insufficient';
+  primaryGroup?: string;
+  tags?: string[];
+  decision?: {
+    permission: 'buy' | 'wait' | 'watch' | 'risk' | 'blocked';
+    label: string;
+    setup: 'breakout' | 'pullback' | 'v_reversal' | 'yellow_watch' | 'risk' | 'none';
+    stage: string;
+    reasonCodes: string[];
+    failedGates: string[];
+    nextTrigger: string | null;
+    invalidation: string | null;
+    maxAcceptablePrice: number | null;
+  };
+  breakout?: {
+    triggered: boolean;
+    signalDate: string | null;
+    previousState: string | null;
+    currentState: string;
+    distanceAtr: number | null;
+    maxAcceptablePrice: number | null;
+    stillExecutable: boolean;
+  };
   dataIntegrity?: {
     hasGap: boolean;
     firstMissingDate: string | null;
     expectedLatestDate: string | null;
   };
+}
+
+interface STScanResponse {
+  schemaVersion: number;
+  policyVersion: string;
+  generatedAt: string;
+  coverage: {
+    requested: number;
+    returned: number;
+    missing: string[];
+  };
+  items: STItem[];
 }
 
 type FilterType = 'all' | STItem['state'] | 'actionable' | 'high_priority' | 'weekly_bull_daily_bear' | 'weekly_bear_daily_bull' | 'weekly_bull_daily_just_bull' | 'weekly_bear_daily_just_bear' | 'weekly_bull_daily_bull' | 'weekly_bear_daily_bear';
@@ -275,11 +314,13 @@ export function SupertrendPage() {
   const load = useCallback(async ({ force = false, background = false }: { force?: boolean; background?: boolean } = {}) => {
     if (!background) setLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/supertrend/scan${force ? '?force=1' : ''}`);
-      const data = await r.json() as STItem[];
-      setItems(data);
+      const params = new URLSearchParams({ include_candles: 'true' });
+      if (force) params.set('force', '1');
+      const r = await fetch(`${API_BASE}/supertrend/scan?${params.toString()}`);
+      const payload = await r.json() as STScanResponse;
+      setItems(payload.items);
       lastLoadedAtRef.current = Date.now();
-      return data.some(item => item.refreshTriggered);
+      return payload.items.some(item => item.refreshTriggered);
     } finally {
       if (!background) setLoading(false);
     }

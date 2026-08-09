@@ -98,8 +98,6 @@ def query_stock(api_base: str, symbol: str, timeout: float) -> dict:
 # SuperTrend scan
 # ---------------------------------------------------------------------------
 
-PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
-
 # Market indices for environment summary
 MARKET_INDICES = ["000001.SS", "000300.SS", "510500.SS", "588000.SS", "159553.SZ"]
 MARKET_INDEX_LABELS = {
@@ -109,36 +107,6 @@ MARKET_INDEX_LABELS = {
     "588000.SS": "科创50",
     "159553.SZ": "中证2000",
 }
-
-# Filters for "worthy" background symbols
-def _is_worthy_background(item: dict) -> bool:
-    """A background (trend continuation) symbol is worth showing if it has a signal change."""
-    d_atr = abs(float(item.get("distanceToSupertrendAtr") or 0))
-    if d_atr < 2.0:
-        return True  # Close to ST, potential pullback
-    ind = item.get("indicators", {})
-    adx = float(ind.get("adx") or 0)
-    if adx > 35:
-        return True  # Strong trend
-    rsi21 = float(ind.get("rsi21") or 50)
-    if rsi21 < 50:
-        return True  # Oversold in uptrend
-    age = int(item.get("trendAgeBars") or 0)
-    if age < 10:
-        return True  # Fresh trend
-    if abs(float(item.get("distanceToSupertrendPct") or 0)) > 20:
-        return True  # Extreme extension
-    return False
-
-
-GROUP_RULES = [
-    ("new_entries", lambda i: i.get("weeklyState") in ("bull", "bull_flip") and i.get("state") in ("bull_flip",) or (i.get("justFlipped") and i.get("state") == "bull")),
-    ("prepare_watch", lambda i: i.get("weeklyState") in ("bull", "bull_flip") and i.get("state") == "bear"),
-    ("position_mgmt", lambda i: i.get("alertType") in ("support_test", "sell_or_risk", "resistance_test")),
-    ("flip_proximity", lambda i: i.get("alertType") not in ("support_test", "sell_or_risk", "resistance_test") and abs(float(i.get("distanceToSupertrendAtr") or 999)) < 0.5),
-    ("background", lambda i: i.get("alertType") == "hold_bull"),
-]
-
 
 def _build_symbol_entry(m: dict) -> dict:
     """Build a compact symbol entry with quality indicators."""
@@ -161,6 +129,8 @@ def _build_symbol_entry(m: dict) -> dict:
         "alias": m.get("alias", ""),
         "state": m.get("state"),
         "weeklyState": m.get("weeklyState"),
+        "weeklyProvisionalState": m.get("weeklyProvisionalState"),
+        "weeklyPeriodComplete": m.get("weeklyPeriodComplete"),
         "alertType": m.get("alertType"),
         "alertLabel": m.get("alertLabel"),
         "alertPriority": m.get("alertPriority"),
@@ -172,6 +142,15 @@ def _build_symbol_entry(m: dict) -> dict:
         "suggestedAction": m.get("suggestedAction"),
         "trendAgeBars": m.get("trendAgeBars"),
         "weeklyTrendAgeBars": m.get("weeklyTrendAgeBars"),
+        "market": m.get("market"),
+        "marketMode": m.get("marketMode"),
+        "dailySessionComplete": m.get("dailySessionComplete"),
+        "decision": m.get("decision"),
+        "primaryGroup": m.get("primaryGroup"),
+        "tags": m.get("tags", []),
+        "breakout": m.get("breakout"),
+        "pullback": m.get("pullback"),
+        "vReversal": m.get("vReversal"),
         # Quality indicators
         "adx": ind.get("adx"),
         "rsi21": ind.get("rsi21"),
@@ -186,6 +165,13 @@ def _build_symbol_entry(m: dict) -> dict:
         "kdjJ": ind.get("kdjJ"),
         "weeklyStVal": m.get("weeklyStVal"),
         "close": m.get("close"),
+        "stVal": m.get("stVal"),
+        "atr": ind.get("atr"),
+        "dailyBoll": {
+            "upper": ind.get("bollUpper"),
+            "mid": ind.get("bollMid"),
+            "lower": ind.get("bollLower"),
+        },
         "bollWidth": m.get("bollWidth"),
         "bollSqueeze": m.get("bollSqueeze", False),
         "weeklyBoll": m.get("weeklyBoll"),
@@ -202,15 +188,27 @@ def _build_symbol_entry(m: dict) -> dict:
 
 def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool = False) -> dict:
     force_str = "true" if force else "false"
-    items = _api_get(api_base, f"/supertrend/scan?force={force_str}", timeout)
+    payload = _api_get(
+        api_base,
+        f"/supertrend/scan?force={force_str}&include_candles=false",
+        timeout,
+    )
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ValueError("SuperTrend scan returned an invalid schema-v2 payload")
+    items = payload["items"]
     result: dict[str, Any] = {
         "total": len(items),
         "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+        "schemaVersion": payload.get("schemaVersion"),
+        "policyVersion": payload.get("policyVersion"),
+        "generatedAt": payload.get("generatedAt"),
+        "coverage": payload.get("coverage"),
+        "thresholds": payload.get("thresholds"),
+        "marketModes": payload.get("marketModes"),
     }
 
     if not grouped:
-        result["items"] = items
-        return result
+        return payload
 
     # Build lookup for market indices
     item_map = {i.get("symbol", ""): i for i in items}
@@ -254,80 +252,14 @@ def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool 
         "summary": "",  # Claude fills this in during presentation
     }
 
-    # Group
-    assigned = set()
-    groups = {}
-    for group_name, rule in GROUP_RULES:
-        members = []
-        for item in items:
-            sym = item.get("symbol", "")
-            if sym in assigned:
-                continue
-            if rule(item):
-                members.append(item)
-                assigned.add(sym)
-        if group_name == "background":
-            # Split: worthy vs quiet
-            worthy = [m for m in members if _is_worthy_background(m)]
-            quiet = [m for m in members if not _is_worthy_background(m)]
-            # Sort worthy by ADX desc (strongest trends first)
-            worthy.sort(key=lambda i: float(i.get("indicators", {}).get("adx") or 0), reverse=True)
-            quiet.sort(key=lambda i: float(i.get("indicators", {}).get("adx") or 0), reverse=True)
-            groups[group_name] = worthy
-            groups["background_quiet"] = quiet
-        elif group_name == "prepare_watch":
-            # Sort by distance (closest to ST = closest to flip)
-            groups[group_name] = sorted(members, key=lambda i: abs(float(i.get("distanceToSupertrendPct") or 999)))
-        elif group_name == "flip_proximity":
-            groups[group_name] = sorted(members, key=lambda i: abs(float(i.get("distanceToSupertrendAtr") or 999)))
-        else:
-            groups[group_name] = sorted(
-                members,
-                key=lambda i: (
-                    PRIORITY_RANK.get(str(i.get("alertPriority") or "none"), 3),
-                    float(i.get("distanceToSupertrendPct") or 999999),
-                ),
-            )
-
-    # BOLL squeeze candidates (not already in higher-priority groups)
-    squeezing = [
-        i for i in items
-        if i.get("symbol") not in assigned and i.get("bollSqueeze")
-    ]
-    if squeezing:
-        groups["squeeze_alerts"] = sorted(
-            squeezing,
-            key=lambda i: float(i.get("bollWidth") or 999),
-        )
-
-    # Remaining actionable
-    other = [
-        i for i in items
-        if i.get("symbol") not in assigned and i.get("isActionable")
-    ]
-    groups["other_actionable"] = sorted(
-        other,
-        key=lambda i: (
-            PRIORITY_RANK.get(str(i.get("alertPriority") or "none"), 3),
-            float(i.get("distanceToSupertrendPct") or 999999),
-        ),
-    )
-
-    # Build summary with quality indicators
     result["groups"] = {}
-    for name, members in groups.items():
-        symbols = [_build_symbol_entry(m) for m in members]
-        if name == "background_quiet":
-            result["groups"][name] = {
-                "count": len(members),
-                "collapsed": True,
-                "symbols": symbols,
-            }
-        else:
-            result["groups"][name] = {
-                "count": len(members),
-                "symbols": symbols,
-            }
+    for name, group in (payload.get("groups") or {}).items():
+        symbols = [symbol for symbol in group.get("symbols", []) if symbol in item_map]
+        result["groups"][name] = {
+            "count": len(symbols),
+            "symbols": symbols,
+        }
+    result["allSymbols"] = [_build_symbol_entry(item) for item in items]
 
     return result
 

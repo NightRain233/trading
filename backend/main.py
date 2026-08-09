@@ -2,7 +2,7 @@ import argparse
 from fastapi import FastAPI, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from typing import List, Optional, Literal
 from backtest import (
@@ -26,6 +26,7 @@ from backtest import (
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from supertrend_alerts import classify_supertrend_alert
+from supertrend_scan_policy import build_scan_response, classify_trend_state
 from analysis import (
     DATA_DIR,
     analyze_stock,
@@ -36,6 +37,7 @@ from analysis import (
     refresh_symbols_sync_with_timeout,
     get_data_source_status,
     build_macd_divergence_summary,
+    filter_completed_weekly_bars,
     is_daily_session_complete,
 )
 from data_source_guard import MarketDataUnavailableError
@@ -48,6 +50,7 @@ from portfolio_strategies.service import PortfolioStrategyService
 from portfolio_strategies import api_models as pm
 import json
 import os
+import copy
 import fcntl
 import sqlite3
 import uuid
@@ -351,6 +354,63 @@ class CreateGroupRequest(BaseModel):
 
 class UpdateWatchlistRequest(BaseModel):
     groups: List[Group]
+
+
+class SupertrendScanCoverage(BaseModel):
+    requested: int
+    returned: int
+    missing: List[str]
+
+
+class SupertrendScanDecision(BaseModel):
+    permission: Literal["buy", "wait", "watch", "risk", "blocked"]
+    label: str
+    setup: str
+    stage: str
+    reasonCodes: List[str]
+    failedGates: List[str]
+    nextTrigger: Optional[str] = None
+    invalidation: Optional[str] = None
+    maxAcceptablePrice: Optional[float] = None
+
+
+class SupertrendScanItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    symbol: str
+    state: Literal["bull", "bull_flip", "bear", "bear_flip"]
+    weeklyState: Optional[Literal["bull", "bull_flip", "bear", "bear_flip"]] = None
+    dailySessionComplete: Optional[bool] = None
+    market: str
+    marketMode: str
+    primaryGroup: str
+    tags: List[str]
+    decision: SupertrendScanDecision
+
+
+class SupertrendScanGroup(BaseModel):
+    count: int
+    symbols: List[str]
+
+
+class SupertrendScanMarketMode(BaseModel):
+    mode: Literal["seek", "cautious", "survival", "insufficient"]
+    representatives: List[str]
+    directions: dict
+    adxThreshold: Optional[float] = None
+    missingSymbols: List[str]
+
+
+class SupertrendScanResponse(BaseModel):
+    schemaVersion: int
+    policyVersion: str
+    includesCandles: bool
+    generatedAt: str
+    coverage: SupertrendScanCoverage
+    thresholds: dict
+    marketModes: dict[str, SupertrendScanMarketMode]
+    groups: dict[str, SupertrendScanGroup]
+    items: List[SupertrendScanItem]
 
 class BatchQuoteRequest(BaseModel):
     symbols: List[str]
@@ -1480,6 +1540,17 @@ ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS = 5.0
 _st_scan_cache: dict = {"data": None, "ts": 0.0}
 
 
+def _st_scan_response_view(payload: dict, include_candles: bool) -> dict:
+    if include_candles:
+        return payload
+    compact = copy.deepcopy(payload)
+    compact["includesCandles"] = False
+    for item in compact.get("items", []):
+        item.pop("candles", None)
+        item.pop("weeklyCandles", None)
+    return compact
+
+
 def _st_path(symbol: str, weekly: bool = False) -> str:
     from analysis import DATA_DIR as current_data_dir
     suffix = "_weekly.parquet" if weekly else ".parquet"
@@ -1663,6 +1734,11 @@ def _st_multitimeframe_context(
     weekly_close = close.resample("W").last().dropna()
     monthly_close = close.resample("ME").last().dropna()
     latest_close_date = pd.Timestamp(close.index[-1]).date().isoformat() if not close.empty else None
+    reference_now = now or datetime.now(timezone.utc)
+    current_month = pd.Timestamp(reference_now.date()).to_period("M")
+    latest_month = pd.Timestamp(close.index[-1]).to_period("M") if not close.empty else None
+    monthly_period_complete = latest_month is not None and latest_month < current_month
+    completed_monthly_close = monthly_close if monthly_period_complete else monthly_close.iloc[:-1]
 
     volume_context = empty_volume.copy()
     if "Volume" in ordered.columns:
@@ -1682,9 +1758,18 @@ def _st_multitimeframe_context(
                 "asOf": volume_as_of,
             })
 
+    monthly_boll = _st_boll_context(monthly_close, as_of=latest_close_date)
+    decision_monthly_boll = _st_boll_context(completed_monthly_close)
+    monthly_boll.update({
+        "periodComplete": monthly_period_complete,
+        "decisionMidDirection": decision_monthly_boll.get("midDirection"),
+        "decisionMidSlopePct": decision_monthly_boll.get("midSlopePct"),
+        "decisionAsOf": decision_monthly_boll.get("asOf"),
+    })
+
     return {
         "weeklyBoll": _st_boll_context(weekly_close, as_of=latest_close_date),
-        "monthlyBoll": _st_boll_context(monthly_close, as_of=latest_close_date),
+        "monthlyBoll": monthly_boll,
         "volumeContext": volume_context,
     }
 
@@ -1720,9 +1805,9 @@ def _refresh_supertrend_symbols(symbols: List[str], timeout_seconds: float) -> b
     thread.join(timeout_seconds)
     return completed["done"]
 
-@app.get("/api/supertrend/scan")
-def supertrend_scan(force: bool = False):
-    """扫描所有 watchlist 标的的 SuperTrend 状态，返回九宫格所需数据。"""
+@app.get("/api/supertrend/scan", response_model=SupertrendScanResponse)
+def supertrend_scan(force: bool = False, include_candles: bool = False):
+    """扫描所有 watchlist 标的并返回统一的右侧交易决策契约。"""
     import pandas as pd
     from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
@@ -1744,7 +1829,7 @@ def supertrend_scan(force: bool = False):
         and cache_symbols == symbols
         and cache_signature == signature
     ):
-        return _st_scan_cache["data"]
+        return _st_scan_response_view(_st_scan_cache["data"], include_candles)
 
     refresh_symbols = []
     missing_symbols = []
@@ -1778,7 +1863,7 @@ def supertrend_scan(force: bool = False):
         and cache_symbols == symbols
         and cache_signature == signature
     ):
-        return _st_scan_cache["data"]
+        return _st_scan_response_view(_st_scan_cache["data"], include_candles)
 
     import pandas_ta as ta
 
@@ -1792,6 +1877,9 @@ def supertrend_scan(force: bool = False):
             return None
         daily = daily.sort_index()
         latest_data_date = _st_latest_data_date(daily)
+        daily_session_complete = _st_volume_session_complete(sym, latest_data_date)
+        decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
+        decision_as_of = _st_latest_data_date(decision_daily)
         data_integrity = _st_recent_gap_info(sym, daily)
         cache_stale = daily_mtime is None or daily_mtime < stale_before
         data_stale = _st_data_stale(latest_data_date, data_integrity)
@@ -1812,17 +1900,7 @@ def supertrend_scan(force: bool = False):
         last = daily.dropna(subset=["Close"]).iloc[-1]
         cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
         dir_rows = daily.dropna(subset=["_st_dir"])
-        # flipped if direction changed within last 5 bars
-        recent_dirs = [int(r) for r in dir_rows["_st_dir"].iloc[-5:]]
-        just_flipped = len(recent_dirs) >= 2 and recent_dirs[-1] != recent_dirs[0]
-        if just_flipped and cur_dir == 1:
-            state = "bull_flip"
-        elif just_flipped and cur_dir == -1:
-            state = "bear_flip"
-        elif cur_dir == 1:
-            state = "bull"
-        else:
-            state = "bear"
+        state, just_flipped = classify_trend_state(dir_rows["_st_dir"].tail(2).tolist())
 
         trend_age_bars = 0
         if cur_dir != 0:
@@ -1852,6 +1930,8 @@ def supertrend_scan(force: bool = False):
         weekly_candles = []
         weekly = None
         weekly_just_flipped = False
+        weekly_provisional_state = None
+        weekly_period_complete = None
         wcur_dir = 0
         wprev_rows = None
         weekly_path = _st_path(sym, weekly=True)
@@ -1866,20 +1946,22 @@ def supertrend_scan(force: bool = False):
                     if wval_col and wdir_col:
                         weekly["_wst_val"] = wst[wval_col]
                         weekly["_wst_dir"] = wst[wdir_col]
-                        wlast = weekly.dropna(subset=["Close"]).iloc[-1]
-                        wcur_dir = int(wlast["_wst_dir"]) if pd.notna(wlast.get("_wst_dir")) else 0
-                        wprev_rows = weekly.dropna(subset=["_wst_dir"])
-                        wrecent_dirs = [int(r) for r in wprev_rows["_wst_dir"].iloc[-5:]]
-                        wjust_flipped = len(wrecent_dirs) >= 2 and wrecent_dirs[-1] != wrecent_dirs[0]
-                        if wjust_flipped and wcur_dir == 1:
-                            weekly_state, weekly_just_flipped = "bull_flip", True
-                        elif wjust_flipped and wcur_dir == -1:
-                            weekly_state, weekly_just_flipped = "bear_flip", True
-                        elif wcur_dir == 1:
-                            weekly_state = "bull"
-                        else:
-                            weekly_state = "bear"
-                        weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
+                        all_weekly_rows = weekly.dropna(subset=["_wst_dir"])
+                        weekly_provisional_state, _ = classify_trend_state(
+                            all_weekly_rows["_wst_dir"].tail(2).tolist()
+                        )
+                        completed_weekly = filter_completed_weekly_bars(sym, weekly, decision_as_of)
+                        if not completed_weekly.empty:
+                            completed_through = completed_weekly.index[-1]
+                            wprev_rows = all_weekly_rows.loc[all_weekly_rows.index <= completed_through]
+                        if wprev_rows is not None and not wprev_rows.empty:
+                            wlast = wprev_rows.dropna(subset=["Close"]).iloc[-1]
+                            wcur_dir = int(wlast["_wst_dir"]) if pd.notna(wlast.get("_wst_dir")) else 0
+                            weekly_state, weekly_just_flipped = classify_trend_state(
+                                wprev_rows["_wst_dir"].tail(2).tolist()
+                            )
+                            weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
+                            weekly_period_complete = wprev_rows.index[-1] == all_weekly_rows.index[-1]
                         weekly_candles = _to_candles(weekly, "_wst_val", "_wst_dir", 30)
 
         # Weekly trend age (consecutive bars in current weekly ST direction)
@@ -1964,11 +2046,14 @@ def supertrend_scan(force: bool = False):
             "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
             "candles": candles,
             "weeklyState": weekly_state,
+            "weeklyProvisionalState": weekly_provisional_state,
+            "weeklyPeriodComplete": weekly_period_complete,
             "weeklyStVal": weekly_st_val,
             "weeklyCandles": weekly_candles,
             "justFlipped": state in ("bull_flip", "bear_flip"),
             "weeklyJustFlipped": weekly_just_flipped,
             "trendAgeBars": trend_age_bars,
+            "dailySessionComplete": daily_session_complete,
             "latestDataDate": latest_data_date,
             "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
             "cacheStale": cache_stale,
@@ -1988,11 +2073,12 @@ def supertrend_scan(force: bool = False):
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = [r for r in executor.map(_process_sym, symbols) if r is not None]
 
-    _st_scan_cache["data"] = results
+    response = build_scan_response(results, requested_symbols=symbols)
+    _st_scan_cache["data"] = response
     _st_scan_cache["ts"] = time.time()
     _st_scan_cache["symbols"] = symbols
     _st_scan_cache["signature"] = signature
-    return results
+    return _st_scan_response_view(response, include_candles)
 
 
 def _next_prewarm_run(now_local: datetime) -> datetime:

@@ -56,6 +56,7 @@ from analysis_candles import (  # noqa: F401
 )
 from analysis_divergence import (  # noqa: F401
     build_macd_divergence_summary,
+    filter_completed_weekly_bars,
     is_daily_session_complete,
 )
 

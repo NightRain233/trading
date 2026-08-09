@@ -69,6 +69,24 @@ def test_supertrend_boll_context_marks_direction_history_at_exactly_twenty_sampl
     assert context["slopeSampleSufficient"] is False
 
 
+def test_supertrend_monthly_decision_direction_uses_last_completed_month():
+    index = pd.bdate_range(end="2026-08-07", periods=700)
+    daily = pd.DataFrame(
+        {"Close": range(100, 800), "Volume": [100.0] * 700},
+        index=index,
+    )
+
+    context = main._st_multitimeframe_context(
+        daily,
+        symbol="510300.SS",
+        now=datetime(2026, 8, 9, 11, 0, tzinfo=main.PREWARM_TZ),
+    )
+
+    assert context["monthlyBoll"]["periodComplete"] is False
+    assert context["monthlyBoll"]["decisionMidDirection"] == "rising"
+    assert context["monthlyBoll"]["decisionAsOf"] == "2026-07-31"
+
+
 def test_supertrend_volume_context_excludes_incomplete_session_ratio():
     index = pd.to_datetime(["2026-08-02", "2026-08-03"])
     daily = pd.DataFrame(
@@ -159,14 +177,15 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
     monkeypatch.setattr(pd, "read_parquet", lambda path: daily.copy())
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    result = main.supertrend_scan()
+    result = main.supertrend_scan(include_candles=True)
 
-    times = [candle["time"] for candle in result[0]["candles"]]
+    item = result["items"][0]
+    times = [candle["time"] for candle in item["candles"]]
     assert times == sorted(times)
-    assert result[0]["indicators"]["macdHistPrev"] == 0.2
-    assert result[0]["indicators"]["macdHistDelta"] == pytest.approx(0.1)
-    assert result[0]["macdDivergence"]["daily"]["confirmed"] is None
-    assert result[0]["macdDivergence"]["policy"]["confirmedOnlyForDecision"] is True
+    assert item["indicators"]["macdHistPrev"] == 0.2
+    assert item["indicators"]["macdHistDelta"] == pytest.approx(0.1)
+    assert item["macdDivergence"]["daily"]["confirmed"] is None
+    assert item["macdDivergence"]["policy"]["confirmedOnlyForDecision"] is True
 
 
 def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
@@ -205,11 +224,11 @@ def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monke
     monkeypatch.setattr(main, "batch_fetch_and_update", fake_fetch)
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    result = main.supertrend_scan()
+    result = main.supertrend_scan(include_candles=True)
 
     assert fetched == ["MISSING.SZ"]
-    assert result[0]["symbol"] == "MISSING.SZ"
-    assert result[0]["alias"] == "缺失票"
+    assert result["items"][0]["symbol"] == "MISSING.SZ"
+    assert result["items"][0]["alias"] == "缺失票"
 
 
 def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
@@ -261,10 +280,10 @@ def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scann
     monkeypatch.setattr(main, "batch_fetch_and_update", fake_fetch)
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    result = main.supertrend_scan()
+    result = main.supertrend_scan(include_candles=True)
 
     assert fetched == ["STALE.SZ"]
-    assert result[0]["candles"][-1]["time"] == "2026-06-02"
+    assert result["items"][0]["candles"][-1]["time"] == "2026-06-02"
 
 
 def test_supertrend_scan_cache_is_scoped_to_watchlist_symbols(monkeypatch):
@@ -297,9 +316,9 @@ def test_supertrend_scan_cache_is_scoped_to_watchlist_symbols(monkeypatch):
     main._st_scan_cache = {"data": [{"symbol": "OLD"}], "ts": 9999999999, "symbols": ["OLD"]}
     monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "NEW", "alias": ""}]}])
 
-    result = main.supertrend_scan()
+    result = main.supertrend_scan(include_candles=True)
 
-    assert [item["symbol"] for item in result] == ["NEW"]
+    assert [item["symbol"] for item in result["items"]] == ["NEW"]
 
 
 def test_supertrend_scan_cache_invalidates_when_daily_parquet_mtime_changes(monkeypatch, tmp_path):
@@ -341,15 +360,15 @@ def test_supertrend_scan_cache_invalidates_when_daily_parquet_mtime_changes(monk
     monkeypatch.setattr(main, "batch_fetch_and_update", lambda symbols: {})
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    first_result = main.supertrend_scan()
+    first_result = main.supertrend_scan(include_candles=True)
 
     build_daily(22.5).to_parquet(daily_path)
     second_mtime = first_mtime + 10
     main.os.utime(daily_path, (second_mtime, second_mtime))
-    second_result = main.supertrend_scan()
+    second_result = main.supertrend_scan(include_candles=True)
 
-    assert first_result[0]["close"] == 11.5
-    assert second_result[0]["close"] == 22.5
+    assert first_result["items"][0]["close"] == 11.5
+    assert second_result["items"][0]["close"] == 22.5
 
 
 def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
@@ -390,9 +409,9 @@ def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "batch_fetch_and_update", lambda symbols: {})
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    result = main.supertrend_scan()
+    result = main.supertrend_scan(include_candles=True)
 
-    item = result[0]
+    item = result["items"][0]
     assert item["latestDataDate"] == latest_date.date().isoformat()
     assert item["dataUpdatedAt"] is not None
     assert item["cacheStale"] is False

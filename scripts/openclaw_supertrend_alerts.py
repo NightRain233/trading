@@ -46,10 +46,10 @@ def _api_get(api_base: str, path: str, timeout: float) -> Any:
 
 
 def fetch_supertrend_scan(api_base: str, timeout: float) -> list[dict[str, Any]]:
-    payload = _api_get(api_base, "/supertrend/scan", timeout)
-    if not isinstance(payload, list):
-        raise ValueError("SuperTrend scan returned a non-list payload")
-    return payload
+    payload = _api_get(api_base, "/supertrend/scan?include_candles=false", timeout)
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ValueError("SuperTrend scan returned an invalid schema-v2 payload")
+    return payload["items"]
 
 
 def filter_alerts(
