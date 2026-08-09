@@ -112,6 +112,56 @@ def test_market_mode_uses_two_representatives_and_marks_missing_data():
     assert response["marketModes"]["bond"]["missingSymbols"] == ["511010.SS", "TLT"]
 
 
+def test_system_representatives_are_separate_and_hk_does_not_depend_on_bonds():
+    items = _representatives() + [_item("513910.SS", state="bull_flip")]
+    representative_items = [
+        _item("^HSI"),
+        _item("2800.HK"),
+        _item("511010.SS"),
+        _item("TLT"),
+    ]
+    response = build_scan_response(
+        items,
+        requested_symbols=[item["symbol"] for item in items],
+        representative_items=representative_items,
+    )
+    assert response["marketModes"]["hong_kong"]["mode"] == "seek"
+    assert response["marketModes"]["bond_cn"]["role"] == "bond_risk_observation"
+    assert response["marketModes"]["bond_us"]["role"] == "bond_risk_observation"
+    assert "^HSI" not in [item["symbol"] for item in response["items"]]
+
+
+def test_stale_bond_representative_only_marks_bond_risk_insufficient():
+    items = _representatives() + [_item("513910.SS", state="bull_flip")]
+    stale_bond = _item("511010.SS")
+    stale_bond["dataStale"] = True
+    response = build_scan_response(
+        items,
+        requested_symbols=[item["symbol"] for item in items],
+        representative_items=[_item("^HSI"), _item("2800.HK"), stale_bond, _item("TLT")],
+    )
+    assert response["marketModes"]["bond_cn"]["mode"] == "insufficient"
+    assert response["marketModes"]["bond_cn"]["representativeStatus"]["511010.SS"] == "stale"
+    assert response["marketModes"]["hong_kong"]["mode"] == "seek"
+
+
+def test_crypto_uses_last_complete_daily_bar_when_current_utc_bar_is_provisional():
+    items = [
+        {**_item("BTC-USD", daily_complete=False), "isCrypto": True, "decisionDailyAvailable": True},
+        {**_item("ETH-USD", daily_complete=False), "isCrypto": True, "decisionDailyAvailable": True},
+    ] + [_item("000001.SS"), _item("000300.SS"), _item("SPY"), _item("QQQ"), _item("GC=F"), _item("518880.SS")]
+    response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
+    btc = next(item for item in response["items"] if item["symbol"] == "BTC-USD")
+    assert btc["decision"]["failedGates"] != ["DAILY_SESSION_INCOMPLETE"]
+
+
+def test_crypto_blocks_only_when_no_complete_daily_bar_exists():
+    btc = {**_item("BTC-USD", daily_complete=False), "isCrypto": True, "decisionDailyAvailable": False}
+    response = build_scan_response([btc], requested_symbols=["BTC-USD"])
+    assert response["items"][0]["decision"]["permission"] == "blocked"
+    assert response["items"][0]["decision"]["failedGates"] == ["DAILY_SESSION_INCOMPLETE"]
+
+
 def test_breakout_requires_weekly_market_adx_and_distance_gates():
     items = _representatives() + [
         _item("AAPL", state="bull_flip", adx=31, distance_atr=1.5),
@@ -207,11 +257,11 @@ def test_pullback_requires_prior_zone_bar_and_current_restrengthening_close():
         "failed": False,
     }
     assert by_symbol["AAPL"]["decision"]["label"] == "可买·回踩入场"
-    assert by_symbol["MU"]["decision"]["label"] == "等确认·回踩接近支撑"
+    assert by_symbol["MU"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
     assert by_symbol["NVDA"]["pullback"]["enteredZone"] is True
     assert by_symbol["NVDA"]["pullback"]["enteredAt"] == "2026-08-07"
     assert by_symbol["NVDA"]["pullback"]["restrengthConfirmed"] is False
-    assert by_symbol["NVDA"]["decision"]["label"] == "等确认·回踩接近支撑"
+    assert by_symbol["NVDA"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
 
 
 def test_v_reversal_does_not_relabel_an_existing_daily_bull_trend():

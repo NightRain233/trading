@@ -26,7 +26,7 @@ from backtest import (
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from supertrend_alerts import classify_supertrend_alert
-from supertrend_scan_policy import build_scan_response, classify_trend_state
+from supertrend_scan_policy import build_scan_response, classify_trend_state, SYSTEM_MARKET_REPRESENTATIVES
 from analysis import (
     DATA_DIR,
     analyze_stock,
@@ -394,6 +394,7 @@ class SupertrendScanGroup(BaseModel):
 
 
 class SupertrendScanMarketMode(BaseModel):
+    model_config = ConfigDict(extra="allow")
     mode: Literal["seek", "cautious", "survival", "insufficient"]
     representatives: List[str]
     directions: dict
@@ -1812,13 +1813,16 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
     from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
     groups = load_watchlist()
-    symbols, alias_map = [], {}
+    user_symbols, alias_map = [], {}
     for g in groups:
         for item in g.get("symbols", []):
             sym = item["symbol"] if isinstance(item, dict) else item
-            if sym not in symbols:
-                symbols.append(sym)
+            if sym not in user_symbols:
+                user_symbols.append(sym)
                 alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
+    representative_symbols = list(dict.fromkeys(symbol for values in SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values))
+    symbols = list(dict.fromkeys(user_symbols + representative_symbols))
+    representative_set = set(representative_symbols)
 
     cache_symbols = _st_scan_cache.get("symbols")
     cache_signature = _st_scan_cache.get("signature")
@@ -1878,8 +1882,6 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
         daily = daily.sort_index()
         latest_data_date = _st_latest_data_date(daily)
         daily_session_complete = _st_volume_session_complete(sym, latest_data_date)
-        decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
-        decision_as_of = _st_latest_data_date(decision_daily)
         data_integrity = _st_recent_gap_info(sym, daily)
         cache_stale = daily_mtime is None or daily_mtime < stale_before
         data_stale = _st_data_stale(latest_data_date, data_integrity)
@@ -1897,10 +1899,20 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
         if "ATR" not in daily.columns or daily["ATR"].isnull().all():
             daily["ATR"] = ta.atr(daily["High"], daily["Low"], daily["Close"], length=14)
 
-        last = daily.dropna(subset=["Close"]).iloc[-1]
+        decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
+        decision_as_of = _st_latest_data_date(decision_daily)
+        decision_daily_available = not decision_daily.empty
+        all_dir_rows = daily.dropna(subset=["_st_dir"])
+        formal_rows = decision_daily.dropna(subset=["Close"])
+        last = formal_rows.iloc[-1] if not formal_rows.empty else daily.dropna(subset=["Close"]).iloc[-1]
         cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
-        dir_rows = daily.dropna(subset=["_st_dir"])
-        state, just_flipped = classify_trend_state(dir_rows["_st_dir"].tail(2).tolist())
+        dir_rows = decision_daily.dropna(subset=["_st_dir"])
+        provisional_state, _ = classify_trend_state(all_dir_rows["_st_dir"].tail(2).tolist())
+        state, just_flipped = (
+            classify_trend_state(dir_rows["_st_dir"].tail(2).tolist())
+            if decision_daily_available
+            else (provisional_state, False)
+        )
 
         trend_age_bars = 0
         if cur_dir != 0:
@@ -1923,7 +1935,7 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
                 })
             return rows
 
-        candles = _to_candles(daily, "_st_val", "_st_dir", 60)
+        candles = _to_candles(decision_daily, "_st_val", "_st_dir", 60)
 
         weekly_state = None
         weekly_st_val = None
@@ -2042,6 +2054,11 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
             "symbol": sym.upper(),
             "alias": alias_map.get(sym, ""),
             "state": state,
+            "dailyProvisionalState": provisional_state,
+            "decisionDailyState": state if decision_daily_available else None,
+            "decisionAsOf": decision_as_of,
+            "decisionDailyAvailable": decision_daily_available,
+            "isCrypto": sym.upper().endswith("-USD"),
             "close": float(last["Close"]) if pd.notna(last.get("Close")) else None,
             "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
             "candles": candles,
@@ -2073,7 +2090,13 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = [r for r in executor.map(_process_sym, symbols) if r is not None]
 
-    response = build_scan_response(results, requested_symbols=symbols)
+    user_results = [item for item in results if item["symbol"] in set(user_symbols)]
+    representative_results = [item for item in results if item["symbol"] in representative_set and item["symbol"] not in set(user_symbols)]
+    response = build_scan_response(
+        user_results,
+        requested_symbols=user_symbols,
+        representative_items=representative_results,
+    )
     _st_scan_cache["data"] = response
     _st_scan_cache["ts"] = time.time()
     _st_scan_cache["symbols"] = symbols

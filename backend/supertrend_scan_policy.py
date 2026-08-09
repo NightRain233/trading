@@ -18,13 +18,16 @@ PULLBACK_ZONE_ATR = 1.5
 V_REVERSAL_BOLL_DISTANCE_ATR = 0.5
 V_REVERSAL_MAX_VOLUME_RATIO = 0.8
 
-MARKET_REPRESENTATIVES = {
+SYSTEM_MARKET_REPRESENTATIVES = {
     "a_share": ("000001.SS", "000300.SS"),
+    "hong_kong": ("^HSI", "2800.HK"),
     "us": ("SPY", "QQQ"),
     "crypto": ("BTC-USD", "ETH-USD"),
     "gold": ("GC=F", "518880.SS"),
-    "bond": ("511010.SS", "TLT"),
+    "bond_cn": ("511010.SS",),
+    "bond_us": ("TLT",),
 }
+MARKET_REPRESENTATIVES = {**SYSTEM_MARKET_REPRESENTATIVES, "bond": ("511010.SS", "TLT")}
 
 GOLD_SYMBOLS = {"GC=F", "518880.SS"}
 BOND_SYMBOLS = {"511010.SS", "TLT"}
@@ -50,7 +53,7 @@ def classify_symbol_market(symbol: str) -> str:
     if normalized in GOLD_SYMBOLS:
         return "gold"
     if normalized in BOND_SYMBOLS:
-        return "bond"
+        return "bond_cn" if normalized == "511010.SS" else "bond_us"
     if normalized in CRYPTO_SYMBOLS:
         return "crypto"
     if normalized in US_EXPOSURE_SYMBOLS:
@@ -85,6 +88,11 @@ def classify_trend_state(directions: Iterable[Any]) -> tuple[str, bool]:
 def _monthly_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
     if not item:
         return None
+    if item.get("dataStale") is True:
+        return None
+    integrity = item.get("dataIntegrity") or {}
+    if integrity.get("hasGap") or integrity.get("hasRecentGap"):
+        return None
     context = item.get("monthlyBoll") or {}
     direction = (
         context.get("decisionMidDirection")
@@ -98,10 +106,22 @@ def _monthly_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
     return str(direction)
 
 
-def build_market_modes(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _representative_status(item: Optional[dict[str, Any]]) -> str:
+    if not item:
+        return "missing"
+    if item.get("dataStale") is True:
+        return "stale"
+    integrity = item.get("dataIntegrity") or {}
+    if integrity.get("hasGap") or integrity.get("hasRecentGap"):
+        return "data_gap"
+    return "available" if _monthly_direction(item) is not None else "monthly_direction_unavailable"
+
+
+def build_market_modes(items: Iterable[dict[str, Any]], representative_items: Iterable[dict[str, Any]] = ()) -> dict[str, dict[str, Any]]:
     item_map = {str(item.get("symbol") or "").upper(): item for item in items}
+    item_map.update({str(item.get("symbol") or "").upper(): item for item in representative_items})
     modes: dict[str, dict[str, Any]] = {}
-    for market, representatives in MARKET_REPRESENTATIVES.items():
+    for market, representatives in SYSTEM_MARKET_REPRESENTATIVES.items():
         directions = {symbol: _monthly_direction(item_map.get(symbol)) for symbol in representatives}
         missing = [symbol for symbol, direction in directions.items() if direction is None]
         values = [direction for direction in directions.values() if direction is not None]
@@ -123,7 +143,18 @@ def build_market_modes(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, A
             "directions": directions,
             "adxThreshold": adx_threshold,
             "missingSymbols": missing,
+            "representativeStatus": {symbol: _representative_status(item_map.get(symbol)) for symbol in representatives},
+            "role": "bond_risk_observation" if market.startswith("bond_") else "equity_permission",
         }
+    modes["bond"] = {
+        "mode": "insufficient" if any(modes[key]["missingSymbols"] for key in ("bond_cn", "bond_us")) else "cautious",
+        "representatives": ["511010.SS", "TLT"],
+        "directions": {symbol: _monthly_direction(item_map.get(symbol)) for symbol in ("511010.SS", "TLT")},
+        "adxThreshold": None,
+        "missingSymbols": [symbol for symbol in ("511010.SS", "TLT") if _monthly_direction(item_map.get(symbol)) is None],
+        "representativeStatus": {symbol: _representative_status(item_map.get(symbol)) for symbol in ("511010.SS", "TLT")},
+        "role": "bond_risk_observation",
+    }
     return modes
 
 
@@ -150,7 +181,7 @@ def _data_failure(item: dict[str, Any]) -> Optional[str]:
     integrity = item.get("dataIntegrity") or {}
     if integrity.get("hasGap") or integrity.get("hasRecentGap"):
         return "DATA_GAP"
-    if item.get("dailySessionComplete") is not True:
+    if item.get("dailySessionComplete") is not True and not (item.get("isCrypto") and item.get("decisionDailyAvailable")):
         return "DAILY_SESSION_INCOMPLETE"
     return None
 
@@ -400,7 +431,7 @@ def _decision(
         if not failed:
             permission, label, stage, group = "buy", "可买·回踩入场", "confirmed", "pullback_buy"
         else:
-            permission, label, stage, group = "wait", "等确认·回踩接近支撑", "approaching", "wait_confirmation"
+            permission, label, stage, group = "wait", "等确认·已进入回踩区，支撑暂未失守", "approaching", "wait_confirmation"
         return ({
             "permission": permission,
             "label": label,
@@ -408,7 +439,7 @@ def _decision(
             "stage": stage,
             "reasonCodes": reasons,
             "failedGates": failed,
-            "nextTrigger": "下一交易日按回踩计划执行" if permission == "buy" else "等待完整日线重新走强",
+            "nextTrigger": "下一交易日按回踩计划执行" if permission == "buy" else "已进入回踩区，支撑暂未失守；等待后续完整日线重新走强",
             "invalidation": "日线收盘跌破SuperTrend",
             "maxAcceptablePrice": None,
         }, group, tags)
@@ -470,12 +501,13 @@ def build_scan_response(
     items: Iterable[dict[str, Any]],
     *,
     requested_symbols: Iterable[str],
+    representative_items: Iterable[dict[str, Any]] = (),
     generated_at: Optional[str] = None,
 ) -> dict[str, Any]:
     normalized_items = [copy.deepcopy(item) for item in items]
     requested = list(dict.fromkeys(str(symbol).upper() for symbol in requested_symbols))
     returned = [str(item.get("symbol") or "").upper() for item in normalized_items]
-    market_modes = build_market_modes(normalized_items)
+    market_modes = build_market_modes(normalized_items, representative_items)
     groups = {name: {"count": 0, "symbols": []} for name in PRIMARY_GROUPS}
 
     for item in normalized_items:

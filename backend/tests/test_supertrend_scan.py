@@ -125,6 +125,9 @@ def test_supertrend_volume_session_completion_uses_market_clock():
         "BTC-USD", "2026-08-03", datetime(2026, 8, 3, 23, 59, tzinfo=main.timezone.utc)
     ) is False
     assert main._st_volume_session_complete(
+        "BTC-USD", "2026-08-04", datetime(2026, 8, 4, 0, 45, tzinfo=main.timezone.utc)
+    ) is False
+    assert main._st_volume_session_complete(
         "BTC-USD", "2026-08-03", datetime(2026, 8, 4, 0, 0, tzinfo=main.timezone.utc)
     ) is True
 
@@ -226,7 +229,8 @@ def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monke
 
     result = main.supertrend_scan(include_candles=True)
 
-    assert fetched == ["MISSING.SZ"]
+    assert fetched[0] == "MISSING.SZ"
+    assert set(fetched[1:]) == {symbol for values in main.SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values}
     assert result["items"][0]["symbol"] == "MISSING.SZ"
     assert result["items"][0]["alias"] == "缺失票"
 
@@ -282,7 +286,8 @@ def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scann
 
     result = main.supertrend_scan(include_candles=True)
 
-    assert fetched == ["STALE.SZ"]
+    assert fetched[0] == "STALE.SZ"
+    assert set(fetched[1:]) == {symbol for values in main.SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values}
     assert result["items"][0]["candles"][-1]["time"] == "2026-06-02"
 
 
