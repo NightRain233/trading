@@ -1,4 +1,4 @@
 interface:
   display_name: "交易深度分析"
-  short_description: "深度分析股票与ETF趋势信号、全市场扫描结果和组合策略状态"
-  default_prompt: "Use $trading-analysis to analyze this stock, signal, or portfolio strategy."
+  short_description: "调查统一决策、行情生命周期、扫描变化与组合执行状态"
+  default_prompt: "Use $trading-analysis to investigate this symbol, unified signal, or portfolio strategy."

@@ -1,4 +1,4 @@
 interface:
   display_name: "市场趋势扫描"
-  short_description: "扫描全部自选标的并按趋势质量、交易机会和风险优先级分组"
+  short_description: "扫描风险、可买、压缩布防、近触发机会及组合执行状态"
   default_prompt: "Use $scan to run and summarize the project-wide SuperTrend market scan."

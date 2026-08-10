@@ -69,6 +69,79 @@ def test_supertrend_boll_context_marks_direction_history_at_exactly_twenty_sampl
     assert context["slopeSampleSufficient"] is False
 
 
+def test_daily_boll_compression_excludes_provisional_bar():
+    index = pd.bdate_range("2026-06-01", periods=21)
+    formal = pd.DataFrame({
+        "BOLL_Upper": [110.0] * 20,
+        "BOLL_Lower": [90.0] * 20,
+        "BOLL_Mid": [100.0] * 20,
+    }, index=index[:20])
+    provisional = pd.DataFrame({
+        "BOLL_Upper": [102.0], "BOLL_Lower": [98.0], "BOLL_Mid": [100.0]
+    }, index=index[20:])
+
+    formal_result = main._st_daily_boll_squeeze(formal)
+    polluted_result = main._st_daily_boll_squeeze(pd.concat([formal, provisional]))
+
+    assert formal_result[1] is False
+    assert polluted_result[1] is True
+
+
+def test_a_share_gap_detection_uses_reference_sessions_not_weekdays(monkeypatch):
+    target_dates = pd.to_datetime(["2026-09-30", "2026-10-08"])
+    target = pd.DataFrame({"Close": [100.0, 101.0]}, index=target_dates)
+    monkeypatch.setattr(main, "_st_a_share_reference_dates", lambda: target_dates)
+
+    assert main._st_recent_gap_info("510300.SS", target)["hasGap"] is False
+
+
+def test_a_share_gap_detection_flags_missing_real_reference_session(monkeypatch):
+    target_dates = pd.to_datetime(["2026-10-08", "2026-10-10"])
+    reference_dates = pd.to_datetime(["2026-10-08", "2026-10-09", "2026-10-10"])
+    target = pd.DataFrame({"Close": [100.0, 101.0]}, index=target_dates)
+    monkeypatch.setattr(main, "_st_a_share_reference_dates", lambda: reference_dates)
+
+    info = main._st_recent_gap_info("510300.SS", target)
+    assert info["hasGap"] is True
+    assert info["firstMissingDate"] == "2026-10-09"
+
+
+def test_scan_cached_view_marks_changes_as_replay_without_mutating_source():
+    payload = {"includesCandles": True, "changes": {"replayedFromCache": False}, "items": []}
+
+    replay = main._st_scan_response_view(payload, include_candles=False, cached=True)
+
+    assert replay["changes"]["replayedFromCache"] is True
+    assert payload["changes"]["replayedFromCache"] is False
+
+
+def test_scan_cache_ttl_expires(monkeypatch):
+    monkeypatch.setattr(main, "_st_scan_cache", {"data": {}, "ts": 100.0})
+    assert main._st_scan_cache_fresh(now=159.9) is True
+    assert main._st_scan_cache_fresh(now=160.1) is False
+
+
+def test_staleness_excludes_current_provisional_session_and_weekend():
+    assert main._st_data_stale(
+        "SPY", "2026-08-07", "2026-08-10", False, {"hasGap": False},
+        now=datetime(2026, 8, 10, 16, 0, tzinfo=main.ZoneInfo("America/New_York")),
+    ) is False
+
+
+def test_staleness_rejects_multiple_missing_completed_sessions():
+    assert main._st_data_stale(
+        "SPY", "2026-08-03", "2026-08-10", False, {"hasGap": False},
+        now=datetime(2026, 8, 10, 16, 0, tzinfo=main.ZoneInfo("America/New_York")),
+    ) is True
+
+
+def test_staleness_respects_a_share_exchange_holiday():
+    assert main._st_data_stale(
+        "510300.SS", "2026-09-30", "2026-09-30", True, {"hasGap": False},
+        now=datetime(2026, 10, 5, 12, 0, tzinfo=main.PREWARM_TZ),
+    ) is False
+
+
 def test_supertrend_monthly_decision_direction_uses_last_completed_month():
     index = pd.bdate_range(end="2026-08-07", periods=700)
     daily = pd.DataFrame(
@@ -175,12 +248,16 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
         "pandas_ta",
         types.SimpleNamespace(supertrend=lambda *args, **kwargs: st, atr=lambda *args, **kwargs: pd.Series([1.0] * len(daily), index=index)),
     )
-    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "TEST", "alias": ""}]}])
+    monkeypatch.setattr(
+        main,
+        "load_watchlist",
+        lambda: (_ for _ in ()).throw(AssertionError("explicit symbol scan must not read watchlist")),
+    )
     monkeypatch.setattr(main.os.path, "exists", lambda path: path.endswith("TEST.parquet"))
     monkeypatch.setattr(pd, "read_parquet", lambda path: daily.copy())
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
-    result = main.supertrend_scan(include_candles=True)
+    result = main.supertrend_scan(include_candles=True, requested_symbols="test")
 
     item = result["items"][0]
     times = [candle["time"] for candle in item["candles"]]

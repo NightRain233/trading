@@ -46,9 +46,9 @@ def _api_get(api_base: str, path: str, timeout: float = 20.0) -> Any:
 # ---------------------------------------------------------------------------
 
 INDICATOR_KEYS = [
-    "close", "ema20", "ema50", "adx", "rsi7", "rsi14", "rsi21",
-    "macd", "macdSignal", "macdHistogram",
-    "bollUpper", "bollMid", "bollLower", "bollWidth",
+    "price", "close", "ema20", "ema50", "adx", "rsi", "rsi7", "rsi14", "rsi21",
+    "macdDif", "macdDea", "macdHist", "macdHistPrev", "macdHistDelta",
+    "bollUpper", "bollMid", "bollLower", "bollWidth", "bollSqueeze", "bollSqueezeRecent", "bollWidthRatio20",
     "kdjK", "kdjD", "kdjJ",
     "atr", "stVal", "stDir",
     "ma30", "ma200",
@@ -60,23 +60,33 @@ SIGNAL_KEYS = [
 ]
 
 SUPERTREND_KEYS = [
-    "state", "weeklyState", "justFlipped", "weeklyJustFlipped",
+    "state", "dailyProvisionalState", "decisionDailyState", "decisionAsOf",
+    "decisionDailyAvailable", "weeklyState", "weeklyProvisionalState",
+    "weeklyPeriodComplete", "justFlipped", "weeklyJustFlipped",
     "trendAgeBars", "distanceToSupertrendPct", "distanceToSupertrendAtr",
     "alertType", "alertLabel", "alertPriority", "alertReason", "suggestedAction",
     "opportunityStage", "opportunityLabel", "opportunityReason",
-    "close", "stVal",
+    "close", "stVal", "weeklyStVal", "breakout", "pullback", "compressionBreakout", "vReversal",
+    "decisionHistory", "lifecycle", "theme", "transition",
 ]
 
 
 def _extract_indicators(quote: dict) -> dict:
-    result = {}
+    result = dict(quote.get("indicators") or {})
     for key in INDICATOR_KEYS:
-        if key in quote:
+        if key in quote and key not in result:
             result[key] = quote[key]
-    # Weekly indicators
-    if "weeklyIndicators" in quote:
-        wi = quote["weeklyIndicators"]
-        result["weekly"] = {k: wi.get(k) for k in INDICATOR_KEYS if k in wi}
+    if quote.get("candles"):
+        latest = quote["candles"][-1]
+        candle_keys = {
+            "close": "close", "ema20": "ema20", "ema50": "ema50",
+            "boll_upper": "bollUpper", "boll_mid": "bollMid",
+            "boll_lower": "bollLower", "atr": "atr", "st_val": "stVal",
+            "st_dir": "stDir",
+        }
+        for source, target in candle_keys.items():
+            if target not in result and latest.get(source) is not None:
+                result[target] = latest[source]
     # Signals
     result["signals"] = {k: quote.get(k) for k in SIGNAL_KEYS if k in quote and quote.get(k) is not None}
     return result
@@ -84,13 +94,39 @@ def _extract_indicators(quote: dict) -> dict:
 
 def query_stock(api_base: str, symbol: str, timeout: float) -> dict:
     quote = _api_get(api_base, f"/quote/{symbol}", timeout)
+    if quote.get("schemaVersion") != 2 or not isinstance(quote.get("decision"), dict):
+        raise ValueError("Stock quote returned without the unified decision contract")
     return {
+        "schemaVersion": quote.get("schemaVersion"),
+        "policyVersion": quote.get("policyVersion"),
         "symbol": symbol.upper(),
         "alias": quote.get("alias", ""),
         "indicators": _extract_indicators(quote),
         "supertrend": {k: quote.get(k) for k in SUPERTREND_KEYS if k in quote},
+        "decision": quote.get("decision"),
+        "sessionContext": quote.get("sessionContext"),
+        "executionStatus": quote.get("executionStatus"),
+        "positionGuidance": quote.get("positionGuidance"),
+        "authorization": quote.get("authorization"),
+        "primaryGroup": quote.get("primaryGroup"),
+        "market": quote.get("market"),
+        "riskMarket": quote.get("riskMarket"),
+        "tradingVenue": quote.get("tradingVenue"),
+        "assetClass": quote.get("assetClass"),
+        "marketMode": quote.get("marketMode"),
+        "marketModeContext": quote.get("marketModeContext"),
+        "dataQuality": {
+            key: quote.get(key)
+            for key in (
+                "latestDataDate", "dataUpdatedAt", "cacheStale", "dataStale",
+                "dataIntegrity", "dailySessionComplete", "volumeContext",
+            )
+        },
+        "weeklyBoll": quote.get("weeklyBoll"),
+        "monthlyBoll": quote.get("monthlyBoll"),
+        "macdDivergence": quote.get("macdDivergence"),
         "signals": {k: quote.get(k) for k in SIGNAL_KEYS if k in quote and quote.get(k) not in (None, False)},
-        "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+        "fetchedAt": quote.get("decisionGeneratedAt") or datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
     }
 
 
@@ -143,16 +179,30 @@ def _build_symbol_entry(m: dict) -> dict:
         "trendAgeBars": m.get("trendAgeBars"),
         "weeklyTrendAgeBars": m.get("weeklyTrendAgeBars"),
         "market": m.get("market"),
+        "riskMarket": m.get("riskMarket"),
+        "tradingVenue": m.get("tradingVenue"),
+        "assetClass": m.get("assetClass"),
         "marketMode": m.get("marketMode"),
         "dailySessionComplete": m.get("dailySessionComplete"),
         "decision": m.get("decision"),
+        "sessionContext": m.get("sessionContext"),
+        "executionStatus": m.get("executionStatus"),
+        "positionGuidance": m.get("positionGuidance"),
+        "authorization": m.get("authorization"),
         "primaryGroup": m.get("primaryGroup"),
         "tags": m.get("tags", []),
         "breakout": m.get("breakout"),
         "pullback": m.get("pullback"),
+        "compressionBreakout": m.get("compressionBreakout"),
         "vReversal": m.get("vReversal"),
+        "lifecycle": m.get("lifecycle"),
+        "decisionHistory": m.get("decisionHistory"),
+        "theme": m.get("theme"),
+        "transition": m.get("transition"),
         # Quality indicators
         "adx": ind.get("adx"),
+        "adxPrev": ind.get("adxPrev"),
+        "adxDelta": ind.get("adxDelta"),
         "rsi21": ind.get("rsi21"),
         "rsi7": ind.get("rsi7"),
         "macdHist": ind.get("macdHist"),
@@ -174,6 +224,7 @@ def _build_symbol_entry(m: dict) -> dict:
         },
         "bollWidth": m.get("bollWidth"),
         "bollSqueeze": m.get("bollSqueeze", False),
+        "bollSqueezeRecent": m.get("bollSqueezeRecent", False),
         "weeklyBoll": m.get("weeklyBoll"),
         "monthlyBoll": m.get("monthlyBoll"),
         "volumeContext": m.get("volumeContext"),
@@ -205,6 +256,9 @@ def query_scan(api_base: str, timeout: float, grouped: bool = True, force: bool 
         "coverage": payload.get("coverage"),
         "thresholds": payload.get("thresholds"),
         "marketModes": payload.get("marketModes"),
+        "attention": payload.get("attention"),
+        "themes": payload.get("themes"),
+        "changes": payload.get("changes"),
     }
 
     if not grouped:
@@ -306,6 +360,76 @@ def query_portfolio(api_base: str, timeout: float, strategy_id: Optional[str] = 
     }
 
 
+def _annotate_scan_with_portfolio(scan: dict, portfolio: dict) -> dict:
+    """Keep technical permission immutable and add strategy-scoped execution context."""
+    symbol_contexts: dict[str, list[dict]] = {}
+    for strategy in portfolio.get("strategies", []):
+        snapshot = strategy.get("snapshot") or {}
+        strategy_id = strategy.get("strategyId")
+        state = snapshot.get("state", "UNAVAILABLE")
+        current = {row.get("symbol"): row for row in snapshot.get("currentWeights", [])}
+        desired = {row.get("symbol"): row for row in snapshot.get("desiredWeights", [])}
+        executable = {row.get("symbol"): row for row in snapshot.get("executableWeights", [])}
+        delta = {row.get("symbol"): row for row in snapshot.get("deltaWeights", [])}
+        for asset in snapshot.get("assets", []):
+            symbol = str(asset.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            if state == "BLOCKED":
+                permission = "blocked"
+            elif symbol in executable:
+                permission = "executable"
+            else:
+                permission = "no_rebalance"
+            symbol_contexts.setdefault(symbol, []).append({
+                "strategyId": strategy_id,
+                "displayName": strategy.get("displayName"),
+                "state": state,
+                "permission": permission,
+                "currentWeight": (current.get(symbol) or {}).get("weight"),
+                "desiredWeight": (desired.get(symbol) or {}).get("weight"),
+                "deltaWeight": (delta.get(symbol) or {}).get("delta"),
+                "executableWeight": (executable.get(symbol) or {}).get("weight"),
+                "ledgerStatus": (snapshot.get("ledger") or {}).get("status"),
+                "diagnostics": [
+                    diagnostic
+                    for diagnostic in snapshot.get("diagnostics", [])
+                    if diagnostic.get("symbol") in {None, symbol}
+                ],
+            })
+
+    matrix = []
+    for item in scan.get("allSymbols", []):
+        symbol = str(item.get("symbol") or "").upper()
+        contexts = symbol_contexts.get(symbol, [])
+        if not contexts:
+            status = "unmanaged"
+        else:
+            permissions = {context["permission"] for context in contexts}
+            if len(permissions) > 1:
+                status = "mixed"
+            elif "executable" in permissions:
+                status = "executable"
+            elif "blocked" in permissions:
+                status = "blocked"
+            else:
+                status = "no_rebalance"
+        item["portfolioExecution"] = {
+            "status": status,
+            "contexts": contexts,
+            "technicalPermissionUnchanged": True,
+        }
+        if contexts:
+            matrix.append({
+                "symbol": symbol,
+                "technicalPermission": (item.get("decision") or {}).get("permission"),
+                "portfolioPermission": status,
+                "contexts": contexts,
+            })
+    scan["portfolioMatrix"] = matrix
+    return scan
+
+
 # ---------------------------------------------------------------------------
 # Overview (compact combined)
 # ---------------------------------------------------------------------------
@@ -339,7 +463,7 @@ def query_overview(api_base: str, timeout: float, force: bool = False) -> dict:
         portfolio = portfolio_future.result()
 
     return {
-        "supertrend": scan,
+        "supertrend": _annotate_scan_with_portfolio(scan, portfolio),
         "portfolio": portfolio,
         "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
     }

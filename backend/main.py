@@ -2,7 +2,7 @@ import argparse
 from fastapi import FastAPI, HTTPException, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
 from typing import List, Optional, Literal
 from backtest import (
@@ -59,6 +59,7 @@ import logging
 import threading
 import hashlib
 import pandas as pd
+import exchange_calendars as xcals
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
@@ -296,6 +297,10 @@ class SymbolItem(BaseModel):
     alias: Optional[str] = ""
 
 class StockResponse(BaseModel):
+    # Keep the legacy quote fields stable while allowing the unified
+    # SuperTrend decision contract to evolve on this existing endpoint.
+    model_config = ConfigDict(extra="allow")
+
     symbol: str
     name: str
     price: float
@@ -337,6 +342,27 @@ class StockResponse(BaseModel):
     resonanceExitLevel: Optional[str] = None
     resonanceExitReason: Optional[str] = None
     macdDivergence: Optional[dict] = None
+    # Unified SuperTrend contract returned by this existing quote URL.
+    schemaVersion: Optional[int] = None
+    policyVersion: Optional[str] = None
+    decisionAvailable: Optional[bool] = None
+    decisionError: Optional[str] = None
+    decisionGeneratedAt: Optional[str] = None
+    decisionCoverage: Optional[dict] = None
+    decisionThresholds: Optional[dict] = None
+    decision: Optional["SupertrendScanDecision"] = None
+    sessionContext: Optional["SupertrendSessionContext"] = None
+    executionStatus: Optional["SupertrendExecutionStatus"] = None
+    positionGuidance: Optional["SupertrendPositionGuidance"] = None
+    lifecycle: Optional["SupertrendLifecycle"] = None
+    authorization: Optional["SupertrendAuthorization"] = None
+    primaryGroup: Optional[str] = None
+    market: Optional[str] = None
+    riskMarket: Optional[str] = None
+    tradingVenue: Optional[str] = None
+    assetClass: Optional[str] = None
+    marketMode: Optional[str] = None
+    marketModeContext: Optional[dict] = None
 
 class Group(BaseModel):
     id: str
@@ -363,7 +389,7 @@ class SupertrendScanCoverage(BaseModel):
 
 
 class SupertrendScanDecision(BaseModel):
-    permission: Literal["buy", "wait", "watch", "risk", "blocked"]
+    permission: Literal["buy", "conditional", "wait", "watch", "risk", "blocked"]
     label: str
     setup: str
     stage: str
@@ -372,6 +398,68 @@ class SupertrendScanDecision(BaseModel):
     nextTrigger: Optional[str] = None
     invalidation: Optional[str] = None
     maxAcceptablePrice: Optional[float] = None
+    triggerPrice: Optional[float] = None
+    invalidationPrice: Optional[float] = None
+    nextGate: Optional[str] = None
+    failureCategory: Optional[str] = None
+    readinessScore: Optional[int] = None
+    distanceToTriggerAtr: Optional[float] = None
+    paperOnly: bool = False
+    liveTradingAllowed: bool = False
+    validationStatus: Optional[str] = None
+    technicalExecutionEligible: bool = False
+
+
+class SupertrendSessionContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    latestDataDate: Optional[str] = None
+    formalDecisionAsOf: Optional[str] = None
+    formalDecisionAvailable: bool
+    hasProvisionalBar: bool
+    permissionBasis: str
+
+
+class SupertrendExecutionStatus(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    executable: bool
+    paperExecutable: bool = False
+    reason: str
+    livePrice: Optional[float] = None
+
+
+class SupertrendPositionGuidance(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    label: str
+    action: str
+    basis: str
+
+
+class SupertrendLifecycle(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    currentStage: str
+    signalStatus: str
+    executionStatus: Optional[str] = None
+    recentStateChanges: List[dict] = Field(default_factory=list)
+    recentDirectionChanges: List[dict] = Field(default_factory=list)
+    historyPoints: int = 0
+
+
+class SupertrendAuthorization(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    signalId: str
+    armedAt: Optional[str] = None
+    validFor: str
+    expiresAfter: str
+    consumptionTracked: bool
+    paperOnly: bool
 
 
 class SupertrendScanItem(BaseModel):
@@ -386,6 +474,11 @@ class SupertrendScanItem(BaseModel):
     primaryGroup: str
     tags: List[str]
     decision: SupertrendScanDecision
+    sessionContext: Optional[SupertrendSessionContext] = None
+    executionStatus: Optional[SupertrendExecutionStatus] = None
+    positionGuidance: Optional[SupertrendPositionGuidance] = None
+    lifecycle: Optional[SupertrendLifecycle] = None
+    authorization: Optional[SupertrendAuthorization] = None
 
 
 class SupertrendScanGroup(BaseModel):
@@ -411,7 +504,13 @@ class SupertrendScanResponse(BaseModel):
     thresholds: dict
     marketModes: dict[str, SupertrendScanMarketMode]
     groups: dict[str, SupertrendScanGroup]
+    attention: dict = Field(default_factory=dict)
+    themes: List[dict] = Field(default_factory=list)
+    changes: dict = Field(default_factory=dict)
     items: List[SupertrendScanItem]
+
+
+StockResponse.model_rebuild()
 
 class BatchQuoteRequest(BaseModel):
     symbols: List[str]
@@ -497,8 +596,9 @@ def api_data_source_status():
 
 @app.get("/api/quote/{symbol}", response_model=StockResponse)
 def get_quote(symbol: str):
+    normalized_symbol = symbol.upper()
     try:
-        data = analyze_stock(symbol.upper())
+        data = analyze_stock(normalized_symbol)
     except MarketDataUnavailableError as exc:
         headers = (
             {"Retry-After": str(exc.retry_after)}
@@ -512,6 +612,40 @@ def get_quote(symbol: str):
         ) from exc
     if not data:
         raise HTTPException(status_code=404, detail="Stock not found or insufficient data")
+
+    try:
+        decision_payload = supertrend_scan(
+            force=False,
+            include_candles=False,
+            requested_symbols=normalized_symbol,
+        )
+    except Exception as exc:
+        logger.warning("统一决策构建失败 %s: %s", normalized_symbol, exc)
+        data.update({
+            "decisionAvailable": False,
+            "decisionError": str(exc),
+        })
+        return data
+    decision_item = next(
+        (
+            item
+            for item in decision_payload.get("items", [])
+            if item.get("symbol") == normalized_symbol
+        ),
+        None,
+    )
+    data.update({
+        "schemaVersion": decision_payload.get("schemaVersion"),
+        "policyVersion": decision_payload.get("policyVersion"),
+        "decisionGeneratedAt": decision_payload.get("generatedAt"),
+        "decisionCoverage": decision_payload.get("coverage"),
+        "decisionThresholds": decision_payload.get("thresholds"),
+        "decisionAvailable": decision_item is not None,
+    })
+    if decision_item is not None:
+        data.update(decision_item)
+        market = decision_item.get("market")
+        data["marketModeContext"] = (decision_payload.get("marketModes") or {}).get(market)
     return data
 
 @app.post("/api/quotes/batch")
@@ -1535,21 +1669,32 @@ def weekly_breakout_scan():
 
 
 ST_SCAN_REFRESH_THRESHOLD_SECONDS = 15 * 60
+ST_SCAN_CACHE_TTL_SECONDS = 60
 ST_SCAN_MISSING_REFRESH_TIMEOUT_SECONDS = 8.0
 ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS = 5.0
 
 _st_scan_cache: dict = {"data": None, "ts": 0.0}
+_st_scan_rebuild_lock = threading.RLock()
+_st_a_share_calendar_cache: dict = {"signature": None, "dates": pd.DatetimeIndex([])}
+_st_a_share_calendar_lock = threading.Lock()
 
 
-def _st_scan_response_view(payload: dict, include_candles: bool) -> dict:
+def _st_scan_response_view(payload: dict, include_candles: bool, *, cached: bool = False) -> dict:
+    view = copy.deepcopy(payload)
+    if cached and isinstance(view.get("changes"), dict):
+        view["changes"]["replayedFromCache"] = True
     if include_candles:
-        return payload
-    compact = copy.deepcopy(payload)
-    compact["includesCandles"] = False
-    for item in compact.get("items", []):
+        return view
+    view["includesCandles"] = False
+    for item in view.get("items", []):
         item.pop("candles", None)
         item.pop("weeklyCandles", None)
-    return compact
+    return view
+
+
+def _st_scan_cache_fresh(now: Optional[float] = None) -> bool:
+    cached_at = float(_st_scan_cache.get("ts") or 0.0)
+    return cached_at > 0 and (now or time.time()) - cached_at <= ST_SCAN_CACHE_TTL_SECONDS
 
 
 def _st_path(symbol: str, weekly: bool = False) -> str:
@@ -1589,6 +1734,39 @@ def _st_is_a_share_symbol(symbol: str) -> bool:
     return normalized.endswith((".SS", ".SZ")) and code.isdigit() and len(code) == 6
 
 
+def _st_a_share_reference_dates() -> pd.DatetimeIndex:
+    """Build an exchange-session proxy from two liquid local benchmark files.
+
+    Their union tolerates a missing row in either file while naturally excluding
+    weekends and exchange holidays. When neither reference is available we avoid
+    guessing; freshness metadata still reports old data independently.
+    """
+    paths = [_st_path("000001.SS"), _st_path("000300.SS")]
+    signature = tuple((path, _st_file_mtime(path)) for path in paths)
+    with _st_a_share_calendar_lock:
+        if signature == _st_a_share_calendar_cache.get("signature"):
+            return _st_a_share_calendar_cache["dates"]
+
+        date_sets = []
+        for path, mtime in signature:
+            if mtime is None:
+                continue
+            try:
+                frame = pd.read_parquet(path, columns=["Close"])
+                dates = pd.DatetimeIndex(frame.index).tz_localize(None).normalize()
+                if not dates.empty:
+                    date_sets.append(dates)
+            except Exception as exc:
+                logger.debug("读取 A 股参考交易日失败 %s: %s", path, exc)
+        combined = (
+            date_sets[0].append(date_sets[1:]).unique().sort_values()
+            if date_sets
+            else pd.DatetimeIndex([])
+        )
+        _st_a_share_calendar_cache.update({"signature": signature, "dates": combined})
+        return combined
+
+
 def _st_recent_gap_info(symbol: str, df) -> dict:
     """保守的 A 股近期缺口提示：只检查最近窗口，避免节假日历史误报。"""
     empty = {"hasGap": False, "firstMissingDate": None, "expectedLatestDate": None}
@@ -1607,7 +1785,12 @@ def _st_recent_gap_info(symbol: str, df) -> dict:
     if len(recent_dates) < 2:
         return empty
 
-    expected = pd.bdate_range(recent_dates[0], recent_dates[-1])
+    reference_dates = _st_a_share_reference_dates()
+    if reference_dates.empty:
+        return empty
+    expected = reference_dates[
+        (reference_dates >= recent_dates[0]) & (reference_dates <= recent_dates[-1])
+    ]
     missing = expected.difference(recent_dates)
     if missing.empty:
         return empty
@@ -1619,17 +1802,87 @@ def _st_recent_gap_info(symbol: str, df) -> dict:
     }
 
 
-def _st_data_stale(latest_data_date: Optional[str], integrity: dict) -> bool:
+def _st_data_stale(
+    symbol: str,
+    decision_as_of: Optional[str],
+    latest_data_date: Optional[str],
+    session_complete: Optional[bool],
+    integrity: dict,
+    now: Optional[datetime] = None,
+) -> bool:
     if integrity.get("hasGap"):
         return True
-    if not latest_data_date:
+    if not decision_as_of:
         return True
     try:
-        latest = datetime.fromisoformat(latest_data_date).date()
+        decision_date = datetime.fromisoformat(decision_as_of).date()
+        live_date = datetime.fromisoformat(latest_data_date).date() if latest_data_date else None
     except ValueError:
         return True
-    now_local = datetime.now(PREWARM_TZ).date()
-    return (now_local - latest).days > 3
+
+    normalized = symbol.upper()
+    if normalized.endswith("-USD"):
+        reference_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        last_complete_date = reference_now.date() - timedelta(days=1)
+        return decision_date < last_complete_date
+
+    if normalized.endswith((".SS", ".SZ")):
+        calendar_name = "XSHG"
+    elif normalized.endswith(".HK") or normalized == "^HSI":
+        calendar_name = "XHKG"
+    elif normalized.endswith("=F"):
+        calendar_name = "CMES"
+    else:
+        calendar_name = "XNYS"
+
+    try:
+        calendar = xcals.get_calendar(calendar_name)
+        reference_now = pd.Timestamp(now or datetime.now(timezone.utc))
+        reference_now = reference_now.tz_localize("UTC") if reference_now.tzinfo is None else reference_now.tz_convert("UTC")
+        sessions = calendar.sessions_in_range(
+            pd.Timestamp(decision_date + timedelta(days=1)),
+            pd.Timestamp(reference_now.date()),
+        )
+        completed_after_decision = [
+            session
+            for session in sessions
+            if calendar.session_close(session) + pd.Timedelta(minutes=10) <= reference_now
+        ]
+        return bool(completed_after_decision)
+    except Exception as exc:
+        logger.debug("交易日历检查失败 %s/%s: %s", symbol, calendar_name, exc)
+        if session_complete is False and live_date is not None and live_date >= decision_date:
+            apparent_sessions = pd.bdate_range(
+                decision_date + timedelta(days=1),
+                live_date - timedelta(days=1),
+            )
+            return len(apparent_sessions) > 1
+        if live_date is not None and live_date == decision_date:
+            return False
+        now_local = (now or datetime.now(PREWARM_TZ)).astimezone(PREWARM_TZ).date()
+        return (now_local - decision_date).days > 3
+
+
+def _st_daily_boll_squeeze(df) -> tuple:
+    """Calculate formal daily BOLL compression from the supplied bar set only."""
+    empty_series = pd.Series(dtype=float)
+    required = {"BOLL_Upper", "BOLL_Lower", "BOLL_Mid"}
+    if df is None or df.empty or not required.issubset(df.columns):
+        return None, False, False, None, empty_series, empty_series
+    valid = df.dropna(subset=list(required))
+    if valid.empty:
+        return None, False, False, None, empty_series, empty_series
+    width_series = (
+        (valid["BOLL_Upper"] - valid["BOLL_Lower"])
+        / valid["BOLL_Mid"].replace(0, float("nan"))
+    )
+    average = width_series.rolling(20, min_periods=10).mean()
+    ratios = (width_series / average.replace(0, float("nan"))).dropna()
+    width = float(width_series.dropna().iloc[-1]) if not width_series.dropna().empty else None
+    ratio = float(ratios.iloc[-1]) if not ratios.empty else None
+    squeeze = ratio is not None and ratio < 0.85
+    recent = bool(not ratios.empty and (ratios.tail(5) < 0.85).any() and ratio <= 1.10)
+    return width, squeeze, recent, ratio, width_series, average
 
 
 def _st_boll_context(
@@ -1807,19 +2060,44 @@ def _refresh_supertrend_symbols(symbols: List[str], timeout_seconds: float) -> b
     return completed["done"]
 
 @app.get("/api/supertrend/scan", response_model=SupertrendScanResponse)
-def supertrend_scan(force: bool = False, include_candles: bool = False):
+def supertrend_scan(
+    force: bool = False,
+    include_candles: bool = False,
+    requested_symbols: Optional[str] = None,
+):
+    # Explicit one-symbol quote enrichment does not touch the shared snapshot.
+    # Full watchlist scans are serialized so one process has one atomic baseline.
+    if requested_symbols is not None:
+        return _supertrend_scan_impl(force, include_candles, requested_symbols)
+    with _st_scan_rebuild_lock:
+        return _supertrend_scan_impl(force, include_candles, requested_symbols)
+
+
+def _supertrend_scan_impl(
+    force: bool = False,
+    include_candles: bool = False,
+    requested_symbols: Optional[str] = None,
+):
     """扫描所有 watchlist 标的并返回统一的右侧交易决策契约。"""
     import pandas as pd
     from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
-    groups = load_watchlist()
+    explicit_symbols = requested_symbols is not None
     user_symbols, alias_map = [], {}
-    for g in groups:
-        for item in g.get("symbols", []):
-            sym = item["symbol"] if isinstance(item, dict) else item
-            if sym not in user_symbols:
-                user_symbols.append(sym)
-                alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
+    if explicit_symbols:
+        user_symbols = list(dict.fromkeys(
+            symbol.strip().upper()
+            for symbol in requested_symbols.split(",")
+            if symbol.strip()
+        ))
+    else:
+        groups = load_watchlist()
+        for g in groups:
+            for item in g.get("symbols", []):
+                sym = item["symbol"] if isinstance(item, dict) else item
+                if sym not in user_symbols:
+                    user_symbols.append(sym)
+                    alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
     representative_symbols = list(dict.fromkeys(symbol for values in SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values))
     symbols = list(dict.fromkeys(user_symbols + representative_symbols))
     representative_set = set(representative_symbols)
@@ -1828,12 +2106,14 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
     cache_signature = _st_scan_cache.get("signature")
     signature = _st_scan_signature(symbols)
     if (
-        not force
+        not explicit_symbols
+        and not force
         and _st_scan_cache["data"] is not None
+        and _st_scan_cache_fresh()
         and cache_symbols == symbols
         and cache_signature == signature
     ):
-        return _st_scan_response_view(_st_scan_cache["data"], include_candles)
+        return _st_scan_response_view(_st_scan_cache["data"], include_candles, cached=True)
 
     refresh_symbols = []
     missing_symbols = []
@@ -1861,13 +2141,15 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
 
     signature = _st_scan_signature(symbols)
     if (
-        not force
+        not explicit_symbols
+        and not force
         and refresh_completed
         and _st_scan_cache["data"] is not None
+        and _st_scan_cache_fresh()
         and cache_symbols == symbols
         and cache_signature == signature
     ):
-        return _st_scan_response_view(_st_scan_cache["data"], include_candles)
+        return _st_scan_response_view(_st_scan_cache["data"], include_candles, cached=True)
 
     import pandas_ta as ta
 
@@ -1881,10 +2163,11 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
             return None
         daily = daily.sort_index()
         latest_data_date = _st_latest_data_date(daily)
+        latest_row = daily.dropna(subset=["Close"]).iloc[-1]
+        live_price = float(latest_row["Close"]) if pd.notna(latest_row.get("Close")) else None
         daily_session_complete = _st_volume_session_complete(sym, latest_data_date)
         data_integrity = _st_recent_gap_info(sym, daily)
         cache_stale = daily_mtime is None or daily_mtime < stale_before
-        data_stale = _st_data_stale(latest_data_date, data_integrity)
 
         st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
         if st is None or st.empty:
@@ -1902,6 +2185,18 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
         decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
         decision_as_of = _st_latest_data_date(decision_daily)
         decision_daily_available = not decision_daily.empty
+        has_provisional_bar = bool(
+            daily_session_complete is False
+            and latest_data_date is not None
+            and latest_data_date != decision_as_of
+        )
+        data_stale = _st_data_stale(
+            sym,
+            decision_as_of,
+            latest_data_date,
+            daily_session_complete,
+            data_integrity,
+        )
         all_dir_rows = daily.dropna(subset=["_st_dir"])
         formal_rows = decision_daily.dropna(subset=["Close"])
         last = formal_rows.iloc[-1] if not formal_rows.empty else daily.dropna(subset=["Close"]).iloc[-1]
@@ -1996,9 +2291,22 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
         )
         macd_hist_prev = float(macd_hist_rows.iloc[-2]) if len(macd_hist_rows) >= 2 else None
         macd_hist_current = _fv("MACD_Hist")
+        adx_rows = (
+            pd.to_numeric(daily.loc[:last.name, "ADX"], errors="coerce").dropna().tail(2)
+            if "ADX" in daily.columns
+            else pd.Series(dtype=float)
+        )
+        adx_prev = float(adx_rows.iloc[-2]) if len(adx_rows) >= 2 else None
+        adx_current = _fv("ADX")
 
         indicators = {
-            "adx": _fv("ADX"),
+            "adx": adx_current,
+            "adxPrev": adx_prev,
+            "adxDelta": (
+                adx_current - adx_prev
+                if adx_current is not None and adx_prev is not None
+                else None
+            ),
             "rsi7": _fv("RSI_7"),
             "rsi14": _fv("RSI_14"),
             "rsi21": _fv("RSI_21"),
@@ -2021,22 +2329,61 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
         }
 
         # Daily BOLL squeeze detection
-        boll_upper = _fv("BOLL_Upper")
-        boll_lower = _fv("BOLL_Lower")
-        boll_mid = _fv("BOLL_Mid")
-        boll_width = None
-        is_squeeze = False
-        if all(v is not None for v in (boll_upper, boll_lower, boll_mid)) and boll_mid != 0:
-            boll_width = (boll_upper - boll_lower) / boll_mid
-            # Compare to 20-period mean bandwidth
-            recent = daily.dropna(subset=["BOLL_Upper", "BOLL_Lower", "BOLL_Mid"]).tail(20)
-            if len(recent) >= 10:
-                recent_bw = (recent["BOLL_Upper"] - recent["BOLL_Lower"]) / recent["BOLL_Mid"].replace(0, float("nan"))
-                avg_bw = recent_bw.mean()
-                if pd.notna(avg_bw) and avg_bw > 0:
-                    is_squeeze = bool(boll_width < avg_bw * 0.85)
+        # Formal authorization must use completed bars only. Provisional BOLL
+        # values may be displayed elsewhere but never feed the decision policy.
+        (
+            boll_width,
+            is_squeeze,
+            recent_squeeze,
+            boll_width_ratio,
+            boll_width_series,
+            boll_width_average,
+        ) = _st_daily_boll_squeeze(decision_daily)
         indicators["bollWidth"] = boll_width
         indicators["bollSqueeze"] = is_squeeze
+        indicators["bollSqueezeRecent"] = recent_squeeze
+        indicators["bollWidthRatio20"] = boll_width_ratio
+
+        decision_history = []
+        history_source = decision_daily.dropna(subset=["Close", "_st_val", "_st_dir"]).tail(10)
+        prior_direction = None
+        for ts, row in history_source.iterrows():
+            direction = int(row["_st_dir"])
+            if direction == 1:
+                history_state = "bull_flip" if prior_direction == -1 else "bull"
+            else:
+                history_state = "bear_flip" if prior_direction == 1 else "bear"
+            row_close = float(row["Close"])
+            row_st = float(row["_st_val"])
+            row_atr = float(row["ATR"]) if pd.notna(row.get("ATR")) and float(row["ATR"]) > 0 else None
+            row_bw = None
+            row_bw_ratio = None
+            row_squeeze = False
+            row_recent_squeeze = False
+            if all(pd.notna(row.get(key)) for key in ("BOLL_Upper", "BOLL_Lower", "BOLL_Mid")) and float(row["BOLL_Mid"]) != 0:
+                row_bw = (float(row["BOLL_Upper"]) - float(row["BOLL_Lower"])) / float(row["BOLL_Mid"])
+                if ts in boll_width_average.index and pd.notna(boll_width_average.loc[ts]) and float(boll_width_average.loc[ts]) > 0:
+                    row_bw_ratio = row_bw / float(boll_width_average.loc[ts])
+                    row_squeeze = row_bw_ratio < 0.85
+                    historical_ratios = (
+                        boll_width_series.loc[:ts]
+                        / boll_width_average.loc[:ts].replace(0, float("nan"))
+                    ).dropna().tail(5)
+                    row_recent_squeeze = bool((historical_ratios < 0.85).any() and row_bw_ratio <= 1.10)
+            decision_history.append({
+                "date": pd.Timestamp(ts).date().isoformat(),
+                "state": history_state,
+                "close": row_close,
+                "stVal": row_st,
+                "distanceToSupertrendAtr": (row_close - row_st) / row_atr if row_atr else None,
+                "adx": float(row["ADX"]) if pd.notna(row.get("ADX")) else None,
+                "macdHist": float(row["MACD_Hist"]) if pd.notna(row.get("MACD_Hist")) else None,
+                "bollWidth": row_bw,
+                "bollWidthRatio20": row_bw_ratio,
+                "bollSqueeze": row_squeeze,
+                "bollSqueezeRecent": row_recent_squeeze,
+            })
+            prior_direction = direction
         macd_divergence = build_macd_divergence_summary(sym, daily, weekly)
         multitimeframe_context = _st_multitimeframe_context(daily, symbol=sym)
 
@@ -2058,7 +2405,10 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
             "decisionDailyState": state if decision_daily_available else None,
             "decisionAsOf": decision_as_of,
             "decisionDailyAvailable": decision_daily_available,
+            "hasProvisionalBar": has_provisional_bar,
             "isCrypto": sym.upper().endswith("-USD"),
+            "livePrice": live_price,
+            "liveAsOf": latest_data_date,
             "close": float(last["Close"]) if pd.notna(last.get("Close")) else None,
             "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
             "candles": candles,
@@ -2078,9 +2428,11 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
             "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
             "dataIntegrity": data_integrity,
             "indicators": indicators,
+            "decisionHistory": decision_history,
             "macdDivergence": macd_divergence,
             "bollWidth": boll_width,
             "bollSqueeze": is_squeeze,
+            "bollSqueezeRecent": recent_squeeze,
             **multitimeframe_context,
             "weeklyTrendAgeBars": weekly_trend_age_bars,
             **alert,
@@ -2092,15 +2444,18 @@ def supertrend_scan(force: bool = False, include_candles: bool = False):
 
     user_results = [item for item in results if item["symbol"] in set(user_symbols)]
     representative_results = [item for item in results if item["symbol"] in representative_set and item["symbol"] not in set(user_symbols)]
+    previous_response = _st_scan_cache.get("data") if not explicit_symbols else None
     response = build_scan_response(
         user_results,
         requested_symbols=user_symbols,
         representative_items=representative_results,
+        previous_response=previous_response,
     )
-    _st_scan_cache["data"] = response
-    _st_scan_cache["ts"] = time.time()
-    _st_scan_cache["symbols"] = symbols
-    _st_scan_cache["signature"] = signature
+    if not explicit_symbols:
+        _st_scan_cache["data"] = response
+        _st_scan_cache["ts"] = time.time()
+        _st_scan_cache["symbols"] = symbols
+        _st_scan_cache["signature"] = signature
     return _st_scan_response_view(response, include_candles)
 
 
