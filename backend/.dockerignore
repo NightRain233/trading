@@ -2,5 +2,8 @@
 __pycache__
 *.pyc
 data
+backtest_results
+tests
+.pytest_cache
 .git
 .gitignore

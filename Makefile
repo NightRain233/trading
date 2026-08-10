@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx
+.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-backend deploy-frontend deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx
 
 
 # 初始化项目: make install
@@ -99,6 +99,12 @@ deploy: _check_host ## Sync project to remote server using rsync
 
 deploy-up: deploy ## Deploy and start docker containers on remote
 	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --build"
+
+deploy-backend: deploy ## Sync project and rebuild only the backend service on remote
+	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --build backend"
+
+deploy-frontend: deploy ## Sync project and rebuild only the frontend service on remote
+	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --build --no-deps frontend"
 
 deploy-nginx: deploy ## Sync files and recreate only frontend to apply nginx.conf without rebuilding images
 	ssh $(DEPLOY_HOST) "cd $(DEPLOY_PATH) && docker compose up -d --force-recreate frontend"
