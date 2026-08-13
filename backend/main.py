@@ -26,7 +26,12 @@ from backtest import (
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
 from supertrend_alerts import classify_supertrend_alert
-from supertrend_scan_policy import build_scan_response, classify_trend_state, SYSTEM_MARKET_REPRESENTATIVES
+from supertrend_scan_policy import (
+    MARKET_REPRESENTATIVE_FALLBACKS,
+    SYSTEM_MARKET_REPRESENTATIVES,
+    build_scan_response,
+    classify_trend_state,
+)
 from analysis import (
     DATA_DIR,
     analyze_stock,
@@ -2098,7 +2103,14 @@ def _supertrend_scan_impl(
                 if sym not in user_symbols:
                     user_symbols.append(sym)
                     alias_map[sym] = item.get("alias", "") if isinstance(item, dict) else ""
-    representative_symbols = list(dict.fromkeys(symbol for values in SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values))
+    representative_symbols = list(dict.fromkeys(
+        symbol
+        for values in (
+            *SYSTEM_MARKET_REPRESENTATIVES.values(),
+            *MARKET_REPRESENTATIVE_FALLBACKS.values(),
+        )
+        for symbol in values
+    ))
     symbols = list(dict.fromkeys(user_symbols + representative_symbols))
     representative_set = set(representative_symbols)
 

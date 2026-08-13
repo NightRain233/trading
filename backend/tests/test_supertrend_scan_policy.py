@@ -165,6 +165,37 @@ def test_stale_bond_representative_only_marks_bond_risk_insufficient():
     assert response["marketModes"]["hong_kong"]["mode"] == "seek"
 
 
+def test_hong_kong_fallback_representatives_cover_missing_hsi_series():
+    items = _representatives() + [_item("513120.SS", state="bull_flip")]
+    representative_items = [
+        _item("2800.HK"),
+        _item("513010.SS"),
+        _item("510900.SS"),
+    ]
+    response = build_scan_response(
+        items,
+        requested_symbols=[item["symbol"] for item in items],
+        representative_items=representative_items,
+    )
+
+    hong_kong = response["marketModes"]["hong_kong"]
+    assert hong_kong["mode"] == "seek"
+    assert hong_kong["missingSymbols"] == ["^HSI"]
+    assert hong_kong["effectiveRepresentatives"] == ["2800.HK", "513010.SS"]
+    candidate = next(item for item in response["items"] if item["symbol"] == "513120.SS")
+    assert candidate["decision"]["permission"] != "wait"
+
+
+def test_hong_kong_fallback_requires_two_usable_monthly_series():
+    items = _representatives() + [_item("513120.SS")]
+    response = build_scan_response(
+        items,
+        requested_symbols=[item["symbol"] for item in items],
+        representative_items=[_item("513010.SS")],
+    )
+    assert response["marketModes"]["hong_kong"]["mode"] == "insufficient"
+
+
 def test_crypto_uses_last_complete_daily_bar_when_current_utc_bar_is_provisional():
     items = [
         {**_item("BTC-USD", daily_complete=False), "isCrypto": True, "decisionDailyAvailable": True},

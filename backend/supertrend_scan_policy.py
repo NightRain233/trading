@@ -33,6 +33,12 @@ SYSTEM_MARKET_REPRESENTATIVES = {
     "bond_cn": ("511010.SS",),
     "bond_us": ("TLT",),
 }
+# Some yfinance index/ETF series are intermittently incomplete.  These are
+# only used to fill a missing Hong Kong representative; they do not replace a
+# healthy primary series.
+MARKET_REPRESENTATIVE_FALLBACKS = {
+    "hong_kong": ("513010.SS", "510900.SS"),
+}
 MARKET_REPRESENTATIVES = {**SYSTEM_MARKET_REPRESENTATIVES, "bond": ("511010.SS", "TLT")}
 
 GOLD_SYMBOLS = {"GC=F", "518880.SS"}
@@ -174,10 +180,27 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
     item_map.update({str(item.get("symbol") or "").upper(): item for item in representative_items})
     modes: dict[str, dict[str, Any]] = {}
     for market, representatives in SYSTEM_MARKET_REPRESENTATIVES.items():
-        directions = {symbol: _monthly_direction(item_map.get(symbol)) for symbol in representatives}
-        missing = [symbol for symbol, direction in directions.items() if direction is None]
-        values = [direction for direction in directions.values() if direction is not None]
-        if missing:
+        primary_directions = {symbol: _monthly_direction(item_map.get(symbol)) for symbol in representatives}
+        fallback_representatives = MARKET_REPRESENTATIVE_FALLBACKS.get(market, ())
+        # Keep primary data whenever it is usable, and fill only unavailable
+        # slots from the fallback pool.  Requiring two usable directions keeps
+        # a single ETF from silently deciding the whole market mode.
+        directions = dict(primary_directions)
+        effective_directions = {
+            symbol: direction
+            for symbol, direction in primary_directions.items()
+            if direction is not None
+        }
+        for symbol in fallback_representatives:
+            if len(effective_directions) >= len(representatives):
+                break
+            direction = _monthly_direction(item_map.get(symbol))
+            if direction is not None:
+                directions[symbol] = direction
+                effective_directions[symbol] = direction
+        missing = [symbol for symbol in representatives if primary_directions[symbol] is None]
+        values = list(effective_directions.values())
+        if len(values) < len(representatives):
             mode = "insufficient"
             adx_threshold = None
         elif all(direction in {"rising", "flat"} for direction in values):
@@ -192,6 +215,8 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
         modes[market] = {
             "mode": mode,
             "representatives": list(representatives),
+            "effectiveRepresentatives": list(effective_directions),
+            "fallbackRepresentatives": list(fallback_representatives),
             "directions": directions,
             "adxThreshold": adx_threshold,
             "missingSymbols": missing,
