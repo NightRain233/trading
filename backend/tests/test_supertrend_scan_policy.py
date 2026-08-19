@@ -25,8 +25,8 @@ def _item(
     ratio20: float = 1.0,
     boll_squeeze: bool = False,
     boll_squeeze_recent: bool = False,
-    macd_hist: float | None = None,
-    macd_delta: float | None = None,
+    macd_hist: float | None = 0.2,
+    macd_delta: float | None = 0.1,
     adx_delta: float | None = None,
     candles: list[dict] | None = None,
 ) -> dict:
@@ -213,12 +213,12 @@ def test_crypto_blocks_only_when_no_complete_daily_bar_exists():
     assert response["items"][0]["decision"]["failedGates"] == ["DAILY_SESSION_INCOMPLETE"]
 
 
-def test_breakout_requires_weekly_market_adx_and_distance_gates():
+def test_breakout_requires_weekly_market_adx_and_positive_macd_histogram():
     items = _representatives() + [
-        _item("AAPL", state="bull_flip", adx=31, distance_atr=1.5),
+        _item("AAPL", state="bull_flip", adx=31, distance_atr=3.5),
         _item("MU", state="bull_flip", weekly_state="bear", adx=35, distance_atr=1.0),
         _item("NVDA", state="bull_flip", adx=20, distance_atr=1.0),
-        _item("GOOGL", state="bull_flip", adx=35, distance_atr=2.5),
+        _item("GOOGL", state="bull_flip", adx=35, distance_atr=1.0, macd_hist=-0.1),
     ]
 
     response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
@@ -229,21 +229,35 @@ def test_breakout_requires_weekly_market_adx_and_distance_gates():
     assert by_symbol["AAPL"]["decision"]["setup"] == "breakout"
     assert by_symbol["AAPL"]["decision"]["stage"] == "breakout_confirmed"
     assert by_symbol["AAPL"]["decision"]["readinessScore"] == 100
-    assert by_symbol["AAPL"]["decision"]["maxAcceptablePrice"] == 104.0
+    assert by_symbol["AAPL"]["decision"]["triggerPrice"] == 101.0
+    assert by_symbol["AAPL"]["decision"]["maxAcceptablePrice"] == 102.0
+    assert by_symbol["AAPL"]["decision"]["invalidationPrice"] == 100.0
     assert by_symbol["AAPL"]["breakout"] == {
         "triggered": True,
         "signalDate": "2026-08-07",
         "previousState": "bear",
         "currentState": "bull_flip",
-        "distanceAtr": 1.5,
-        "maxAcceptablePrice": 104.0,
+        "distanceAtr": 3.5,
+        "maxAcceptablePrice": 102.0,
         "stillExecutable": True,
     }
     assert by_symbol["MU"]["decision"]["permission"] == "watch"
     assert by_symbol["MU"]["decision"]["failedGates"] == ["WEEKLY_NOT_BULL"]
     assert by_symbol["NVDA"]["decision"]["failedGates"] == ["ADX_BELOW_25"]
-    assert by_symbol["GOOGL"]["decision"]["permission"] == "wait"
-    assert by_symbol["GOOGL"]["decision"]["failedGates"] == ["DISTANCE_ABOVE_2_ATR"]
+    assert by_symbol["GOOGL"]["decision"]["permission"] == "watch"
+    assert by_symbol["GOOGL"]["decision"]["failedGates"] == ["MACD_HIST_NOT_POSITIVE"]
+
+
+def test_breakout_blocks_when_macd_histogram_is_unavailable():
+    items = _representatives() + [
+        _item("AAPL", state="bull_flip", adx=31, macd_hist=None),
+    ]
+
+    response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
+    aapl = next(item for item in response["items"] if item["symbol"] == "AAPL")
+
+    assert aapl["decision"]["permission"] == "watch"
+    assert aapl["decision"]["failedGates"] == ["MACD_HIST_UNAVAILABLE"]
 
 
 def test_cautious_market_raises_breakout_adx_threshold_to_thirty():
@@ -371,7 +385,7 @@ def test_in_progress_price_above_max_keeps_signal_but_cancels_execution():
     aapl = next(item for item in response["items"] if item["symbol"] == "AAPL")
 
     assert aapl["decision"]["permission"] == "buy"
-    assert aapl["decision"]["maxAcceptablePrice"] == 104.0
+    assert aapl["decision"]["maxAcceptablePrice"] == 102.0
     assert aapl["executionStatus"]["status"] == "above_max_price"
     assert aapl["executionStatus"]["executable"] is False
     assert aapl["breakout"]["stillExecutable"] is False

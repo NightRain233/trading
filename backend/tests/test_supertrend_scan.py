@@ -121,6 +121,21 @@ def test_scan_cache_ttl_expires(monkeypatch):
     assert main._st_scan_cache_fresh(now=160.1) is False
 
 
+def test_supertrend_refresh_uses_shared_async_coordinator(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        main,
+        "refresh_symbols_async",
+        lambda symbols, reason, min_interval_seconds: calls.append(
+            (symbols, reason, min_interval_seconds)
+        ) or True,
+    )
+
+    assert main._schedule_supertrend_refresh(["AAPL", "510300.SS"]) is True
+    assert calls == [(["AAPL", "510300.SS"], "supertrend_scan", 60)]
+
+
 def test_staleness_excludes_current_provisional_session_and_weekend():
     assert main._st_data_stale(
         "SPY", "2026-08-07", "2026-08-10", False, {"hasGap": False},
@@ -268,7 +283,7 @@ def test_supertrend_scan_returns_daily_candles_time_ascending(monkeypatch):
     assert item["macdDivergence"]["policy"]["confirmedOnlyForDecision"] is True
 
 
-def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
+def test_supertrend_scan_schedules_missing_watchlist_refresh_without_blocking(monkeypatch, tmp_path):
     index = pd.to_datetime(["2026-05-29", "2026-06-01", "2026-06-02"])
     daily = pd.DataFrame(
         {
@@ -301,18 +316,25 @@ def test_supertrend_scan_fetches_missing_watchlist_parquet_before_scanning(monke
     )
     monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "MISSING.SZ", "alias": "缺失票"}]}])
-    monkeypatch.setattr(main, "batch_fetch_and_update", fake_fetch)
+    monkeypatch.setattr(main, "_schedule_supertrend_refresh", lambda symbols: fake_fetch(symbols) or True)
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
     result = main.supertrend_scan(include_candles=True)
 
     assert fetched[0] == "MISSING.SZ"
-    assert set(fetched[1:]) == {symbol for values in main.SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values}
-    assert result["items"][0]["symbol"] == "MISSING.SZ"
-    assert result["items"][0]["alias"] == "缺失票"
+    expected_representatives = {
+        symbol
+        for values in (
+            *main.SYSTEM_MARKET_REPRESENTATIVES.values(),
+            *main.MARKET_REPRESENTATIVE_FALLBACKS.values(),
+        )
+        for symbol in values
+    }
+    assert set(fetched[1:]) == expected_representatives
+    assert result["coverage"]["missing"] == ["MISSING.SZ"]
 
 
-def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scanning(monkeypatch, tmp_path):
+def test_supertrend_scan_serves_existing_stale_snapshot_while_refreshing(monkeypatch, tmp_path):
     stale_daily = pd.DataFrame(
         {
             "Open": [10.0],
@@ -358,14 +380,23 @@ def test_supertrend_scan_refreshes_existing_stale_watchlist_parquet_before_scann
     )
     monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "STALE.SZ", "alias": "旧数据"}]}])
-    monkeypatch.setattr(main, "batch_fetch_and_update", fake_fetch)
+    monkeypatch.setattr(main, "_schedule_supertrend_refresh", lambda symbols: fake_fetch(symbols) or True)
     main._st_scan_cache = {"data": None, "ts": 0.0}
 
     result = main.supertrend_scan(include_candles=True)
 
     assert fetched[0] == "STALE.SZ"
-    assert set(fetched[1:]) == {symbol for values in main.SYSTEM_MARKET_REPRESENTATIVES.values() for symbol in values}
-    assert result["items"][0]["candles"][-1]["time"] == "2026-06-02"
+    expected_representatives = {
+        symbol
+        for values in (
+            *main.SYSTEM_MARKET_REPRESENTATIVES.values(),
+            *main.MARKET_REPRESENTATIVE_FALLBACKS.values(),
+        )
+        for symbol in values
+    }
+    assert set(fetched[1:]) == expected_representatives
+    assert result["items"][0]["candles"][-1]["time"] == "2026-06-01"
+    assert result["items"][0]["refreshTriggered"] is True
 
 
 def test_supertrend_scan_cache_is_scoped_to_watchlist_symbols(monkeypatch):

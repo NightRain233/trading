@@ -65,7 +65,7 @@ uv run python scripts/trading_analysis_helper.py \
 
 ## 5. 路径
 
-- `breakout`：完整收盘已经 `bull_flip`，按周线、市场、ADX 和 2 ATR 上限判断。
+- `breakout`：完整收盘已经 `bull_flip`，按周线、市场、ADX 与 MACD 柱为正判断；下一交易日最高接受价锚定正式收盘价上方 0.5 ATR，不再用翻多后新生成的 ST 线计算追价距离。
 - `pullback`：已确认多头趋势回到 1.5 ATR 支撑区，等待完整日线重新走强。
 - `compression_breakout`：尚未完成样本外与交易成本验证，只能纸面跟踪；正式周线和市场条件不足时仍为 `compression_watch`。
 

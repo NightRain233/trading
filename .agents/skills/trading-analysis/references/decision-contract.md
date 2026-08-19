@@ -11,6 +11,7 @@
 - `decision.permission=conditional` 表示上一完整收盘形成压缩突破纸面实验计划，不是实盘授权，也不等于已经成交。
 - `decision.setup` 只使用 `breakout`、`pullback`、`compression_breakout`、观察或风险类型；`decision.stage` 描述生命周期阶段。
 - `decision.nextGate` 是权限升级前的首要门槛；`readinessScore` 只用于同权限内排序，不能覆盖硬门槛。
+- 正式 `breakout` 必须同时满足完整日线 `bull_flip`、周线多头、对应市场允许、ADX 门槛与 MACD 柱为正。其 `triggerPrice` 是正式翻多收盘价，`maxAcceptablePrice=triggerPrice+0.5×ATR`，`invalidationPrice` 是该正式收盘对应的 ST；下一交易日高于上限或盘中低于正式 ST 时取消执行。这里不再使用翻多后新生成的 ST 与收盘之间的距离作为入场门槛。
 
 ## 2. 条件纸面计划
 
@@ -41,7 +42,7 @@
 - `armed_above_max`：跳过最高接受价，取消追买并转回踩观察。
 - `armed_invalidated`：跌破预设失效价，取消计划。
 
-盘中数据只能取消/降级执行或提示风险，不能创造 `buy`。始终并列展示 `livePrice`、`formalClose`、`formalDecisionAsOf` 和会话状态。
+盘中数据只能取消/降级执行或提示风险，不能创造 `buy`。正式 breakout 的 MACD 柱为正是收盘门槛；其他 MACD 改善、背离等仍不能在盘中升级权限。始终并列展示 `livePrice`、`formalClose`、`formalDecisionAsOf` 和会话状态。
 
 ## 4. 行情生命周期
 

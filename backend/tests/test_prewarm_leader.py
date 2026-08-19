@@ -10,8 +10,14 @@ def _release_test_leader():
     main._prewarm_leader_handle = None
 
 
-def test_default_prewarm_schedule_is_evening_only():
-    assert main.PREWARM_HOURS == (21,)
+def test_default_prewarm_schedule_includes_morning_refresh():
+    assert main.PREWARM_TIMES == ((7, 30), (21, 0))
+
+
+def test_next_prewarm_run_supports_half_past_seven():
+    now = main.datetime(2026, 8, 19, 6, 45, tzinfo=main.PREWARM_TZ)
+
+    assert main._next_prewarm_run(now).strftime("%H:%M") == "07:30"
 
 
 def test_only_one_prewarm_leader_can_hold_lock(tmp_path):

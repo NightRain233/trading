@@ -355,6 +355,16 @@ def _detect_timeframe(
     if len(prepared) < config.left + config.right + config.min_gap + 1:
         return result
 
+    # Only the latest confirmed/candidate pivot can still be actionable. Keep
+    # enough history for its TTL, its prior pivot's max gap, and both pivot
+    # confirmation windows. Scanning the full multi-year parquet here made a
+    # cold scan repeat thousands of Python-level iloc operations per symbol.
+    recent_window = (
+        config.max_gap + config.ttl + config.left + config.right + 1
+    )
+    if len(prepared) > recent_window:
+        prepared = prepared.tail(recent_window)
+
     for kind in ("bearish", "bullish"):
         confirmed_pivots = _confirmed_pivots(prepared, kind, config)
         for second in reversed(confirmed_pivots):

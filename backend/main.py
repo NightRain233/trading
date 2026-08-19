@@ -69,7 +69,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
 from zoneinfo import ZoneInfo
-from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS
+from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS, PREWARM_TIMES
 
 # 获取日志记录器，用于在控制台输出信息
 logger = logging.getLogger(__name__)
@@ -1675,13 +1675,13 @@ def weekly_breakout_scan():
 
 ST_SCAN_REFRESH_THRESHOLD_SECONDS = 15 * 60
 ST_SCAN_CACHE_TTL_SECONDS = 60
-ST_SCAN_MISSING_REFRESH_TIMEOUT_SECONDS = 8.0
-ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS = 5.0
 
 _st_scan_cache: dict = {"data": None, "ts": 0.0}
 _st_scan_rebuild_lock = threading.RLock()
 _st_a_share_calendar_cache: dict = {"signature": None, "dates": pd.DatetimeIndex([])}
 _st_a_share_calendar_lock = threading.Lock()
+_st_exchange_calendar_cache: dict = {}
+_st_exchange_calendar_lock = threading.Lock()
 
 
 def _st_scan_response_view(payload: dict, include_candles: bool, *, cached: bool = False) -> dict:
@@ -1841,7 +1841,7 @@ def _st_data_stale(
         calendar_name = "XNYS"
 
     try:
-        calendar = xcals.get_calendar(calendar_name)
+        calendar = _st_get_exchange_calendar(calendar_name)
         reference_now = pd.Timestamp(now or datetime.now(timezone.utc))
         reference_now = reference_now.tz_localize("UTC") if reference_now.tzinfo is None else reference_now.tz_convert("UTC")
         sessions = calendar.sessions_in_range(
@@ -1866,6 +1866,16 @@ def _st_data_stale(
             return False
         now_local = (now or datetime.now(PREWARM_TZ)).astimezone(PREWARM_TZ).date()
         return (now_local - decision_date).days > 3
+
+
+def _st_get_exchange_calendar(calendar_name: str):
+    """Reuse exchange-calendar objects across scan items and requests."""
+    with _st_exchange_calendar_lock:
+        calendar = _st_exchange_calendar_cache.get(calendar_name)
+        if calendar is None:
+            calendar = xcals.get_calendar(calendar_name)
+            _st_exchange_calendar_cache[calendar_name] = calendar
+        return calendar
 
 
 def _st_daily_boll_squeeze(df) -> tuple:
@@ -2046,23 +2056,28 @@ def _st_scan_signature(symbols: List[str]) -> list:
     return signature
 
 
-def _refresh_supertrend_symbols(symbols: List[str], timeout_seconds: float) -> bool:
+def _schedule_supertrend_refresh(symbols: List[str]) -> bool:
+    """Schedule a deduplicated refresh without blocking the scan response.
+
+    Scan used to start a private worker and wait up to 5–8 seconds for it.
+    That worker bypassed the shared refresh coordinator, so a scan could
+    refresh the same symbols concurrently with /api/quotes/batch.  Reuse the
+    shared coordinator instead: it suppresses duplicate/in-flight refreshes
+    and lets the endpoint serve the current local snapshot immediately.
+    """
     if not symbols:
-        return True
+        return False
 
-    completed = {"done": False}
-
-    def worker():
-        try:
-            batch_fetch_and_update(symbols)
-            completed["done"] = True
-        except Exception as exc:
-            logger.warning(f"SuperTrend 扫描预刷新失败: {exc}")
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    thread.join(timeout_seconds)
-    return completed["done"]
+    scheduled = refresh_symbols_async(
+        symbols,
+        reason="supertrend_scan",
+        min_interval_seconds=60,
+    )
+    if scheduled:
+        logger.info("SuperTrend 扫描已提交后台刷新: %d 只", len(symbols))
+    else:
+        logger.debug("SuperTrend 扫描刷新已在执行或最近提交，直接使用本地快照")
+    return scheduled
 
 @app.get("/api/supertrend/scan", response_model=SupertrendScanResponse)
 def supertrend_scan(
@@ -2076,6 +2091,322 @@ def supertrend_scan(
         return _supertrend_scan_impl(force, include_candles, requested_symbols)
     with _st_scan_rebuild_lock:
         return _supertrend_scan_impl(force, include_candles, requested_symbols)
+
+
+def _build_supertrend_scan_item(
+    sym: str,
+    daily: pd.DataFrame,
+    weekly: Optional[pd.DataFrame] = None,
+    *,
+    alias: str = "",
+    now: Optional[datetime] = None,
+    daily_mtime: Optional[float] = None,
+    cache_stale: bool = False,
+    refresh_triggered: bool = False,
+    data_integrity: Optional[dict] = None,
+    include_auxiliary: bool = True,
+) -> Optional[dict]:
+    """Build one production scan item from point-in-time daily/weekly frames.
+
+    The live endpoint and the historical policy replay share this function so
+    that research cannot silently reimplement the production feature contract.
+    Callers performing historical replay must pass frames truncated to the
+    information available at ``now``.
+    """
+    import pandas_ta as ta
+    from analysis_constants import ST_LENGTH, ST_MULTIPLIER
+
+    if daily is None or daily.empty:
+        return None
+    sym = sym.upper()
+    daily = daily.sort_index().copy()
+    latest_data_date = _st_latest_data_date(daily)
+    latest_row = daily.dropna(subset=["Close"]).iloc[-1]
+    live_price = float(latest_row["Close"]) if pd.notna(latest_row.get("Close")) else None
+    daily_session_complete = _st_volume_session_complete(sym, latest_data_date, now=now)
+    integrity = data_integrity if data_integrity is not None else _st_recent_gap_info(sym, daily)
+
+    if "_st_val" not in daily.columns or "_st_dir" not in daily.columns:
+        # The normal parquet format already contains these columns under the
+        # legacy names. Reuse them instead of recalculating 1,850 daily bars
+        # for every symbol during the first scan after a restart.
+        if "ST_Val" in daily.columns and "ST_Dir" in daily.columns:
+            daily["_st_val"] = daily["ST_Val"]
+            daily["_st_dir"] = daily["ST_Dir"]
+        else:
+            st = ta.supertrend(
+                daily["High"], daily["Low"], daily["Close"],
+                length=ST_LENGTH, multiplier=ST_MULTIPLIER,
+            )
+            if st is None or st.empty:
+                return None
+            val_col = next((
+                c for c in st.columns
+                if c.startswith("SUPERT_")
+                and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))
+            ), None)
+            dir_col = next((c for c in st.columns if c.startswith("SUPERTd_")), None)
+            if not val_col or not dir_col:
+                return None
+            daily["_st_val"] = st[val_col]
+            daily["_st_dir"] = st[dir_col]
+    if "ATR" not in daily.columns or daily["ATR"].isnull().all():
+        daily["ATR"] = ta.atr(daily["High"], daily["Low"], daily["Close"], length=14)
+
+    decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
+    decision_as_of = _st_latest_data_date(decision_daily)
+    decision_daily_available = not decision_daily.empty
+    has_provisional_bar = bool(
+        daily_session_complete is False
+        and latest_data_date is not None
+        and latest_data_date != decision_as_of
+    )
+    data_stale = _st_data_stale(
+        sym,
+        decision_as_of,
+        latest_data_date,
+        daily_session_complete,
+        integrity,
+        now=now,
+    )
+    all_dir_rows = daily.dropna(subset=["_st_dir"])
+    formal_rows = decision_daily.dropna(subset=["Close"])
+    if formal_rows.empty:
+        return None
+    last = formal_rows.iloc[-1]
+    cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
+    dir_rows = decision_daily.dropna(subset=["_st_dir"])
+    provisional_state, _ = classify_trend_state(all_dir_rows["_st_dir"].tail(2).tolist())
+    state, _ = (
+        classify_trend_state(dir_rows["_st_dir"].tail(2).tolist())
+        if decision_daily_available
+        else (provisional_state, False)
+    )
+
+    trend_age_bars = 0
+    if cur_dir != 0:
+        for direction in reversed([int(r) for r in dir_rows["_st_dir"].tolist()]):
+            if direction != cur_dir:
+                break
+            trend_age_bars += 1
+
+    def _to_candles(df, val_key, dir_key, n):
+        rows = []
+        for ts, row in df.sort_index().tail(n).iterrows():
+            rows.append({
+                "time": pd.Timestamp(ts).date().isoformat(),
+                "open": float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"]),
+                "high": float(row["High"]) if pd.notna(row.get("High")) else float(row["Close"]),
+                "low": float(row["Low"]) if pd.notna(row.get("Low")) else float(row["Close"]),
+                "close": float(row["Close"]),
+                "st_val": float(row[val_key]) if pd.notna(row.get(val_key)) else None,
+                "st_dir": int(row[dir_key]) if pd.notna(row.get(dir_key)) else None,
+            })
+        return rows
+
+    candles = _to_candles(decision_daily, "_st_val", "_st_dir", 60)
+
+    weekly_state = None
+    weekly_st_val = None
+    weekly_candles = []
+    weekly_just_flipped = False
+    weekly_provisional_state = None
+    weekly_period_complete = None
+    wcur_dir = 0
+    wprev_rows = None
+    weekly_frame = weekly.sort_index().copy() if weekly is not None and not weekly.empty else None
+    if weekly_frame is not None:
+        if "_wst_val" not in weekly_frame.columns or "_wst_dir" not in weekly_frame.columns:
+            wst = ta.supertrend(
+                weekly_frame["High"], weekly_frame["Low"], weekly_frame["Close"],
+                length=ST_LENGTH, multiplier=ST_MULTIPLIER,
+            )
+            if wst is not None and not wst.empty:
+                wval_col = next((
+                    c for c in wst.columns
+                    if c.startswith("SUPERT_")
+                    and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))
+                ), None)
+                wdir_col = next((c for c in wst.columns if c.startswith("SUPERTd_")), None)
+                if wval_col and wdir_col:
+                    weekly_frame["_wst_val"] = wst[wval_col]
+                    weekly_frame["_wst_dir"] = wst[wdir_col]
+        if "_wst_dir" in weekly_frame.columns and "_wst_val" in weekly_frame.columns:
+            all_weekly_rows = weekly_frame.dropna(subset=["_wst_dir"])
+            if not all_weekly_rows.empty:
+                weekly_provisional_state, _ = classify_trend_state(
+                    all_weekly_rows["_wst_dir"].tail(2).tolist()
+                )
+                completed_weekly = filter_completed_weekly_bars(sym, weekly_frame, decision_as_of)
+                if not completed_weekly.empty:
+                    completed_through = completed_weekly.index[-1]
+                    wprev_rows = all_weekly_rows.loc[all_weekly_rows.index <= completed_through]
+                if wprev_rows is not None and not wprev_rows.empty:
+                    wlast = wprev_rows.dropna(subset=["Close"]).iloc[-1]
+                    wcur_dir = int(wlast["_wst_dir"]) if pd.notna(wlast.get("_wst_dir")) else 0
+                    weekly_state, weekly_just_flipped = classify_trend_state(
+                        wprev_rows["_wst_dir"].tail(2).tolist()
+                    )
+                    weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
+                    weekly_period_complete = wprev_rows.index[-1] == all_weekly_rows.index[-1]
+                weekly_candles = _to_candles(weekly_frame, "_wst_val", "_wst_dir", 30)
+
+    weekly_trend_age_bars = 0
+    if wcur_dir != 0 and wprev_rows is not None:
+        for wdir in reversed([int(r) for r in wprev_rows["_wst_dir"].tolist()]):
+            if wdir != wcur_dir:
+                break
+            weekly_trend_age_bars += 1
+
+    def _fv(key, default=None):
+        val = last.get(key)
+        return float(val) if pd.notna(val) else default
+
+    macd_hist_rows = (
+        pd.to_numeric(daily.loc[:last.name, "MACD_Hist"], errors="coerce").dropna().tail(2)
+        if "MACD_Hist" in daily.columns else pd.Series(dtype=float)
+    )
+    macd_hist_prev = float(macd_hist_rows.iloc[-2]) if len(macd_hist_rows) >= 2 else None
+    macd_hist_current = _fv("MACD_Hist")
+    adx_rows = (
+        pd.to_numeric(daily.loc[:last.name, "ADX"], errors="coerce").dropna().tail(2)
+        if "ADX" in daily.columns else pd.Series(dtype=float)
+    )
+    adx_prev = float(adx_rows.iloc[-2]) if len(adx_rows) >= 2 else None
+    adx_current = _fv("ADX")
+    indicators = {
+        "adx": adx_current,
+        "adxPrev": adx_prev,
+        "adxDelta": adx_current - adx_prev if adx_current is not None and adx_prev is not None else None,
+        "rsi7": _fv("RSI_7"),
+        "rsi14": _fv("RSI_14"),
+        "rsi21": _fv("RSI_21"),
+        "macdDif": _fv("MACD_DIF"),
+        "macdDea": _fv("MACD_DEA"),
+        "macdHist": macd_hist_current,
+        "macdHistPrev": macd_hist_prev,
+        "macdHistDelta": (
+            macd_hist_current - macd_hist_prev
+            if macd_hist_current is not None and macd_hist_prev is not None else None
+        ),
+        "kdjK": _fv("K"),
+        "kdjD": _fv("D"),
+        "kdjJ": _fv("J"),
+        "bollUpper": _fv("BOLL_Upper"),
+        "bollMid": _fv("BOLL_Mid"),
+        "bollLower": _fv("BOLL_Lower"),
+        "atr": _fv("ATR"),
+    }
+
+    (
+        boll_width,
+        is_squeeze,
+        recent_squeeze,
+        boll_width_ratio,
+        boll_width_series,
+        boll_width_average,
+    ) = _st_daily_boll_squeeze(decision_daily)
+    indicators.update({
+        "bollWidth": boll_width,
+        "bollSqueeze": is_squeeze,
+        "bollSqueezeRecent": recent_squeeze,
+        "bollWidthRatio20": boll_width_ratio,
+    })
+
+    decision_history = []
+    history_source = decision_daily.dropna(subset=["Close", "_st_val", "_st_dir"]).tail(10)
+    prior_direction = None
+    for ts, row in history_source.iterrows():
+        direction = int(row["_st_dir"])
+        if direction == 1:
+            history_state = "bull_flip" if prior_direction == -1 else "bull"
+        else:
+            history_state = "bear_flip" if prior_direction == 1 else "bear"
+        row_close = float(row["Close"])
+        row_st = float(row["_st_val"])
+        row_atr = float(row["ATR"]) if pd.notna(row.get("ATR")) and float(row["ATR"]) > 0 else None
+        row_bw = None
+        row_bw_ratio = None
+        row_squeeze = False
+        row_recent_squeeze = False
+        if all(pd.notna(row.get(key)) for key in ("BOLL_Upper", "BOLL_Lower", "BOLL_Mid")) and float(row["BOLL_Mid"]) != 0:
+            row_bw = (float(row["BOLL_Upper"]) - float(row["BOLL_Lower"])) / float(row["BOLL_Mid"])
+            if ts in boll_width_average.index and pd.notna(boll_width_average.loc[ts]) and float(boll_width_average.loc[ts]) > 0:
+                row_bw_ratio = row_bw / float(boll_width_average.loc[ts])
+                row_squeeze = row_bw_ratio < 0.85
+                historical_ratios = (
+                    boll_width_series.loc[:ts] / boll_width_average.loc[:ts].replace(0, float("nan"))
+                ).dropna().tail(5)
+                row_recent_squeeze = bool((historical_ratios < 0.85).any() and row_bw_ratio <= 1.10)
+        decision_history.append({
+            "date": pd.Timestamp(ts).date().isoformat(),
+            "state": history_state,
+            "close": row_close,
+            "stVal": row_st,
+            "distanceToSupertrendAtr": (row_close - row_st) / row_atr if row_atr else None,
+            "adx": float(row["ADX"]) if pd.notna(row.get("ADX")) else None,
+            "macdHist": float(row["MACD_Hist"]) if pd.notna(row.get("MACD_Hist")) else None,
+            "bollWidth": row_bw,
+            "bollWidthRatio20": row_bw_ratio,
+            "bollSqueeze": row_squeeze,
+            "bollSqueezeRecent": row_recent_squeeze,
+        })
+        prior_direction = direction
+
+    macd_divergence = (
+        build_macd_divergence_summary(sym, daily, weekly_frame)
+        if include_auxiliary else {}
+    )
+    multitimeframe_context = _st_multitimeframe_context(daily, symbol=sym, now=now)
+    alert = classify_supertrend_alert(
+        state=state,
+        weekly_state=weekly_state,
+        close=float(last["Close"]) if pd.notna(last.get("Close")) else None,
+        st_val=float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
+        atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None,
+        just_flipped=state in ("bull_flip", "bear_flip"),
+        trend_age_bars=trend_age_bars,
+    )
+    return {
+        "symbol": sym,
+        "alias": alias,
+        "state": state,
+        "dailyProvisionalState": provisional_state,
+        "decisionDailyState": state if decision_daily_available else None,
+        "decisionAsOf": decision_as_of,
+        "decisionDailyAvailable": decision_daily_available,
+        "hasProvisionalBar": has_provisional_bar,
+        "isCrypto": sym.endswith("-USD"),
+        "livePrice": live_price,
+        "liveAsOf": latest_data_date,
+        "close": float(last["Close"]) if pd.notna(last.get("Close")) else None,
+        "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
+        "candles": candles,
+        "weeklyState": weekly_state,
+        "weeklyProvisionalState": weekly_provisional_state,
+        "weeklyPeriodComplete": weekly_period_complete,
+        "weeklyStVal": weekly_st_val,
+        "weeklyCandles": weekly_candles,
+        "justFlipped": state in ("bull_flip", "bear_flip"),
+        "weeklyJustFlipped": weekly_just_flipped,
+        "trendAgeBars": trend_age_bars,
+        "dailySessionComplete": daily_session_complete,
+        "latestDataDate": latest_data_date,
+        "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
+        "cacheStale": cache_stale,
+        "dataStale": data_stale,
+        "refreshTriggered": refresh_triggered,
+        "dataIntegrity": integrity,
+        "indicators": indicators,
+        "decisionHistory": decision_history,
+        "macdDivergence": macd_divergence,
+        "bollWidth": boll_width,
+        "bollSqueeze": is_squeeze,
+        "bollSqueezeRecent": recent_squeeze,
+        **multitimeframe_context,
+        "weeklyTrendAgeBars": weekly_trend_age_bars,
+        **alert,
+    }
 
 
 def _supertrend_scan_impl(
@@ -2128,13 +2459,11 @@ def _supertrend_scan_impl(
         return _st_scan_response_view(_st_scan_cache["data"], include_candles, cached=True)
 
     refresh_symbols = []
-    missing_symbols = []
     stale_before = time.time() - ST_SCAN_REFRESH_THRESHOLD_SECONDS
     for sym in symbols:
         daily_path = _st_path(sym)
         if not os.path.exists(daily_path):
             refresh_symbols.append(sym)
-            missing_symbols.append(sym)
             continue
         try:
             if force or os.path.getmtime(daily_path) < stale_before:
@@ -2142,30 +2471,11 @@ def _supertrend_scan_impl(
         except OSError:
             continue
 
-    refresh_completed = True
-    if refresh_symbols:
-        refresh_timeout = (
-            ST_SCAN_MISSING_REFRESH_TIMEOUT_SECONDS
-            if missing_symbols
-            else ST_SCAN_STALE_REFRESH_TIMEOUT_SECONDS
-        )
-        refresh_completed = _refresh_supertrend_symbols(refresh_symbols, refresh_timeout)
-
     signature = _st_scan_signature(symbols)
-    if (
-        not explicit_symbols
-        and not force
-        and refresh_completed
-        and _st_scan_cache["data"] is not None
-        and _st_scan_cache_fresh()
-        and cache_symbols == symbols
-        and cache_signature == signature
-    ):
-        return _st_scan_response_view(_st_scan_cache["data"], include_candles, cached=True)
 
     import pandas_ta as ta
 
-    def _process_sym(sym):
+    def _process_sym_legacy(sym):
         daily_path = _st_path(sym)
         if not os.path.exists(daily_path):
             return None
@@ -2450,9 +2760,35 @@ def _supertrend_scan_impl(
             **alert,
         }
 
+    def _process_sym(sym):
+        daily_path = _st_path(sym)
+        if not os.path.exists(daily_path):
+            return None
+        daily_mtime = _st_file_mtime(daily_path)
+        daily = pd.read_parquet(daily_path)
+        if daily.empty:
+            return None
+        weekly_path = _st_path(sym, weekly=True)
+        weekly = pd.read_parquet(weekly_path) if os.path.exists(weekly_path) else None
+        return _build_supertrend_scan_item(
+            sym,
+            daily,
+            weekly,
+            alias=alias_map.get(sym, ""),
+            daily_mtime=daily_mtime,
+            cache_stale=daily_mtime is None or daily_mtime < stale_before,
+            refresh_triggered=bool(refresh_symbols),
+        )
+
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = [r for r in executor.map(_process_sym, symbols) if r is not None]
+
+    if refresh_symbols:
+        # Build the response from the current local snapshot first. Starting
+        # the refresh only after that avoids CPU/I/O contention on the first
+        # scan after a restart; the next request will see the refreshed mtimes.
+        _schedule_supertrend_refresh(refresh_symbols)
 
     user_results = [item for item in results if item["symbol"] in set(user_symbols)]
     representative_results = [item for item in results if item["symbol"] in representative_set and item["symbol"] not in set(user_symbols)]
@@ -2474,15 +2810,15 @@ def _supertrend_scan_impl(
 def _next_prewarm_run(now_local: datetime) -> datetime:
     """计算下一个固定预热时间点（本地时区时间）。"""
     today_candidates = [
-        now_local.replace(hour=hour, minute=0, second=0, microsecond=0)
-        for hour in PREWARM_HOURS
+        now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        for hour, minute in PREWARM_TIMES
     ]
     for candidate in today_candidates:
         if candidate > now_local:
             return candidate
     return (now_local + timedelta(days=1)).replace(
-        hour=PREWARM_HOURS[0],
-        minute=0,
+        hour=PREWARM_TIMES[0][0],
+        minute=PREWARM_TIMES[0][1],
         second=0,
         microsecond=0,
     )

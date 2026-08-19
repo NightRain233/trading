@@ -6,7 +6,12 @@
       "Skill(update-config)",
       "WebFetch(domain:finance.sina.com.cn)",
       "WebFetch(domain:www.csindex.com.cn)",
-      "WebFetch(domain:quote.eastmoney.com)"
+      "WebFetch(domain:quote.eastmoney.com)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat\\(scan\\): 新增扫描策略引擎及测试 *)",
+      "Bash(git commit -m 'feat\\(scan\\): 集成策略引擎，API 升级为 v2 结构化契约响应 *)",
+      "Bash(git commit -m 'chore: 基础设施优化与扫描技能文档重写 *)",
+      "Bash(git commit -m 'feat\\(scan\\): 市场代表品种体系扩展与加密货币日线处理优化 *)"
     ]
   }
 }

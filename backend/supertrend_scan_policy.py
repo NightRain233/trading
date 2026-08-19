@@ -10,11 +10,11 @@ from zoneinfo import ZoneInfo
 
 
 SCHEMA_VERSION = 2
-POLICY_VERSION = "scan_v2_right_side_4"
+POLICY_VERSION = "scan_v2_right_side_5"
 
 NORMAL_ADX_THRESHOLD = 25.0
 CAUTIOUS_ADX_THRESHOLD = 30.0
-BREAKOUT_MAX_DISTANCE_ATR = 2.0
+BREAKOUT_MAX_NEXT_SESSION_GAP_ATR = 0.5
 PULLBACK_ZONE_ATR = 1.5
 PULLBACK_APPROACHING_ATR = 2.5
 COMPRESSION_MAX_DISTANCE_ATR = 1.5
@@ -799,18 +799,24 @@ def _decision(
                 failed.append("ADX_UNAVAILABLE")
             else:
                 failed.append(f"ADX_BELOW_{int(threshold)}")
-        if distance is not None and distance <= BREAKOUT_MAX_DISTANCE_ATR:
-            reasons.append("DISTANCE_PASSED")
+        macd_hist = _finite_float((item.get("indicators") or {}).get("macdHist"))
+        if macd_hist is not None and macd_hist > 0:
+            reasons.append("MACD_HIST_POSITIVE")
+        elif macd_hist is None:
+            failed.append("MACD_HIST_UNAVAILABLE")
         else:
-            failed.append("DISTANCE_ABOVE_2_ATR")
+            failed.append("MACD_HIST_NOT_POSITIVE")
 
         st_val = _finite_float(item.get("stVal"))
         atr = _finite_float((item.get("indicators") or {}).get("atr"))
-        max_price = st_val + BREAKOUT_MAX_DISTANCE_ATR * atr if st_val is not None and atr is not None else None
+        close = _finite_float(item.get("close"))
+        max_price = (
+            close + BREAKOUT_MAX_NEXT_SESSION_GAP_ATR * atr
+            if close is not None and atr is not None and atr > 0
+            else None
+        )
         if not failed:
             permission, label, stage, group = "buy", "可买·突破入场", "breakout_confirmed", "breakout_buy"
-        elif failed == ["DISTANCE_ABOVE_2_ATR"]:
-            permission, label, stage, group = "wait", "等确认·突破已发生，等待回踩", "extended_wait_pullback", "wait_confirmation"
         elif "MARKET_MODE_INSUFFICIENT" in failed:
             permission, label, stage, group = "wait", "等确认·市场模式数据不足", "market_confirmation_missing", "wait_confirmation"
         else:
@@ -831,7 +837,9 @@ def _decision(
                 else "等待首个失败门槛改善"
             ),
             "invalidation": "日线收盘重新翻空",
+            "triggerPrice": close,
             "maxAcceptablePrice": max_price,
+            "invalidationPrice": st_val,
         }, group, tags)
 
     if yellow:
@@ -1254,7 +1262,7 @@ def build_scan_response(
             "compressionLiveTradingAllowed": False,
             "normalAdx": NORMAL_ADX_THRESHOLD,
             "cautiousAdx": CAUTIOUS_ADX_THRESHOLD,
-            "breakoutMaxAtr": BREAKOUT_MAX_DISTANCE_ATR,
+            "breakoutMaxNextSessionGapAtr": BREAKOUT_MAX_NEXT_SESSION_GAP_ATR,
             "pullbackZoneAtr": PULLBACK_ZONE_ATR,
             "pullbackApproachingAtr": PULLBACK_APPROACHING_ATR,
             "compressionMaxDistanceAtr": COMPRESSION_MAX_DISTANCE_ATR,

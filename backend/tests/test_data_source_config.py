@@ -46,6 +46,24 @@ def test_invalid_prewarm_hours_fall_back(monkeypatch):
     ) == (12, 21)
 
 
+def test_prewarm_times_are_sorted_and_support_minutes(monkeypatch):
+    monkeypatch.setenv("TEST_TIMES", "21:00,07:30,07:30")
+
+    assert analysis_constants._env_times(
+        "TEST_TIMES",
+        ((21, 0),),
+    ) == ((7, 30), (21, 0))
+
+
+def test_invalid_prewarm_times_fall_back(monkeypatch):
+    monkeypatch.setenv("TEST_TIMES", "07:30,25:00")
+
+    assert analysis_constants._env_times(
+        "TEST_TIMES",
+        ((7, 30), (21, 0)),
+    ) == ((7, 30), (21, 0))
+
+
 def test_tickflow_defaults(monkeypatch):
     for key in (
         "TICKFLOW_FETCH_ENABLED",
@@ -55,6 +73,7 @@ def test_tickflow_defaults(monkeypatch):
         "TICKFLOW_CIRCUIT_COOLDOWN_SECONDS",
         "TICKFLOW_INCREMENTAL_OVERLAP_DAYS",
         "PREWARM_HOURS",
+        "PREWARM_TIMES",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -66,4 +85,5 @@ def test_tickflow_defaults(monkeypatch):
     assert module.TICKFLOW_MIN_INTERVAL_SECONDS == 1.0
     assert module.TICKFLOW_CIRCUIT_COOLDOWN_SECONDS == 900
     assert module.TICKFLOW_INCREMENTAL_OVERLAP_DAYS == 7
-    assert module.PREWARM_HOURS == (21,)
+    assert module.PREWARM_TIMES == ((7, 30), (21, 0))
+    assert module.PREWARM_HOURS == (7, 21)

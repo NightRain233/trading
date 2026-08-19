@@ -47,6 +47,36 @@ def _env_hours(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
     return hours
 
 
+def _env_times(
+    name: str,
+    default: tuple[tuple[int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Parse a comma-separated HH:MM schedule, with legacy hour support."""
+    raw = os.getenv(name)
+    if raw is None:
+        legacy_raw = os.getenv("PREWARM_HOURS")
+        if legacy_raw is not None:
+            legacy_hours = _env_hours("PREWARM_HOURS", tuple(hour for hour, _ in default))
+            return tuple((hour, 0) for hour in legacy_hours)
+        return default
+    try:
+        parsed = []
+        for part in raw.split(","):
+            value = part.strip()
+            if not value:
+                continue
+            hour_text, minute_text = value.split(":", 1)
+            hour = int(hour_text)
+            minute = int(minute_text)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError
+            parsed.append((hour, minute))
+        result = tuple(sorted(set(parsed)))
+    except (TypeError, ValueError):
+        return default
+    return result or default
+
+
 DATA_DIR = "data"
 CACHE_DURATION_SECONDS = 60 * 60
 ALLOW_STALE_SECONDS = 60 * 60 * 24
@@ -84,7 +114,9 @@ YAHOO_CIRCUIT_COOLDOWN_SECONDS = _env_int(
 )
 
 BACKGROUND_PREWARM_ENABLED = _env_bool("BACKGROUND_PREWARM_ENABLED", True)
-PREWARM_HOURS = _env_hours("PREWARM_HOURS", (21,))
+PREWARM_TIMES = _env_times("PREWARM_TIMES", ((7, 30), (21, 0)))
+# Kept as a compatibility alias for older callers/configuration checks.
+PREWARM_HOURS = tuple(hour for hour, _ in PREWARM_TIMES)
 
 EMA_FAST_5 = 5
 EMA_FAST_10 = 10
