@@ -116,6 +116,25 @@ def test_missing_latest_close_blocks_instead_of_falling_back_silently():
     )
 
 
+def test_mixed_market_current_utc_lag_aligns_without_false_block():
+    config = get_strategy("btc_supertrend_satellite")
+    etf_sessions = xshg_sessions("2025-08-01", "2026-06-26")
+    frames = {
+        symbol: _frame(etf_sessions)
+        for symbol in config.symbols if symbol != "BTC-USD"
+    }
+    # At Shanghai midnight the BTC UTC day is not complete yet.
+    frames["BTC-USD"] = _frame(etf_sessions[:-1])
+
+    market = build_portfolio_market_data(
+        config, frames,
+        datetime(2026, 6, 26, 23, 59, tzinfo=SHANGHAI),
+    )
+
+    assert market.blocked is False
+    assert market.market_data_date == etf_sessions[-2].date()
+
+
 def test_recent_unexplained_asset_gap_blocks_calculation():
     config = get_strategy("theme_alpha")
     sessions = xshg_sessions("2025-08-01", "2026-06-26")
@@ -224,4 +243,3 @@ def test_refresh_uses_fixed_strategy_universe():
             {"reason": "portfolio_strategy", "min_interval_seconds": 0},
         )
     ]
-

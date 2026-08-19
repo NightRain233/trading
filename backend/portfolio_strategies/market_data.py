@@ -217,6 +217,18 @@ def build_portfolio_market_data(
     for symbol in etf_symbols[1:]:
         common_sessions = common_sessions.intersection(completed[symbol].index)
     common_sessions = common_sessions[common_sessions <= candidate].sort_values()
+    # Mixed-market legacy strategies can legitimately have one fewer completed
+    # bar at the Shanghai cutoff (for example BTC's UTC day is still open while
+    # A-share ETFs have closed).  Align to the latest date completed by every
+    # required asset, while still detecting gaps inside the aligned history.
+    markets = {asset.market for asset in config.assets}
+    if len(markets) > 1:
+        latest_all_assets = min(
+            completed[asset.symbol].index.max()
+            for asset in config.assets
+            if asset.symbol in completed
+        )
+        common_sessions = common_sessions[common_sessions <= latest_all_assets]
     if common_sessions.empty:
         return _empty_market_data(diagnostics)
 
