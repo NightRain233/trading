@@ -57,7 +57,7 @@ export function buildAssetRows(snapshot) {
   const sleeveMap = new Map();
 
   for (const c of (snapshot.currentWeights || [])) {
-    currentMap.set(c.symbol, c.weight);
+    currentMap.set(c.symbol, (currentMap.get(c.symbol) || 0) + c.weight);
   }
   for (const d of (snapshot.desiredWeights || [])) {
     desiredMap.set(d.symbol, d.weight);

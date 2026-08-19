@@ -84,16 +84,25 @@ def _priority_allowed(item: dict[str, Any], min_priority: str) -> bool:
 # Portfolio strategies
 # ---------------------------------------------------------------------------
 
+PRIMARY_PORTFOLIO_ORDER = [
+    "risk_parity_core_next_open",
+    "core90_ma200_bull10",
+    "theme_alpha",
+    "btc_supertrend_satellite",
+]
+
 
 def fetch_portfolio_strategies(api_base: str, timeout: float) -> list[dict[str, Any]]:
-    """Return paper-enabled strategies with their latest snapshots."""
+    """Return the four primary paper strategies with their latest snapshots."""
     strategies = _api_get(api_base, "/portfolio-strategies", timeout)
     if not isinstance(strategies, list):
         return []
 
     result = []
     for st in strategies:
-        if not st.get("paperEnabled"):
+        strategy_id = st.get("strategyId", "")
+        is_primary = st.get("isPrimary", strategy_id in PRIMARY_PORTFOLIO_ORDER)
+        if not st.get("paperEnabled") or not is_primary:
             continue
         try:
             snapshot = _api_get(api_base, f"/portfolio-strategies/{st['strategyId']}/snapshot", timeout)
@@ -101,8 +110,10 @@ def fetch_portfolio_strategies(api_base: str, timeout: float) -> list[dict[str, 
             snapshot = {"state": "UNAVAILABLE", "calcError": "Failed to fetch snapshot"}
         snapshot["_displayName"] = st.get("displayName", st.get("strategyId", ""))
         snapshot["_bootstrapped"] = st.get("bootstrapped", False)
+        snapshot["_isPrimary"] = True
         result.append(snapshot)
-    return result
+    order = {strategy_id: index for index, strategy_id in enumerate(PRIMARY_PORTFOLIO_ORDER)}
+    return sorted(result, key=lambda item: order.get(item.get("strategyId", ""), len(order)))
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +334,26 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
     name = snapshot.get("_displayName", snapshot.get("strategyId", "Unknown"))
     sid = snapshot.get("strategyId", "")
     state = snapshot.get("state", "EMPTY")
-    emoji = _state_emoji(state)
-    lines = [f"### {emoji} {name}"]
+    lines = [f"### {name} [{state}]"]
+
+    operations = snapshot.get("operations") or {}
+    orders = operations.get("orders") or []
+    active_orders = [order for order in orders if order.get("due") or order.get("status") in ("PENDING", "DELAYED")]
+    for order in active_orders:
+        execution_date = order.get("nextAttemptDate") or order.get("expectedExecutionDate") or "待定"
+        reason = order.get("delayReason") or order.get("rejectionReason") or order.get("status", "PENDING")
+        prefix = "今日执行" if order.get("due") else "等待 Open"
+        lines.append(
+            f"- {prefix}: {order.get('symbol', '?')} {order.get('side', '?')}，"
+            f"下一尝试 {execution_date}（{reason}）"
+        )
+
+    candidates = operations.get("bullCandidates") or []
+    if candidates:
+        allowed = int(operations.get("ma200AllowedCount") or 0)
+        blocked = int(operations.get("ma200BlockedCount") or 0)
+        symbols = " / ".join(str(item.get("symbol", "?")) for item in candidates[:8])
+        lines.append(f"- Bull flip: {len(candidates)} 个（MA200 允许 {allowed} / 拦截 {blocked}）: {symbols}")
 
     # Key metrics row
     nav = snapshot.get("nav", {})
@@ -348,10 +377,10 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
                 for p in sorted(non_cash, key=lambda x: float(x.get("weight", 0)), reverse=True)
             )
             if cash_item and float(cash_item.get("weight", 0)) > 0.01:
-                pos_str += f" / 💵 {float(cash_item['weight']) * 100:.0f}%"
+                pos_str += f" / 现金 {float(cash_item['weight']) * 100:.0f}%"
             lines.append(f"- 持仓: {pos_str}")
         elif cash_item and float(cash_item.get("weight", 0)) > 0.99:
-            lines.append("- 持仓: 💵 全现金")
+            lines.append("- 持仓: 全现金")
     else:
         desired = snapshot.get("desiredWeights", [])
         if desired:
@@ -372,11 +401,20 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
             reason = reason[:117] + "..."
         lines.append(f"- 信号: {reason}")
 
-    # Pending rebalance alert
+    gross_exposure = operations.get("grossExposure")
+    if gross_exposure is not None:
+        cash = nav.get("cash") if nav else None
+        lines.append(f"- 总敞口 {float(gross_exposure) * 100:.1f}% | 现金 ¥{_fmt_number(cash, 0)}")
+
+    benchmark = operations.get("benchmark") or {}
+    if benchmark.get("relativeReturn") is not None:
+        lines.append(f"- 相对 RiskParity: {_fmt_pct(benchmark.get('relativeReturn'), 2)}")
+
+    # Legacy pending rebalance alert
     ledger = snapshot.get("ledger", {})
     if ledger.get("status") == "pending":
         signal_date = ledger.get("signalDate", "?")
-        lines.append(f"- ⚠️ 待执行调仓，信号日 {signal_date}")
+        lines.append(f"- 待执行调仓，信号日 {signal_date}")
 
     # Next check date
     dates = snapshot.get("dates", {})
@@ -387,7 +425,12 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
     # Error
     error = snapshot.get("calcError")
     if error:
-        lines.append(f"- ⚠️ 计算错误: {error}")
+        lines.append(f"- 计算错误: {error}")
+
+    diagnostics = snapshot.get("diagnostics") or []
+    data_quality_count = int(operations.get("dataQualityEventCount") or 0)
+    if diagnostics or data_quality_count:
+        lines.append(f"- 异常: 策略诊断 {len(diagnostics)} / 数据质量事件 {data_quality_count}")
 
     return lines
 
@@ -397,7 +440,27 @@ def render_portfolio_summary_markdown(strategies: list[dict[str, Any]]) -> str:
     if not strategies:
         return ""
 
-    lines = ["", "## 📊 组合策略"]
+    lines = ["", "## 组合策略纸面执行"]
+
+    active_orders = []
+    waiting_orders = []
+    for strategy in strategies:
+        name = strategy.get("_displayName", strategy.get("strategyId", ""))
+        for order in (strategy.get("operations") or {}).get("orders") or []:
+            row = (name, order)
+            if order.get("due"):
+                active_orders.append(row)
+            elif order.get("status") in ("PENDING", "DELAYED"):
+                waiting_orders.append(row)
+
+    lines.append("### 执行优先")
+    if not active_orders and not waiting_orders:
+        lines.append("- 今日无执行订单，也无等待 Open 的订单")
+    for name, order in active_orders:
+        lines.append(f"- 今日执行: {order.get('symbol')} {order.get('side')}（{name}）")
+    for name, order in waiting_orders:
+        attempt = order.get("nextAttemptDate") or order.get("expectedExecutionDate") or "待定"
+        lines.append(f"- 等待 Open: {order.get('symbol')} {order.get('side')}，下一尝试 {attempt}（{name}）")
 
     # Quick summary row
     summaries = []
@@ -408,8 +471,7 @@ def render_portfolio_summary_markdown(strategies: list[dict[str, Any]]) -> str:
         nav = st.get("nav", {})
         daily_ret = _fmt_pct(nav.get("dailyReturn"), 2) if nav else "-"
         state = st.get("state", "EMPTY")
-        emoji = _state_emoji(state)
-        summaries.append(f"{emoji} {short_name}: {daily_ret}")
+        summaries.append(f"{short_name}: {daily_ret} [{state}]")
     lines.append(" | ".join(summaries))
     lines.append("")
 

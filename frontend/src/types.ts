@@ -235,6 +235,9 @@ export interface PortfolioStrategyItem {
   bootstrapped: boolean;
   bootstrapSignalDate?: string | null;
   bootstrapValuationDate?: string | null;
+  presentationGroup: 'primary' | 'comparison';
+  isPrimary: boolean;
+  benchmarkStrategyId?: string | null;
 }
 
 export interface PortfolioWeightItem {
@@ -250,6 +253,7 @@ export interface PortfolioPositionItem {
   quantity: number;
   price: number | null;
   value: number;
+  sleeve: string;
 }
 
 export interface PortfolioDiagnosticItem {
@@ -303,7 +307,63 @@ export interface PortfolioSnapshot {
     rebalanceId?: number | null;
     signalDate?: string | null;
   };
+  operations: {
+    asOfDate?: string | null;
+    orders: PortfolioPaperOrder[];
+    bullCandidates: PortfolioBullCandidate[];
+    dueOrderCount: number;
+    waitingOpenCount: number;
+    pendingOrderCount: number;
+    ma200AllowedCount: number;
+    ma200BlockedCount: number;
+    grossExposure?: number | null;
+    dataQualityEventCount: number;
+    benchmark: {
+      strategyId: string;
+      valuationDate?: string | null;
+      benchmarkNav?: number | null;
+      relativeNav?: number | null;
+      relativeReturn?: number | null;
+    };
+  };
   calcError?: string | null;
+}
+
+export interface PortfolioPaperOrder {
+  orderId: number;
+  symbol: string;
+  market: string;
+  sleeve: string;
+  orderType: string;
+  side: string;
+  status: string;
+  signalDate: string;
+  expectedExecutionDate?: string | null;
+  nextAttemptDate?: string | null;
+  actualExecutionDate?: string | null;
+  actualOpen?: number | null;
+  requestedWeightDelta?: number | null;
+  quantityDelta?: number | null;
+  commission?: number | null;
+  slippage?: number | null;
+  delayReason?: string | null;
+  rejectionReason?: string | null;
+  due: boolean;
+}
+
+export interface PortfolioBullCandidate {
+  symbol: string;
+  market: string;
+  signalDate: string;
+  eligible: boolean;
+  reason: string;
+  permission?: string | null;
+  referenceSymbol?: string | null;
+  referenceDate?: string | null;
+  referenceClose?: number | null;
+  referenceMa?: number | null;
+  riskOn?: boolean | null;
+  gateReason?: string | null;
 }
 
 export interface PortfolioTargetWeights {

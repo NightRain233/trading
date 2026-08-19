@@ -115,6 +115,11 @@ def _get_portfolio_service() -> PortfolioStrategyService:
         _portfolio_service = PortfolioStrategyService(
             data_dir=DATA_DIR,
             db_path=PORTFOLIO_PAPER_DB,
+            decision_provider=lambda symbols: supertrend_scan(
+                force=False,
+                include_candles=False,
+                requested_symbols=",".join(symbols),
+            ),
         )
     return _portfolio_service
 

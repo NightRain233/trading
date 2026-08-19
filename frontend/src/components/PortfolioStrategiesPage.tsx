@@ -1,482 +1,322 @@
-import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, AlertTriangle, CheckCircle2, Clock, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { clsx } from 'clsx';
-import type {
-  PortfolioSnapshot,
-  PortfolioStrategyItem,
-  PortfolioNavSeries,
-} from '../types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  fetchPortfolioStrategies,
-  fetchPortfolioSnapshot,
-  refreshPortfolioStrategy,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  RefreshCw,
+} from 'lucide-react';
+import { clsx } from 'clsx';
+import type { PortfolioNavSeries, PortfolioSnapshot, PortfolioStrategyItem } from '../types';
+import {
   fetchPortfolioNav,
+  fetchPortfolioSnapshot,
+  fetchPortfolioStrategies,
+  refreshPortfolioStrategy,
 } from '../utils';
-import { stateTone, buildAssetRows, fmtDate, fmtPct, fmtNum } from '../portfolioStrategies.js';
+import { buildAssetRows, fmtDate, fmtNum, fmtPct, stateTone } from '../portfolioStrategies.js';
 
-function Panel({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+const PRIMARY_ORDER = [
+  'risk_parity_core_next_open',
+  'core90_ma200_bull10',
+  'theme_alpha',
+  'btc_supertrend_satellite',
+];
+
+const EMPTY_OPERATIONS: PortfolioSnapshot['operations'] = {
+  orders: [],
+  bullCandidates: [],
+  dueOrderCount: 0,
+  waitingOpenCount: 0,
+  pendingOrderCount: 0,
+  ma200AllowedCount: 0,
+  ma200BlockedCount: 0,
+  dataQualityEventCount: 0,
+  benchmark: { strategyId: 'risk_parity_core_next_open' },
+};
+
+function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <section className={clsx('rounded-2xl border border-zinc-800 bg-zinc-950/60', className)}>{children}</section>;
+}
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{children}</div>;
+}
+
+function StateBadge({ state }: { state: string }) {
+  const status = stateTone(state);
   return (
-    <div className={clsx('glass-card rounded-xl p-4 border border-zinc-800/50', className)}>
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">{title}</h3>
-      {children}
-    </div>
+    <span className={clsx(
+      'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+      status.tone === 'positive' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
+      status.tone === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+      status.tone === 'danger' && 'border-red-500/30 bg-red-500/10 text-red-400',
+      status.tone === 'info' && 'border-sky-500/30 bg-sky-500/10 text-sky-400',
+      status.tone === 'neutral' && 'border-zinc-700 bg-zinc-800/60 text-zinc-400',
+    )}>{status.label}</span>
   );
 }
 
-function StatusBadge({ state }: { state: string }) {
-  const { tone, label } = stateTone(state);
-  const colors: Record<string, string> = {
-    positive: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
-    neutral: 'bg-zinc-700/60 border-zinc-600 text-zinc-300',
-    warning: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
-    danger: 'bg-red-500/10 border-red-500/30 text-red-400',
-    info: 'bg-sky-500/10 border-sky-500/30 text-sky-400',
-  };
+function Metric({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' | 'warn' }) {
   return (
-    <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border', colors[tone] || colors.neutral)}>
-      {tone === 'positive' && <CheckCircle2 size={10} />}
-      {tone === 'warning' && <Clock size={10} />}
-      {tone === 'danger' && <XCircle size={10} />}
-      {tone === 'info' && <AlertTriangle size={10} />}
-      {label}
-    </span>
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-600">{label}</div>
+      <div className={clsx(
+        'mt-1 font-mono text-xl font-semibold tabular-nums text-zinc-100',
+        tone === 'good' && 'text-emerald-400',
+        tone === 'bad' && 'text-red-400',
+        tone === 'warn' && 'text-amber-300',
+      )}>{value}</div>
+    </div>
   );
 }
 
 export default function PortfolioStrategiesPage() {
   const [strategies, setStrategies] = useState<PortfolioStrategyItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>('btc_supertrend_satellite');
-  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [snapshots, setSnapshots] = useState<Record<string, PortfolioSnapshot>>({});
+  const [selectedId, setSelectedId] = useState(PRIMARY_ORDER[0]);
   const [navSeries, setNavSeries] = useState<PortfolioNavSeries | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAllAssets, setShowAllAssets] = useState(false);
+  const [showAssets, setShowAssets] = useState(false);
+  const [showNav, setShowNav] = useState(false);
 
-  const loadStrategies = useCallback(async () => {
+  const loadPage = useCallback(async () => {
     setLoading(true);
-    const list = await fetchPortfolioStrategies();
-    setStrategies(list);
-    setLoading(false);
-  }, []);
-
-  const loadSnapshot = useCallback(async (id: string) => {
-    const snap = await fetchPortfolioSnapshot(id);
-    setSnapshot(snap);
-  }, []);
-
-  const loadNav = useCallback(async (id: string) => {
-    const nav = await fetchPortfolioNav(id);
-    setNavSeries(nav);
-  }, []);
-
-  useEffect(() => {
-    loadStrategies();
-  }, [loadStrategies]);
-
-  useEffect(() => {
-    if (selectedId) {
-      loadSnapshot(selectedId);
-      loadNav(selectedId);
-      setError(null);
+    setError(null);
+    try {
+      const list = await fetchPortfolioStrategies();
+      const orderedPrimary = list
+        .filter(item => item.isPrimary || PRIMARY_ORDER.includes(item.strategyId))
+        .sort((a, b) => PRIMARY_ORDER.indexOf(a.strategyId) - PRIMARY_ORDER.indexOf(b.strategyId));
+      setStrategies(list);
+      setSelectedId(current => orderedPrimary.some(item => item.strategyId === current)
+        ? current
+        : (orderedPrimary[0]?.strategyId || PRIMARY_ORDER[0]));
+      const entries = await Promise.all(orderedPrimary.filter(item => item.paperEnabled).map(async item => {
+        try {
+          return [item.strategyId, await fetchPortfolioSnapshot(item.strategyId)] as const;
+        } catch {
+          return null;
+        }
+      }));
+      setSnapshots(Object.fromEntries(entries.filter((entry): entry is readonly [string, PortfolioSnapshot] => entry !== null)));
+    } catch {
+      setError('组合数据加载失败，请检查后端服务。');
+    } finally {
+      setLoading(false);
     }
-  }, [selectedId, loadSnapshot, loadNav]);
+  }, []);
+
+  useEffect(() => { void loadPage(); }, [loadPage]);
+
+  useEffect(() => {
+    let active = true;
+    fetchPortfolioNav(selectedId)
+      .then(value => { if (active) setNavSeries(value); })
+      .catch(() => { if (active) setNavSeries(null); });
+    return () => { active = false; };
+  }, [selectedId]);
+
+  const primary = useMemo(() => strategies
+    .filter(item => item.isPrimary || PRIMARY_ORDER.includes(item.strategyId))
+    .sort((a, b) => PRIMARY_ORDER.indexOf(a.strategyId) - PRIMARY_ORDER.indexOf(b.strategyId)), [strategies]);
+  const comparisons = strategies.filter(item => !item.isPrimary && !PRIMARY_ORDER.includes(item.strategyId));
+  const snapshot = snapshots[selectedId] || null;
+  const strategy = strategies.find(item => item.strategyId === selectedId);
+  const operations = snapshot?.operations || EMPTY_OPERATIONS;
+  const allOrders = primary.flatMap(item => (snapshots[item.strategyId]?.operations || EMPTY_OPERATIONS).orders
+    .map(order => ({ ...order, strategyName: item.displayName })));
+  const urgentOrders = allOrders.filter(order => order.due || order.status === 'PENDING' || order.status === 'DELAYED');
+  const totalDue = primary.reduce((sum, item) => sum + (snapshots[item.strategyId]?.operations?.dueOrderCount || 0), 0);
+  const totalWaiting = primary.reduce((sum, item) => sum + (snapshots[item.strategyId]?.operations?.waitingOpenCount || 0), 0);
+  const totalAnomalies = primary.reduce((sum, item) => {
+    const snap = snapshots[item.strategyId];
+    return sum + (snap?.diagnostics.length || 0) + (snap?.operations?.dataQualityEventCount || 0);
+  }, 0);
+  const navPoints = navSeries?.points || [];
+  const latestNav = navPoints.at(-1);
+  const assetRows = snapshot ? buildAssetRows(snapshot) : [];
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
-    const snap = await refreshPortfolioStrategy(selectedId);
-    if (snap) {
-      setSnapshot(snap);
-      const nav = await fetchPortfolioNav(selectedId);
-      setNavSeries(nav);
-    } else {
-      setError('刷新失败');
+    try {
+      const next = await refreshPortfolioStrategy(selectedId);
+      if (!next) throw new Error('refresh failed');
+      setSnapshots(current => ({ ...current, [selectedId]: next }));
+      setNavSeries(await fetchPortfolioNav(selectedId));
+    } catch {
+      setError('刷新失败；未写入重复信号或订单。');
+    } finally {
+      setRefreshing(false);
     }
-    setRefreshing(false);
   }, [selectedId]);
 
-  const handleStrategyChange = useCallback((id: string) => {
-    setSelectedId(id);
-    setShowAllAssets(false);
-  }, []);
+  const aliasMap = Object.fromEntries((snapshot?.assets || []).map(asset => [asset.symbol, asset.alias]));
+  const symbolLabel = (symbol: string) => aliasMap[symbol] ? `${symbol} · ${aliasMap[symbol]}` : symbol;
 
-  const paperStrategies = strategies.filter(s => s.paperEnabled);
-  const assetRows = snapshot ? buildAssetRows(snapshot) : [];
-  const navPoints = navSeries?.points || [];
-  const latestNav = navPoints.length > 0 ? navPoints[navPoints.length - 1] : null;
-  const initialNav = strategies.find(s => s.strategyId === selectedId)?.initialNav || 100000;
-
-  const aliasMap: Record<string, string> = {};
-  if (snapshot?.assets) {
-    for (const a of snapshot.assets) {
-      aliasMap[a.symbol] = a.alias;
-    }
+  if (loading) {
+    return <main className="mx-auto max-w-7xl px-4 py-6"><div className="h-48 animate-pulse rounded-2xl border border-zinc-800 bg-zinc-900/40" /></main>;
   }
-  const symbolLabel = (sym: string) => aliasMap[sym] ? `${sym} (${aliasMap[sym]})` : sym;
 
   return (
-    <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold text-zinc-100">组合策略</h2>
-          {snapshot && <StatusBadge state={snapshot.state} />}
+    <main className="mx-auto max-w-7xl px-3 py-5 sm:px-5 sm:py-7">
+      <header className="mb-5 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Eyebrow>Daily paper execution</Eyebrow>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100">组合策略执行台</h1>
+          <p className="mt-1 text-xs text-zinc-500">冻结规则 · 样本外跟踪 · 无真实下单</p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Strategy selector */}
-          <select
-            value={selectedId}
-            onChange={e => handleStrategyChange(e.target.value)}
-            className="input-glass rounded-xl px-3 py-2 text-xs font-medium focus:outline-none border border-zinc-700/60 bg-zinc-900 text-zinc-200"
-          >
-            {paperStrategies.map(s => (
-              <option key={s.strategyId} value={s.strategyId}>
-                {s.displayName} {s.bootstrapped ? '' : '(未初始化)'}
-              </option>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing || !snapshot}
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:opacity-40"
+        >
+          <RefreshCw size={14} strokeWidth={1.5} className={clsx(refreshing && 'animate-spin')} />
+          刷新当前策略
+        </button>
+      </header>
+
+      {error && <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{error}</div>}
+
+      <Card className="mb-4 overflow-hidden">
+        <div className="border-b border-zinc-800 px-4 py-3 sm:px-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <Eyebrow>Execution first</Eyebrow>
+              <h2 className="mt-1 text-sm font-semibold text-zinc-200">今日执行与等待队列</h2>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <span className={clsx('font-mono', totalDue ? 'text-amber-300' : 'text-zinc-500')}>今日 {totalDue}</span>
+              <span className={clsx('font-mono', totalWaiting ? 'text-sky-300' : 'text-zinc-500')}>等待 Open {totalWaiting}</span>
+              <span className={clsx('hidden font-mono sm:inline', totalAnomalies ? 'text-red-400' : 'text-emerald-400')}>异常 {totalAnomalies}</span>
+            </div>
+          </div>
+        </div>
+        {urgentOrders.length ? (
+          <div className="divide-y divide-zinc-800">
+            {urgentOrders.map(order => (
+              <div key={`${order.strategyName}-${order.orderId}`} className="grid gap-2 px-4 py-3 text-xs sm:grid-cols-[1.4fr_.8fr_.8fr_1fr] sm:items-center sm:px-5">
+                <div><div className="font-medium text-zinc-200">{order.symbol} · {order.side}</div><div className="mt-0.5 text-[10px] text-zinc-600">{order.strategyName}</div></div>
+                <div className="font-mono text-zinc-400">预期 {fmtDate(order.expectedExecutionDate)}</div>
+                <div className="font-mono text-zinc-400">下次 {fmtDate(order.nextAttemptDate)}</div>
+                <div className={clsx('sm:text-right', order.due ? 'text-amber-300' : 'text-sky-300')}>{order.delayReason || order.status}</div>
+              </div>
             ))}
-          </select>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="btn-glass px-3 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-emerald-400 border border-zinc-700/60 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <RefreshCw size={14} className={clsx(refreshing && 'animate-spin')} />
-            刷新
-          </button>
-        </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 px-5 py-5 text-xs text-emerald-400"><CheckCircle2 size={14} strokeWidth={1.5} />当前没有需要执行或等待 Open 的订单</div>
+        )}
+      </Card>
+
+      <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {primary.map(item => {
+          const snap = snapshots[item.strategyId];
+          const ops = snap?.operations || EMPTY_OPERATIONS;
+          const selected = item.strategyId === selectedId;
+          return (
+            <button
+              key={item.strategyId}
+              onClick={() => { setSelectedId(item.strategyId); setShowAssets(false); setShowNav(false); }}
+              className={clsx(
+                'min-h-28 rounded-2xl border p-4 text-left transition-colors',
+                selected ? 'border-emerald-500/50 bg-emerald-500/[0.06]' : 'border-zinc-800 bg-zinc-950/60 hover:border-zinc-700',
+              )}
+            >
+              <div className="flex items-start justify-between gap-2"><span className="text-xs font-semibold leading-5 text-zinc-200">{item.displayName}</span><StateBadge state={snap?.state || (item.bootstrapped ? 'READY' : 'EMPTY')} /></div>
+              <div className="mt-4 flex gap-4 font-mono text-[10px] text-zinc-500"><span>订单 {ops.pendingOrderCount}</span><span>敞口 {fmtPct(ops.grossExposure, 0)}</span></div>
+            </button>
+          );
+        })}
       </div>
 
-      {error && (
-        <div className="mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
-          {error}
-        </div>
-      )}
-
-      {loading && !snapshot && (
-        <div className="text-zinc-500 text-sm p-12 text-center">加载中...</div>
-      )}
-
-      {snapshot && (
-        <>
-          {/* Nine-panel grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-            {/* Panel 1: Dates */}
-            <Panel title="日期">
-              <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">行情日期</span>
-                  <span className="text-zinc-200 font-mono">{fmtDate(snapshot.dates.marketDataDate)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">信号日期</span>
-                  <span className="text-zinc-200 font-mono">{fmtDate(snapshot.dates.signalDate)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">执行日期</span>
-                  <span className="text-zinc-200 font-mono">{fmtDate(snapshot.dates.executionDate)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">下次检查</span>
-                  <span className="text-zinc-200 font-mono">{fmtDate(snapshot.dates.nextCheck)}</span>
-                </div>
+      {snapshot ? (
+        <div className="grid gap-4 lg:grid-cols-[1.55fr_.85fr]">
+          <div className="space-y-4">
+            <Card className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><Eyebrow>Selected portfolio</Eyebrow><h2 className="mt-1 text-xl font-semibold text-zinc-100">{strategy?.displayName}</h2><p className="mt-1 max-w-xl text-xs leading-5 text-zinc-500">{strategy?.description}</p></div>
+                <div className="text-right"><div className="font-mono text-[10px] text-zinc-600">{snapshot.strategyVersion}</div><div className="mt-1"><StateBadge state={snapshot.state} /></div></div>
               </div>
-            </Panel>
+              <div className="mt-6 grid grid-cols-2 gap-5 border-t border-zinc-800 pt-5 sm:grid-cols-4">
+                <Metric label="NAV" value={fmtNum(snapshot.nav.netNav ?? latestNav?.netNav, 2)} />
+                <Metric label="累计收益" value={fmtPct(snapshot.nav.cumulativeReturn ?? latestNav?.cumulativeReturn)} tone={(snapshot.nav.cumulativeReturn ?? 0) >= 0 ? 'good' : 'bad'} />
+                <Metric label="回撤" value={fmtPct(snapshot.nav.drawdown ?? latestNav?.drawdown)} tone="bad" />
+                <Metric label="相对 RiskParity" value={fmtPct(operations.benchmark.relativeReturn)} tone={(operations.benchmark.relativeReturn ?? 0) >= 0 ? 'good' : 'bad'} />
+              </div>
+            </Card>
 
-            {/* Panel 2: Diagnostics */}
-            <Panel title="数据诊断">
-              {snapshot.diagnostics.length === 0 ? (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                  <CheckCircle2 size={12} />
-                  数据正常
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {snapshot.diagnostics.map((d, i) => (
-                    <div key={i} className={clsx(
-                      'text-xs px-2 py-1.5 rounded-lg border',
-                      d.code.startsWith('BLOCKED')
-                        ? 'bg-red-500/5 border-red-500/20 text-red-400'
-                        : 'bg-amber-500/5 border-amber-500/20 text-amber-400'
-                    )}>
-                      <div className="font-semibold">{d.code}</div>
-                      <div className="text-zinc-500 mt-0.5">{d.message}</div>
-                      {d.symbol && <div className="text-zinc-600 font-mono mt-0.5">{d.symbol}</div>}
+            <Card>
+              <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3"><div><Eyebrow>Holdings</Eyebrow><h3 className="mt-1 text-sm font-semibold text-zinc-200">当前持仓与现金</h3></div><span className="font-mono text-xs text-zinc-400">总敞口 {fmtPct(operations.grossExposure)}</span></div>
+              {snapshot.currentWeights.length ? (
+                <div className="divide-y divide-zinc-800/70">
+                  {snapshot.currentWeights.filter(position => position.weight > .0001 || position.symbol === 'CASH').sort((a, b) => b.weight - a.weight).map((position, index) => (
+                    <div key={`${position.sleeve}-${position.symbol}-${index}`} className="grid grid-cols-[1fr_auto] items-center gap-4 px-5 py-3 text-xs">
+                      <div><div className="font-mono text-zinc-200">{symbolLabel(position.symbol)}</div><div className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-600">{position.sleeve || 'portfolio'}</div></div>
+                      <div className="text-right"><div className="font-mono font-semibold text-zinc-200">{fmtPct(position.weight)}</div><div className="mt-0.5 font-mono text-[10px] text-zinc-600">{fmtNum(position.value, 0)}</div></div>
                     </div>
                   ))}
                 </div>
-              )}
-            </Panel>
+              ) : <div className="px-5 py-8 text-xs text-zinc-600">尚无纸面持仓</div>}
+            </Card>
 
-            {/* Panel 3: Signal */}
-            <Panel title="信号状态">
-              {snapshot.observation.reason ? (
-                <div className="space-y-1.5 text-xs">
-                  <div className="text-zinc-200">{snapshot.observation.reason}</div>
-                  {snapshot.observation.values && Object.keys(snapshot.observation.values).length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-zinc-800">
-                      {Object.entries(snapshot.observation.values).map(([key, val]) => (
-                        <div key={key} className="flex justify-between text-[11px]">
-                          <span className="text-zinc-500 font-mono">{key}</span>
-                          <span className="text-zinc-300 font-mono">
-                            {typeof val === 'boolean' ? (val ? 'ON' : 'OFF') : typeof val === 'number' ? fmtNum(val, 4) : String(val)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-xs text-amber-400">
-                  <AlertTriangle size={12} />
-                  {snapshot.calcError || '无信号'}
-                </div>
-              )}
-            </Panel>
+            <Card className="overflow-hidden">
+              <button onClick={() => setShowAssets(value => !value)} className="flex w-full items-center justify-between px-5 py-4 text-left"><div><Eyebrow>Allocation audit</Eyebrow><div className="mt-1 text-sm font-semibold text-zinc-200">当前与目标权重 · {assetRows.length} 项</div></div>{showAssets ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+              {showAssets && <div className="overflow-x-auto border-t border-zinc-800"><table className="w-full min-w-[620px] text-xs"><thead className="bg-zinc-900/70 text-[10px] uppercase tracking-wider text-zinc-600"><tr><th className="px-5 py-2 text-left">资产</th><th className="px-3 py-2 text-left">模块</th><th className="px-3 py-2 text-right">当前</th><th className="px-3 py-2 text-right">目标</th><th className="px-5 py-2 text-right">差异</th></tr></thead><tbody>{assetRows.map(row => <tr key={`${row.sleeve}-${row.symbol}`} className="border-t border-zinc-800/70"><td className="px-5 py-3 font-mono text-zinc-300">{symbolLabel(row.symbol)}</td><td className="px-3 py-3 text-zinc-500">{row.sleeve}</td><td className="px-3 py-3 text-right font-mono text-zinc-400">{fmtPct(row.currentWeight)}</td><td className="px-3 py-3 text-right font-mono text-zinc-300">{fmtPct(row.desiredWeight)}</td><td className={clsx('px-5 py-3 text-right font-mono', row.delta > 0 ? 'text-emerald-400' : row.delta < 0 ? 'text-red-400' : 'text-zinc-600')}>{row.delta > 0 ? '+' : ''}{fmtPct(row.delta)}</td></tr>)}</tbody></table></div>}
+            </Card>
 
-            {/* Panel 4: Current Holdings */}
-            <Panel title="当前持仓">
-              {snapshot.currentWeights.length === 0 ? (
-                <div className="text-xs text-zinc-600">无持仓</div>
-              ) : (
-                <div className="space-y-1">
-                  {snapshot.currentWeights
-                    .filter(p => p.weight > 0.001 || p.symbol === 'CASH')
-                    .sort((a, b) => b.weight - a.weight)
-                    .map(p => (
-                      <div key={p.symbol} className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-300 font-mono text-[11px]">{symbolLabel(p.symbol)}</span>
-                        <div className="flex items-center gap-2">
-                          {p.price != null && (
-                            <span className="text-zinc-600 font-mono text-[10px]">{fmtNum(p.price)}</span>
-                          )}
-                          <span className="text-zinc-200 font-mono font-semibold">{fmtPct(p.weight, 1)}</span>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </Panel>
-
-            {/* Panel 5: Target Weights */}
-            <Panel title="目标权重">
-              {snapshot.desiredWeights.length === 0 ? (
-                <div className="text-xs text-zinc-600">无目标</div>
-              ) : (
-                <div className="space-y-1">
-                  {snapshot.desiredWeights.map(w => (
-                    <div key={w.symbol} className="flex items-center justify-between text-xs">
-                      <div>
-                        <span className="text-zinc-300 font-mono text-[11px]">{symbolLabel(w.symbol)}</span>
-                        <span className="text-zinc-600 ml-1.5 text-[10px]">{w.sleeve}</span>
-                      </div>
-                      <span className="text-zinc-200 font-mono font-semibold">{fmtPct(w.weight, 1)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Panel>
-
-            {/* Panel 6: Rebalance Diff */}
-            <Panel title="调仓差异">
-              {assetRows.length === 0 ? (
-                <div className="text-xs text-zinc-600">无差异</div>
-              ) : (
-                <div className="space-y-1">
-                  {assetRows
-                    .filter(r => Math.abs(r.delta) > 0.0001)
-                    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-                    .slice(0, 6)
-                    .map(r => (
-                      <div key={r.symbol} className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-300 font-mono text-[11px]">{symbolLabel(r.symbol)}</span>
-                        <span className={clsx(
-                          'font-mono font-semibold',
-                          r.delta > 0 ? 'text-emerald-400' : r.delta < 0 ? 'text-red-400' : 'text-zinc-600'
-                        )}>
-                          {r.delta > 0 ? '+' : ''}{fmtPct(r.delta, 2)}
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </Panel>
-
-            {/* Panel 7: NAV */}
-            <Panel title="净值 & 回撤">
-              {latestNav ? (
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">净值</span>
-                    <span className="text-zinc-200 font-mono font-semibold">{fmtNum(latestNav.netNav, 2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">现金</span>
-                    <span className="text-zinc-200 font-mono">{fmtNum(latestNav.cash, 2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">累计收益</span>
-                    <span className={clsx(
-                      'font-mono font-semibold',
-                      latestNav.cumulativeReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
-                    )}>
-                      {fmtPct(latestNav.cumulativeReturn, 2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">最大回撤</span>
-                    <span className="text-red-400 font-mono font-semibold">{fmtPct(latestNav.drawdown, 2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">初始资金</span>
-                    <span className="text-zinc-400 font-mono">{fmtNum(initialNav, 0)}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-zinc-600">无净值数据</div>
-              )}
-            </Panel>
-
-            {/* Panel 8: Ledger Summary */}
-            <Panel title="最近账本">
-              <div className="text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">状态</span>
-                  <span className="text-zinc-200">{snapshot.ledger.status}</span>
-                </div>
-                {snapshot.ledger.signalDate && (
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">信号日</span>
-                    <span className="text-zinc-200 font-mono">{fmtDate(snapshot.ledger.signalDate)}</span>
-                  </div>
-                )}
-              </div>
-            </Panel>
-
-            {/* Panel 9: Next Check */}
-            <Panel title="下次检查 & 状态">
-              <div className="space-y-2 text-xs">
-                {snapshot.dates.nextCheck ? (
-                  <div className="flex items-center gap-1.5 text-emerald-400">
-                    <Clock size={12} />
-                    <span className="font-mono">{fmtDate(snapshot.dates.nextCheck)}</span>
-                  </div>
-                ) : (
-                  <div className="text-zinc-600">待定</div>
-                )}
-                {snapshot.ledger.status === 'pending' && (
-                  <div className="flex items-center gap-1.5 text-amber-400">
-                    <AlertTriangle size={12} />
-                    待执行调仓
-                  </div>
-                )}
-                {snapshot.state === 'BLOCKED' && (
-                  <div className="flex items-center gap-1.5 text-red-400">
-                    <XCircle size={12} />
-                    数据阻塞，无法调仓
-                  </div>
-                )}
-              </div>
-            </Panel>
+            {navPoints.length > 1 && <Card className="overflow-hidden"><button onClick={() => setShowNav(value => !value)} className="flex w-full items-center justify-between px-5 py-4 text-left"><div><Eyebrow>Ledger series</Eyebrow><div className="mt-1 text-sm font-semibold text-zinc-200">净值历史 · {navPoints.length} 条</div></div>{showNav ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>{showNav && <div className="max-h-72 overflow-auto border-t border-zinc-800"><table className="w-full text-xs"><thead className="sticky top-0 bg-zinc-950 text-zinc-600"><tr><th className="px-5 py-2 text-left">日期</th><th className="px-3 py-2 text-right">NAV</th><th className="px-3 py-2 text-right">日收益</th><th className="px-5 py-2 text-right">回撤</th></tr></thead><tbody>{navPoints.map(point => <tr key={point.valuationDate} className="border-t border-zinc-800/70"><td className="px-5 py-2 font-mono text-zinc-400">{point.valuationDate}</td><td className="px-3 py-2 text-right font-mono text-zinc-300">{fmtNum(point.netNav)}</td><td className={clsx('px-3 py-2 text-right font-mono', point.dailyReturn >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmtPct(point.dailyReturn)}</td><td className="px-5 py-2 text-right font-mono text-red-400">{fmtPct(point.drawdown)}</td></tr>)}</tbody></table></div>}</Card>}
           </div>
 
-          {/* Expanded asset table */}
-          {assetRows.length > 0 && (
-            <div className="glass-card rounded-xl border border-zinc-800/50 overflow-hidden">
-              <button
-                onClick={() => setShowAllAssets(!showAllAssets)}
-                className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
-              >
-                <span>全部资产 ({assetRows.length})</span>
-                {showAllAssets ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-              {showAllAssets && (
-                <div className="overflow-x-auto border-t border-zinc-800/50">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-zinc-900/50 text-zinc-500">
-                        <th className="text-left px-4 py-2 font-medium">标的</th>
-                        <th className="text-left px-4 py-2 font-medium">模块</th>
-                        <th className="text-right px-4 py-2 font-medium">当前权重</th>
-                        <th className="text-right px-4 py-2 font-medium">目标权重</th>
-                        <th className="text-right px-4 py-2 font-medium">差异</th>
-                        <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">原因</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {assetRows.map(r => (
-                        <tr key={r.symbol} className="border-t border-zinc-800/30 hover:bg-zinc-800/20">
-                          <td className="px-4 py-2 font-mono text-zinc-300">{symbolLabel(r.symbol)}</td>
-                          <td className="px-4 py-2 text-zinc-500">{r.sleeve}</td>
-                          <td className="px-4 py-2 text-right font-mono text-zinc-300">{fmtPct(r.currentWeight, 1)}</td>
-                          <td className="px-4 py-2 text-right font-mono text-zinc-300">{fmtPct(r.desiredWeight, 1)}</td>
-                          <td className={clsx(
-                            'px-4 py-2 text-right font-mono font-semibold',
-                            r.delta > 0.001 ? 'text-emerald-400' : r.delta < -0.001 ? 'text-red-400' : 'text-zinc-600'
-                          )}>
-                            {r.delta > 0 ? '+' : ''}{fmtPct(r.delta, 2)}
-                          </td>
-                          <td className="px-4 py-2 text-zinc-500 hidden sm:table-cell max-w-48 truncate">{r.reason}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* BTC proxy warning */}
-          {selectedId.startsWith('btc') && (
-            <div className="mt-3 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/15 text-amber-400/80 text-[10px] flex items-center gap-1.5">
-              <AlertTriangle size={11} />
-              BTC-USD 为合成收益代理，本阶段不建模 CNY/USD 兑换。纸面仓位不代表可直接投资的 CNY 产品。
-            </div>
-          )}
-
-          {/* NAV History mini table */}
-          {navPoints.length > 1 && (
-            <div className="glass-card rounded-xl border border-zinc-800/50 mt-4 p-4">
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">净值历史 ({navPoints.length} 条)</h3>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto">
-                <table className="w-full text-[10px]">
-                  <thead className="sticky top-0 bg-zinc-950 text-zinc-500">
-                    <tr>
-                      <th className="text-left px-2 py-1 font-medium">日期</th>
-                      <th className="text-right px-2 py-1 font-medium">净值</th>
-                      <th className="text-right px-2 py-1 font-medium">日收益</th>
-                      <th className="text-right px-2 py-1 font-medium">累计收益</th>
-                      <th className="text-right px-2 py-1 font-medium">回撤</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {navPoints.map((p, i) => (
-                      <tr key={i} className="border-t border-zinc-800/20 hover:bg-zinc-800/20">
-                        <td className="px-2 py-1 font-mono text-zinc-400">{p.valuationDate}</td>
-                        <td className="px-2 py-1 text-right font-mono text-zinc-300">{fmtNum(p.netNav, 2)}</td>
-                        <td className={clsx('px-2 py-1 text-right font-mono', p.dailyReturn >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                          {fmtPct(p.dailyReturn, 2)}
-                        </td>
-                        <td className={clsx('px-2 py-1 text-right font-mono', p.cumulativeReturn >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                          {fmtPct(p.cumulativeReturn, 2)}
-                        </td>
-                        <td className="px-2 py-1 text-right font-mono text-red-400/80">{fmtPct(p.drawdown, 2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <aside className="space-y-4">
+            <Card className="p-5">
+              <Eyebrow>Bull flip gate</Eyebrow>
+              <h3 className="mt-1 text-sm font-semibold text-zinc-200">今日候选与 MA200</h3>
+              <div className="mt-4 grid grid-cols-3 gap-3"><Metric label="候选" value={String(operations.bullCandidates.length)} /><Metric label="允许" value={String(operations.ma200AllowedCount)} tone="good" /><Metric label="拦截" value={String(operations.ma200BlockedCount)} tone={operations.ma200BlockedCount ? 'warn' : undefined} /></div>
+              <div className="mt-4 space-y-2">
+                {operations.bullCandidates.slice(0, 8).map(candidate => (
+                  <div key={`${candidate.symbol}-${candidate.signalDate}`} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs">
+                    <div className="flex items-center justify-between"><span className="font-mono font-semibold text-zinc-200">{candidate.symbol}</span><span className={candidate.eligible ? 'text-emerald-400' : 'text-amber-300'}>{candidate.eligible ? 'MA200 允许' : 'MA200 拦截'}</span></div>
+                    <div className="mt-1 text-[10px] leading-4 text-zinc-600">{candidate.gateReason || candidate.reason}</div>
+                  </div>
+                ))}
+                {!operations.bullCandidates.length && <div className="py-3 text-xs text-zinc-600">今日没有 bull flip 候选</div>}
               </div>
-            </div>
-          )}
-        </>
+            </Card>
+
+            <Card className="p-5">
+              <Eyebrow>Audit status</Eyebrow>
+              <h3 className="mt-1 text-sm font-semibold text-zinc-200">日期与异常</h3>
+              <dl className="mt-4 space-y-2 text-xs">
+                {[['行情日期', snapshot.dates.marketDataDate], ['信号日期', snapshot.dates.signalDate], ['下次检查', snapshot.dates.nextCheck]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-zinc-600">{label}</dt><dd className="font-mono text-zinc-300">{fmtDate(value)}</dd></div>)}
+                <div className="flex justify-between gap-4"><dt className="text-zinc-600">数据质量事件</dt><dd className={clsx('font-mono', operations.dataQualityEventCount ? 'text-red-400' : 'text-emerald-400')}>{operations.dataQualityEventCount}</dd></div>
+              </dl>
+              {snapshot.diagnostics.length ? <div className="mt-4 space-y-2">{snapshot.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.code}-${index}`} className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3 text-xs"><div className="font-mono text-red-400">{diagnostic.code}</div><div className="mt-1 leading-4 text-zinc-500">{diagnostic.message}</div></div>)}</div> : <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400"><CheckCircle2 size={14} strokeWidth={1.5} />未发现策略诊断异常</div>}
+            </Card>
+
+            <Card className="p-5">
+              <Eyebrow>Deterministic output</Eyebrow>
+              <div className="mt-3 space-y-2 text-xs leading-5 text-zinc-500">
+                <div className="flex gap-2"><Clock3 size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-sky-400" /><span>订单只按各标的下一有效 Open 执行；缺失 Open 会继续等待。</span></div>
+                <div className="flex gap-2"><AlertTriangle size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-amber-300" /><span>页面解释冻结规则输出，不修改信号、参数或仓位。</span></div>
+              </div>
+            </Card>
+          </aside>
+        </div>
+      ) : <Card className="p-10 text-center text-sm text-zinc-500">该策略尚无账户快照；不会自动 bootstrap。</Card>}
+
+      {comparisons.length > 0 && (
+        <section className="mt-7 border-t border-zinc-800 pt-5">
+          <Eyebrow>Comparison only</Eyebrow>
+          <h2 className="mt-1 text-sm font-semibold text-zinc-300">影子对照</h2>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{comparisons.map(item => <div key={item.strategyId} className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-3"><div className="flex items-center justify-between gap-3"><span className="text-xs font-medium text-zinc-400">{item.displayName}</span><span className="text-[10px] uppercase tracking-wider text-zinc-600">comparison</span></div><p className="mt-1 text-[10px] leading-4 text-zinc-600">{item.description}</p></div>)}</div>
+        </section>
       )}
 
-      {!loading && !snapshot && !error && (
-        <div className="glass-card rounded-2xl p-12 text-center">
-          <div className="text-zinc-500 text-sm font-medium mb-1">暂无数据</div>
-          <div className="text-zinc-700 text-xs">点击"刷新"加载最新组合策略数据</div>
-        </div>
-      )}
+      {selectedId.startsWith('btc') && <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3 text-[10px] leading-4 text-amber-300/80"><AlertTriangle size={13} strokeWidth={1.5} className="mt-0.5 shrink-0" />BTC-USD 是收益代理，不建模 CNY/USD 兑换；纸面仓位不代表可直接投资产品。</div>}
     </main>
   );
 }

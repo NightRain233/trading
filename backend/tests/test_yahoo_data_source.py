@@ -85,6 +85,11 @@ def test_yahoo_batch_uses_guard_with_deterministic_key(tmp_path):
     weekly = downloaded.assign(MACD_W=0.0)
     calculated = downloaded.assign(EMA5=100.0, EMA20=100.0)
 
+    # Earlier full-suite tests may leave SPY in the process-wide memory cache.
+    # This case exercises the download path, so isolate it from that shared state.
+    with analysis._memory_cache_lock:
+        analysis._memory_cache.pop("SPY", None)
+
     with patch.object(
         analysis,
         "DATA_DIR",

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from pathlib import Path
-from collections.abc import Callable, Mapping
+import math
+import json
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+import exchange_calendars as xcals
 
 from .btc_satellite import calculate_btc_satellite
 from .ledger import PortfolioLedger, connect
@@ -23,6 +27,21 @@ from .models import (
     TargetWeight,
 )
 from .paper_engine import PaperAccountNotFoundError, PortfolioPaperEngine
+from .event_ledger import EventPortfolioLedger, payload_hash
+from .frozen_xquant import (
+    evaluate_universe_snapshot,
+    frozen_membership_snapshot,
+    frozen_universe,
+)
+from .next_open_data import load_next_open_frames
+from .next_open_engine import NextOpenPaperEngine
+from .next_open_strategies import (
+    CORE_SYMBOLS,
+    calculate_bull_decision,
+    calculate_risk_parity_decision,
+    core_common_sessions,
+    core_signal_due,
+)
 from .registry import (
     ComparisonStrategyError,
     UnknownStrategyError,
@@ -68,16 +87,26 @@ class PortfolioStrategyService:
         db_path: Path | str = "backtest_results/portfolio_paper.sqlite",
         *,
         refresh_fn: Callable | None = None,
+        decision_provider: Callable[[Sequence[str]], Mapping[str, Any]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ):
         self.data_dir = Path(data_dir)
         self.db_path = Path(db_path)
         self.ledger = PortfolioLedger(self.db_path)
         self.engine = PortfolioPaperEngine(self.ledger)
+        self.next_open_engine = NextOpenPaperEngine(self.ledger)
+        self.events = EventPortfolioLedger(self.ledger)
         self._refresh_fn = refresh_fn
+        self._decision_provider = decision_provider
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def list_strategies(self) -> list[dict[str, Any]]:
+        primary_ids = {
+            "risk_parity_core_next_open",
+            "core90_ma200_bull10",
+            "theme_alpha",
+            "btc_supertrend_satellite",
+        }
         result = []
         for config in list_strategies():
             entry: dict[str, Any] = {
@@ -90,6 +119,12 @@ class PortfolioStrategyService:
                 "baseCurrency": config.base_currency,
                 "initialNav": config.initial_nav,
                 "paperEnabled": config.mode == StrategyMode.PAPER,
+                "presentationGroup": "primary" if config.strategy_id in primary_ids else "comparison",
+                "isPrimary": config.strategy_id in primary_ids,
+                "benchmarkStrategyId": (
+                    None if config.strategy_id == "risk_parity_core_next_open"
+                    else "risk_parity_core_next_open"
+                ),
             }
             account = self.ledger.get_account(config) if config.mode == StrategyMode.PAPER else None
             entry["bootstrapped"] = account is not None
@@ -98,6 +133,88 @@ class PortfolioStrategyService:
                 entry["bootstrapValuationDate"] = account["bootstrap_valuation_date"]
             result.append(entry)
         return result
+
+    def _today(self) -> date:
+        now = self._clock()
+        aware = now.replace(tzinfo=ZoneInfo("Asia/Shanghai")) if now.tzinfo is None else now
+        return aware.astimezone(ZoneInfo("Asia/Shanghai")).date()
+
+    def _benchmark_block(
+        self,
+        config: StrategyConfig,
+        *,
+        valuation_date: str | None,
+        net_nav: float | None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {"strategyId": "risk_parity_core_next_open"}
+        if valuation_date is None or net_nav is None:
+            return result
+        benchmark_config = get_strategy("risk_parity_core_next_open")
+        benchmark_account = self.ledger.get_account(benchmark_config)
+        if benchmark_account is None:
+            return result
+        conn = connect(self.db_path)
+        try:
+            benchmark = conn.execute(
+                """SELECT * FROM portfolio_nav_v2 WHERE account_id = ?
+                AND authoritative = 1 AND valuation_date <= ?
+                ORDER BY valuation_date DESC, id DESC LIMIT 1""",
+                (benchmark_account["id"], valuation_date),
+            ).fetchone()
+        finally:
+            conn.close()
+        if benchmark is None:
+            return result
+        strategy_ratio = net_nav / float(config.initial_nav)
+        benchmark_ratio = float(benchmark["net_nav"]) / float(benchmark_account["initial_nav"])
+        return {
+            "strategyId": benchmark_config.strategy_id,
+            "valuationDate": benchmark["valuation_date"],
+            "benchmarkNav": float(benchmark["net_nav"]),
+            "relativeNav": strategy_ratio / benchmark_ratio,
+            "relativeReturn": strategy_ratio / benchmark_ratio - 1.0,
+        }
+
+    def _legacy_operations(
+        self,
+        config: StrategyConfig,
+        account: Any,
+        nav: Mapping[str, Any] | None,
+        pending: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        orders: list[dict[str, Any]] = []
+        if pending is not None:
+            expected = pending.get("execution_date")
+            orders.append({
+                "orderId": -int(pending["id"]), "symbol": "BATCH",
+                "market": "XSHG", "sleeve": "portfolio",
+                "orderType": "NEXT_CLOSE_REBALANCE", "side": "REBALANCE",
+                "status": "PENDING", "signalDate": pending["signal_date"],
+                "expectedExecutionDate": expected, "nextAttemptDate": expected,
+                "due": bool(expected and expected <= self._today().isoformat()),
+            })
+        net_nav = float(nav["net_nav"]) if nav is not None else None
+        cash = float(nav["cash"]) if nav is not None else None
+        gross_exposure = (
+            max(0.0, 1.0 - cash / net_nav)
+            if net_nav and cash is not None else None
+        )
+        valuation_date = str(nav["valuation_date"]) if nav is not None else None
+        return {
+            "asOfDate": valuation_date,
+            "orders": orders,
+            "bullCandidates": [],
+            "dueOrderCount": sum(bool(order["due"]) for order in orders),
+            "waitingOpenCount": 0,
+            "pendingOrderCount": len(orders),
+            "ma200AllowedCount": 0,
+            "ma200BlockedCount": 0,
+            "grossExposure": gross_exposure,
+            "dataQualityEventCount": 0,
+            "benchmark": self._benchmark_block(
+                config, valuation_date=valuation_date, net_nav=net_nav,
+            ),
+        }
 
     def _load_market_data(self, config: StrategyConfig) -> PortfolioMarketData:
         return load_strategy_market_data(config, self.data_dir, self._clock())
@@ -112,6 +229,8 @@ class PortfolioStrategyService:
 
     def get_snapshot(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if config.execution == "next_open":
+            return self._get_next_open_snapshot(config)
         market_data = self._load_market_data(config)
         account = self.ledger.get_account(config)
 
@@ -147,6 +266,7 @@ class PortfolioStrategyService:
         nav_metrics: dict[str, Any] = {}
         ledger_summary: dict[str, Any] = {"status": "empty" if account is None else "bootstrapped"}
         pending = None
+        nav = None
 
         if account is not None:
             positions = self.ledger.latest_positions(account["id"])
@@ -170,6 +290,7 @@ class PortfolioStrategyService:
                         "quantity": float(p["quantity"]),
                         "price": float(p["price"]) if p["price"] is not None else None,
                         "value": float(p["value"]),
+                        "sleeve": "",
                     })
 
             pending = self.ledger.get_pending_rebalance(account["id"])
@@ -223,7 +344,7 @@ class PortfolioStrategyService:
             for asset in config.assets
         ]
 
-        return {
+        response = {
             "strategyId": config.strategy_id,
             "strategyVersion": config.version,
             "state": overall_state,
@@ -247,9 +368,15 @@ class PortfolioStrategyService:
             "ledger": ledger_summary,
             "calcError": calc_error,
         }
+        response["operations"] = self._legacy_operations(
+            config, account, nav, pending,
+        )
+        return response
 
     def refresh(self, strategy_id: str, now: datetime | None = None) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)
+        if config.execution == "next_open":
+            return self._refresh_next_open(config, now=now)
         effective_now = now or self._clock()
         market_data = self._refresh_and_load(config)
 
@@ -288,8 +415,501 @@ class PortfolioStrategyService:
 
         return self.get_snapshot(strategy_id)
 
+    def _next_open_frames(
+        self,
+        config: StrategyConfig,
+        *,
+        through_date: date,
+        as_of: datetime | None = None,
+    ) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+        symbols = list(config.symbols)
+        if config.strategy_id.startswith("core90_"):
+            universe = frozen_universe()
+            symbols.extend(universe.reference_symbol_by_market.values())
+        return load_next_open_frames(
+            self.data_dir, symbols, through_date=through_date, as_of=as_of,
+        )
+
+    def _active_membership(
+        self,
+        signal_date: date,
+    ) -> dict[str, dict[str, Any]]:
+        conn = connect(self.db_path)
+        try:
+            snapshot = conn.execute(
+                """
+                SELECT * FROM universe_snapshots
+                WHERE universe_id = ? AND universe_version = ?
+                  AND effective_date <= ?
+                ORDER BY effective_date DESC, id ASC LIMIT 1
+                """,
+                (
+                    frozen_universe().universe_id,
+                    frozen_universe().universe_version,
+                    signal_date.isoformat(),
+                ),
+            ).fetchone()
+            if snapshot is None:
+                return {}
+            rows = conn.execute(
+                """
+                SELECT * FROM universe_memberships
+                WHERE universe_snapshot_id = ? AND selected = 1
+                """,
+                (snapshot["id"],),
+            ).fetchall()
+            return {
+                row["symbol"]: {
+                    "effectiveDate": snapshot["effective_date"],
+                    "liquidityRank": row["liquidity_rank"],
+                }
+                for row in rows
+            }
+        finally:
+            conn.close()
+
+    def _ensure_current_universe(
+        self,
+        frames: Mapping[str, pd.DataFrame],
+        signal_date: date,
+    ) -> None:
+        universe = frozen_universe()
+        month_start = pd.Timestamp(signal_date).replace(day=1).normalize()
+        non_crypto_dates: set[pd.Timestamp] = set()
+        for symbol, frame in frames.items():
+            if universe.market_by_symbol.get(symbol) == "crypto":
+                continue
+            non_crypto_dates.update(frame.index[frame.index < month_start])
+        if not non_crypto_dates:
+            return
+        snapshot_date = max(non_crypto_dates).date()
+        future_dates: set[pd.Timestamp] = set()
+        snapshot_ts = pd.Timestamp(snapshot_date)
+        for symbol, frame in frames.items():
+            if universe.market_by_symbol.get(symbol) == "crypto":
+                continue
+            future_dates.update(frame.index[frame.index > snapshot_ts])
+        if not future_dates:
+            return
+        effective_date = min(future_dates).date()
+        conn = connect(self.db_path)
+        try:
+            exists = conn.execute(
+                """
+                SELECT 1 FROM universe_snapshots
+                WHERE universe_id = ? AND universe_version = ?
+                  AND effective_date = ? LIMIT 1
+                """,
+                (universe.universe_id, universe.universe_version, effective_date.isoformat()),
+            ).fetchone()
+        finally:
+            conn.close()
+        if exists is not None:
+            return
+        frozen = frozen_membership_snapshot(effective_date)
+        result = None if frozen is not None else evaluate_universe_snapshot(
+            frames, snapshot_date=snapshot_date, effective_date=effective_date,
+            universe=universe,
+        )
+        serialized = []
+        memberships = []
+        if frozen is not None:
+            snapshot_date = date.fromisoformat(str(frozen["snapshotDate"]))
+            selected = set(frozen["selectedSymbols"])
+            source_rows = [{
+                "snapshotDate": snapshot_date.isoformat(),
+                "effectiveDate": effective_date.isoformat(),
+                "symbol": symbol,
+                "market": universe.market_by_symbol[symbol],
+                "qualified": symbol in selected,
+                "selected": symbol in selected,
+                "liquidityRank": None,
+                "failureReasons": "" if symbol in selected else "not_selected_in_frozen_snapshot",
+            } for symbol in universe.symbols]
+        else:
+            assert result is not None
+            source_rows = result.to_dict("records")
+        for row in source_rows:
+            def clean(value: Any) -> Any:
+                if pd.isna(value):
+                    return None
+                if isinstance(value, (float, int)) and not math.isfinite(float(value)):
+                    return None
+                if isinstance(value, pd.Timestamp):
+                    return value.date().isoformat()
+                if isinstance(value, (pd.Timedelta,)):
+                    return str(value)
+                if hasattr(value, "item"):
+                    return value.item()
+                return value
+            details = {key: clean(value) for key, value in row.items()}
+            serialized.append(details)
+            memberships.append({
+                "symbol": row["symbol"],
+                "market": row["market"],
+                "selected": bool(row["selected"]),
+                "qualified": bool(row["qualified"]),
+                "liquidity_rank": clean(row["liquidityRank"]),
+                "reason": str(row["failureReasons"]),
+                "details": details,
+            })
+        self.events.record_universe_snapshot(
+            universe_id=universe.universe_id,
+            universe_version=universe.universe_version,
+            snapshot_date=snapshot_date,
+            effective_date=effective_date,
+            source_hash=universe.source_hash,
+            input_hash=payload_hash(serialized),
+            data_quality_status="OK",
+            metadata={
+                "selectionMode": "monthly_point_in_time",
+                "frozenXquantSnapshot": frozen is not None,
+            },
+            memberships=memberships,
+        )
+
+    def _refresh_next_open(
+        self,
+        config: StrategyConfig,
+        *,
+        now: datetime | None,
+    ) -> dict[str, Any]:
+        effective_now = now or self._clock()
+        through_date = effective_now.date()
+        if self._refresh_fn is not None:
+            refresh_strategy_universe(config, 30.0, refresh_fn=self._refresh_fn)
+        frames, errors = self._next_open_frames(
+            config, through_date=through_date, as_of=effective_now,
+        )
+        if any(symbol not in frames for symbol in CORE_SYMBOLS):
+            return self._get_next_open_snapshot(config, load_errors=errors)
+        sessions = core_common_sessions(frames)
+        if sessions.empty:
+            return self._get_next_open_snapshot(config, load_errors=errors)
+        market_data_date = sessions[-1].date()
+        account = self.ledger.get_account(config)
+        expected_sessions = xcals.get_calendar("XSHG").sessions_in_range(
+            pd.Timestamp(through_date) - pd.Timedelta(days=14),
+            pd.Timestamp(through_date),
+        )
+        expected_core_date = (
+            pd.Timestamp(expected_sessions[-1]).tz_localize(None).date()
+            if not expected_sessions.empty else through_date
+        )
+        if market_data_date < expected_core_date:
+            errors = dict(errors)
+            errors["CORE_COMMON_SESSION"] = (
+                f"stale:{market_data_date.isoformat()}<expected:{expected_core_date.isoformat()}"
+            )
+            if account is not None:
+                self.next_open_engine.reconcile(config, frames, through_date=through_date)
+                self.events.record_data_quality(
+                    account_id=account["id"], strategy_id=config.strategy_id,
+                    strategy_version=config.version,
+                    event_key=payload_hash([
+                        config.strategy_id, "STALE_CORE_DATA", market_data_date,
+                        expected_core_date,
+                    ]),
+                    observed_at=effective_now.isoformat(),
+                    market_data_date=market_data_date,
+                    code="STALE_CORE_DATA",
+                    message="Core common-session data is stale; no new signal was generated",
+                    details={"expectedDate": expected_core_date.isoformat()},
+                )
+            return self._get_next_open_snapshot(config, load_errors=errors)
+        if account is None:
+            self.next_open_engine.activate(config, activation_date=through_date)
+
+        # First settle prior signals using each symbol's own valid Open.
+        self.next_open_engine.reconcile(config, frames, through_date=through_date)
+        state = self.next_open_engine.current_state(config)
+        assert state is not None
+        account = self.ledger.get_account(config)
+        assert account is not None
+        conn = connect(self.db_path)
+        try:
+            pending = conn.execute(
+                """
+                SELECT * FROM paper_orders
+                WHERE account_id = ? AND status IN ('PENDING', 'WAITING_OPEN')
+                """,
+                (account["id"],),
+            ).fetchall()
+            last_core_signal = conn.execute(
+                """SELECT MAX(signal_date) FROM decision_runs
+                WHERE account_id = ? AND run_type = 'CORE_REBALANCE'
+                  AND authoritative = 1""",
+                (account["id"],),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        has_core = bool(state.held_symbols("core"))
+        pending_core = any(row["order_type"] == "CORE_REBALANCE" for row in pending)
+        anchor = date.fromisoformat(str(
+            last_core_signal or config.params["schedule_anchor_signal_date"]
+        ))
+        if not pending_core and (
+            not has_core
+            or core_signal_due(
+                frames, market_data_date, anchor_signal_date=anchor,
+                every=int(config.params["rebalance_sessions"]),
+            )
+        ):
+            decision = calculate_risk_parity_decision(
+                config, frames, signal_date=market_data_date,
+            )
+            self.next_open_engine.queue_decision(config, decision, frames)
+
+        if config.strategy_id == "core90_ma200_bull10":
+            self._ensure_current_universe(frames, market_data_date)
+            if self._decision_provider is not None:
+                scan = self._decision_provider(frozen_universe().symbols)
+                items = list(scan.get("items", ()))
+                held = state.held_symbols("satellite")
+                pending_exit_symbols = {
+                    row["symbol"] for row in pending
+                    if row["order_type"] == "ST_BEAR_EXIT"
+                }
+                dates = sorted({
+                    date.fromisoformat(str(item["decisionAsOf"]))
+                    for item in items if item.get("decisionAsOf")
+                    and date.fromisoformat(str(item["decisionAsOf"])) <= through_date
+                })
+                for signal_date in dates:
+                    dated_items = [
+                        item for item in items
+                        if item.get("decisionAsOf")
+                        and date.fromisoformat(str(item["decisionAsOf"])) == signal_date
+                    ]
+                    decision = calculate_bull_decision(
+                        config, dated_items, frames,
+                        self._active_membership(signal_date),
+                        signal_date=signal_date,
+                        held_symbols=held,
+                        pending_exit_symbols=pending_exit_symbols,
+                    )
+                    self.next_open_engine.queue_decision(config, decision, frames)
+
+        # Today-generated signals cannot execute on today's close; this pass
+        # only catches independently-dated markets already due from prior days.
+        self.next_open_engine.reconcile(config, frames, through_date=through_date)
+        try:
+            self.next_open_engine.value(config, frames, through_date)
+        except ValueError:
+            pass
+        return self._get_next_open_snapshot(config, load_errors=errors)
+
+    def _get_next_open_snapshot(
+        self,
+        config: StrategyConfig,
+        *,
+        load_errors: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        account = self.ledger.get_account(config)
+        assets = [{
+            "symbol": asset.symbol, "alias": asset.alias, "sleeve": asset.sleeve,
+            "syntheticProxy": asset.synthetic_proxy,
+        } for asset in config.assets]
+        if account is None:
+            return {
+                "strategyId": config.strategy_id, "strategyVersion": config.version,
+                "state": "EMPTY",
+                "dates": {}, "assets": assets,
+                "diagnostics": [], "observation": {}, "currentWeights": [],
+                "desiredWeights": [], "executableWeights": [], "deltaWeights": [],
+                "sleeveWeights": {}, "nav": {}, "ledger": {"status": "empty"},
+                "operations": {
+                    "orders": [], "bullCandidates": [],
+                    "benchmark": {"strategyId": "risk_parity_core_next_open"},
+                },
+                "calcError": None,
+            }
+        conn = connect(self.db_path)
+        try:
+            nav = conn.execute(
+                """SELECT * FROM portfolio_nav_v2 WHERE account_id = ?
+                AND authoritative = 1 ORDER BY valuation_date DESC, id DESC LIMIT 1""",
+                (account["id"],),
+            ).fetchone()
+            positions = conn.execute(
+                """SELECT * FROM portfolio_positions_v2 WHERE account_id = ?
+                AND authoritative = 1 AND valuation_date = (
+                    SELECT MAX(valuation_date) FROM portfolio_positions_v2
+                    WHERE account_id = ? AND authoritative = 1)
+                ORDER BY sleeve, symbol""",
+                (account["id"], account["id"]),
+            ).fetchall()
+            pending = conn.execute(
+                """SELECT * FROM paper_orders WHERE account_id = ?
+                AND status IN ('PENDING', 'WAITING_OPEN')
+                ORDER BY next_attempt_date, priority DESC, symbol""",
+                (account["id"],),
+            ).fetchall()
+            today_text = self._today().isoformat()
+            operation_orders = conn.execute(
+                """SELECT o.*, e.actual_open, e.quantity_delta,
+                    e.commission, e.slippage
+                FROM paper_orders o
+                LEFT JOIN paper_executions e ON e.order_id = o.id
+                WHERE o.account_id = ? AND (
+                    o.status IN ('PENDING', 'WAITING_OPEN')
+                    OR o.actual_execution_date = ?
+                )
+                ORDER BY COALESCE(o.next_attempt_date, o.actual_execution_date),
+                         o.priority DESC, o.symbol""",
+                (account["id"], today_text),
+            ).fetchall()
+            latest_bull_run = conn.execute(
+                """SELECT * FROM decision_runs WHERE account_id = ?
+                AND authoritative = 1 AND run_type = 'BULL_DAILY'
+                ORDER BY signal_date DESC, id DESC LIMIT 1""",
+                (account["id"],),
+            ).fetchone()
+            bull_rows = [] if latest_bull_run is None else conn.execute(
+                """SELECT * FROM decision_items WHERE decision_run_id = ?
+                AND event_type = 'BULL_FLIP_ENTRY'
+                ORDER BY priority DESC, symbol""",
+                (latest_bull_run["id"],),
+            ).fetchall()
+            data_quality_count = conn.execute(
+                "SELECT COUNT(*) FROM data_quality_events_v2 WHERE account_id = ?",
+                (account["id"],),
+            ).fetchone()[0]
+            latest_decision = conn.execute(
+                """SELECT * FROM decision_runs WHERE account_id = ? AND authoritative = 1
+                ORDER BY signal_date DESC, id DESC LIMIT 1""", (account["id"],),
+            ).fetchone()
+            desired = []
+            if latest_decision is not None:
+                desired = [dict(row) for row in conn.execute(
+                    """SELECT symbol, target_weight AS weight, sleeve, reason
+                    FROM decision_items WHERE decision_run_id = ? AND eligible = 1
+                    AND target_weight IS NOT NULL ORDER BY priority DESC, symbol""",
+                    (latest_decision["id"],),
+                ).fetchall()]
+        finally:
+            conn.close()
+        current = [{
+            "symbol": row["symbol"], "weight": float(row["weight"]),
+            "quantity": float(row["quantity"]), "price": float(row["price"]),
+            "value": float(row["value"]),
+            "sleeve": row["sleeve"],
+        } for row in positions]
+        diagnostics = [{
+            "code": "MISSING_OPTIONAL_MARKET_DATA", "message": reason,
+            "symbol": symbol, "details": {},
+        } for symbol, reason in sorted((load_errors or {}).items())]
+        pending_dates = [row["next_attempt_date"] for row in pending if row["next_attempt_date"]]
+        orders = [{
+            "orderId": row["id"], "symbol": row["symbol"],
+            "market": row["market"], "sleeve": row["sleeve"],
+            "orderType": row["order_type"], "side": row["side"],
+            "status": row["status"], "signalDate": row["signal_date"],
+            "expectedExecutionDate": row["expected_execution_date"],
+            "nextAttemptDate": row["next_attempt_date"],
+            "actualExecutionDate": row["actual_execution_date"],
+            "actualOpen": row["actual_open"],
+            "requestedWeightDelta": row["requested_weight_delta"],
+            "quantityDelta": row["quantity_delta"],
+            "commission": row["commission"], "slippage": row["slippage"],
+            "delayReason": row["delay_reason"],
+            "rejectionReason": row["rejection_reason"],
+            "due": bool(
+                row["status"] in ("PENDING", "WAITING_OPEN")
+                and row["next_attempt_date"]
+                and row["next_attempt_date"] <= today_text
+            ),
+        } for row in operation_orders]
+        bull_candidates = []
+        for row in bull_rows:
+            payload = json.loads(row["payload_json"])
+            bull_candidates.append({
+                "symbol": row["symbol"], "market": row["market"],
+                "signalDate": latest_bull_run["signal_date"],
+                "eligible": bool(row["eligible"]), "reason": row["reason"],
+                "permission": payload.get("permission"),
+                "referenceSymbol": payload.get("referenceSymbol"),
+                "referenceDate": payload.get("referenceDate"),
+                "referenceClose": payload.get("referenceClose"),
+                "referenceMa": payload.get("referenceMa"),
+                "riskOn": payload.get("riskOn"),
+                "gateReason": payload.get("gateReason"),
+            })
+        net_nav = float(nav["net_nav"]) if nav is not None else None
+        valuation_date = nav["valuation_date"] if nav is not None else None
+        operations = {
+            "asOfDate": valuation_date,
+            "orders": orders,
+            "bullCandidates": bull_candidates,
+            "dueOrderCount": sum(bool(order["due"]) for order in orders),
+            "waitingOpenCount": sum(order["status"] == "WAITING_OPEN" for order in orders),
+            "pendingOrderCount": len(pending),
+            "ma200AllowedCount": sum(item.get("riskOn") is True for item in bull_candidates),
+            "ma200BlockedCount": sum(item.get("riskOn") is False for item in bull_candidates),
+            "grossExposure": float(nav["gross_exposure"]) if nav is not None else None,
+            "dataQualityEventCount": int(data_quality_count),
+            "benchmark": self._benchmark_block(
+                config, valuation_date=valuation_date, net_nav=net_nav,
+            ),
+        }
+        return {
+            "strategyId": config.strategy_id, "strategyVersion": config.version,
+            "state": "PENDING_EXECUTION" if pending else "ACTIVE",
+            "dates": {
+                "marketDataDate": nav["valuation_date"] if nav else None,
+                "signalDate": latest_decision["signal_date"] if latest_decision else None,
+                "executionDate": min(pending_dates) if pending_dates else None,
+                "nextCheck": min(pending_dates) if pending_dates else None,
+            },
+            "assets": assets, "diagnostics": diagnostics,
+            "observation": {
+                "asOfDate": nav["valuation_date"] if nav else None,
+                "state": "deterministic", "reason": "Frozen next-open paper state",
+                "values": {
+                    "pendingOrders": len(pending),
+                    "waitingOpen": sum(row["status"] == "WAITING_OPEN" for row in pending),
+                },
+            },
+            "currentWeights": current, "desiredWeights": desired,
+            "executableWeights": [], "deltaWeights": [], "sleeveWeights": {},
+            "nav": ({
+                "valuationDate": nav["valuation_date"], "grossNav": nav["gross_nav"],
+                "netNav": nav["net_nav"], "cash": nav["cash"],
+                "dailyReturn": nav["daily_return"],
+                "cumulativeReturn": nav["cumulative_return"],
+                "drawdown": nav["drawdown"],
+            } if nav else {}),
+            "ledger": {
+                "status": "pending" if pending else "active",
+                "signalDate": latest_decision["signal_date"] if latest_decision else None,
+            },
+            "operations": operations,
+            "calcError": None,
+        }
+
     def target_weights(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if config.execution == "next_open":
+            account = self.ledger.get_account(config)
+            if account is None:
+                return {"strategyId": strategy_id, "desired": [], "executable": []}
+            conn = connect(self.db_path)
+            try:
+                run = conn.execute(
+                    """SELECT id FROM decision_runs WHERE account_id = ?
+                    AND authoritative = 1 ORDER BY signal_date DESC, id DESC LIMIT 1""",
+                    (account["id"],),
+                ).fetchone()
+                desired = [] if run is None else [dict(row) for row in conn.execute(
+                    """SELECT symbol, target_weight AS weight, sleeve, reason
+                    FROM decision_items WHERE decision_run_id = ? AND eligible = 1
+                    AND target_weight IS NOT NULL ORDER BY priority DESC, symbol""",
+                    (run["id"],),
+                ).fetchall()]
+                return {"strategyId": strategy_id, "desired": desired, "executable": []}
+            finally:
+                conn.close()
         account = self.ledger.get_account(config)
         if account is None:
             return {"strategyId": strategy_id, "desired": [], "executable": []}
@@ -314,6 +934,27 @@ class PortfolioStrategyService:
 
     def rebalance_diff(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if config.execution == "next_open":
+            account = self.ledger.get_account(config)
+            if account is None:
+                return {"strategyId": strategy_id, "rows": []}
+            snapshot = self._get_next_open_snapshot(config)
+            current: dict[str, float] = {}
+            for row in snapshot["currentWeights"]:
+                current[row["symbol"]] = (
+                    current.get(row["symbol"], 0.0) + float(row["weight"])
+                )
+            desired = {
+                row["symbol"]: float(row["weight"])
+                for row in self.target_weights(strategy_id)["desired"]
+            }
+            rows = [{
+                "symbol": symbol,
+                "currentWeight": current.get(symbol, 0.0),
+                "desiredWeight": desired.get(symbol, 0.0),
+                "delta": desired.get(symbol, 0.0) - current.get(symbol, 0.0),
+            } for symbol in sorted(set(current) | set(desired))]
+            return {"strategyId": strategy_id, "rows": rows}
         account = self.ledger.get_account(config)
         if account is None:
             return {"strategyId": strategy_id, "current": [], "desired": [], "delta": []}
@@ -352,6 +993,51 @@ class PortfolioStrategyService:
         account = self.ledger.get_account(config)
         if account is None:
             return {"strategyId": strategy_id, "events": [], "nextCursor": None}
+
+        if config.execution == "next_open":
+            conn = connect(self.db_path)
+            try:
+                query = """
+                    SELECT * FROM (
+                        SELECT 'decision' AS type, id * 10 + 1 AS event_id,
+                               signal_date AS event_date,
+                               data_quality_status AS state,
+                               run_type AS reason, created_at
+                        FROM decision_runs WHERE account_id = ?
+                        UNION ALL
+                        SELECT 'order' AS type, id * 10 + 2 AS event_id,
+                               COALESCE(actual_execution_date, signal_date) AS event_date,
+                               status AS state,
+                               symbol || ' ' || order_type || COALESCE(' ' || delay_reason, '') AS reason,
+                               updated_at AS created_at
+                        FROM paper_orders WHERE account_id = ?
+                        UNION ALL
+                        SELECT 'data_quality' AS type, id * 10 + 3 AS event_id,
+                               market_data_date AS event_date, code AS state,
+                               message AS reason, created_at
+                        FROM data_quality_events_v2 WHERE account_id = ?
+                    )
+                """
+                params: list[Any] = [account["id"], account["id"], account["id"]]
+                if cursor is not None:
+                    query += " WHERE event_id < ?"
+                    params.append(cursor)
+                query += " ORDER BY event_id DESC LIMIT ?"
+                params.append(limit + 1)
+                rows = conn.execute(query, params).fetchall()
+                has_more = len(rows) > limit
+                rows = rows[:limit]
+                events = [{
+                    "type": row["type"], "id": row["event_id"],
+                    "eventDate": row["event_date"], "state": row["state"],
+                    "reason": row["reason"], "createdAt": row["created_at"],
+                } for row in rows]
+                return {
+                    "strategyId": strategy_id, "events": events,
+                    "nextCursor": events[-1]["id"] if has_more and events else None,
+                }
+            finally:
+                conn.close()
 
         conn = connect(self.db_path)
         try:
@@ -397,10 +1083,9 @@ class PortfolioStrategyService:
 
         conn = connect(self.db_path)
         try:
-            query = """
-                SELECT * FROM nav_snapshots
-                WHERE account_id = ?
-            """
+            table = "portfolio_nav_v2" if config.execution == "next_open" else "nav_snapshots"
+            authoritative = " AND authoritative = 1" if config.execution == "next_open" else ""
+            query = f"SELECT * FROM {table} WHERE account_id = ?{authoritative}"
             params: list[Any] = [account["id"]]
             if start is not None:
                 query += " AND valuation_date >= ?"

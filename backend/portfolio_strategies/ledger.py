@@ -120,6 +120,226 @@ CREATE TABLE IF NOT EXISTS data_quality_events (
     details_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Event-driven next-open ledger.  These tables intentionally sit beside the
+-- legacy rebalance tables so existing Theme Alpha / BTC accounts remain
+-- byte-for-byte compatible with their original execution model.
+CREATE TABLE IF NOT EXISTS strategy_activations (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    activation_date TEXT NOT NULL,
+    initial_cash REAL NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (account_id)
+);
+
+CREATE TABLE IF NOT EXISTS data_quality_events_v2 (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    strategy_id TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    market_data_date TEXT,
+    code TEXT NOT NULL,
+    message TEXT NOT NULL,
+    symbol TEXT,
+    previous_input_hash TEXT,
+    current_input_hash TEXT,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (event_key)
+);
+
+CREATE TABLE IF NOT EXISTS universe_snapshots (
+    id INTEGER PRIMARY KEY,
+    universe_id TEXT NOT NULL,
+    universe_version TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    effective_date TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    data_quality_status TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (universe_id, universe_version, effective_date, input_hash)
+);
+
+CREATE TABLE IF NOT EXISTS universe_memberships (
+    id INTEGER PRIMARY KEY,
+    universe_snapshot_id INTEGER NOT NULL
+        REFERENCES universe_snapshots(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    market TEXT NOT NULL,
+    selected INTEGER NOT NULL CHECK (selected IN (0, 1)),
+    qualified INTEGER NOT NULL CHECK (qualified IN (0, 1)),
+    liquidity_rank REAL,
+    score REAL,
+    reason TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (universe_snapshot_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS decision_runs (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    strategy_id TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    run_type TEXT NOT NULL,
+    market_data_date TEXT NOT NULL,
+    signal_date TEXT NOT NULL,
+    universe_version TEXT,
+    config_hash TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    data_quality_status TEXT NOT NULL,
+    authoritative INTEGER NOT NULL CHECK (authoritative IN (0, 1)),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (
+        strategy_id, strategy_version, run_type, signal_date, input_hash
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_decision_runs_authoritative
+ON decision_runs(strategy_id, strategy_version, run_type, signal_date)
+WHERE authoritative = 1;
+
+CREATE TABLE IF NOT EXISTS decision_items (
+    id INTEGER PRIMARY KEY,
+    decision_run_id INTEGER NOT NULL REFERENCES decision_runs(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    market TEXT NOT NULL,
+    sleeve TEXT NOT NULL,
+    eligible INTEGER NOT NULL CHECK (eligible IN (0, 1)),
+    target_weight REAL,
+    priority REAL NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (decision_run_id, symbol, event_type)
+);
+
+CREATE TABLE IF NOT EXISTS paper_orders (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    decision_run_id INTEGER NOT NULL REFERENCES decision_runs(id) ON DELETE CASCADE,
+    decision_item_id INTEGER REFERENCES decision_items(id) ON DELETE CASCADE,
+    order_key TEXT NOT NULL,
+    strategy_id TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    sleeve TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    market TEXT NOT NULL,
+    order_type TEXT NOT NULL,
+    side TEXT NOT NULL,
+    status TEXT NOT NULL,
+    signal_date TEXT NOT NULL,
+    expected_execution_date TEXT,
+    next_attempt_date TEXT,
+    actual_execution_date TEXT,
+    target_weight REAL,
+    requested_weight_delta REAL,
+    requested_quantity REAL,
+    priority REAL NOT NULL DEFAULT 0,
+    delay_reason TEXT,
+    rejection_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (order_key)
+);
+
+CREATE INDEX IF NOT EXISTS ix_paper_orders_due
+ON paper_orders(account_id, status, next_attempt_date, priority, id);
+
+CREATE TABLE IF NOT EXISTS paper_order_attempts (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES paper_orders(id) ON DELETE CASCADE,
+    attempted_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    observed_open REAL,
+    next_expected_execution_date TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (order_id, attempted_date)
+);
+
+CREATE TABLE IF NOT EXISTS paper_executions (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES paper_orders(id) ON DELETE CASCADE,
+    signal_date TEXT NOT NULL,
+    expected_execution_date TEXT,
+    actual_execution_date TEXT NOT NULL,
+    actual_open REAL NOT NULL,
+    execution_price REAL NOT NULL,
+    side TEXT NOT NULL,
+    quantity_delta REAL NOT NULL,
+    weight_delta REAL NOT NULL,
+    gross_notional REAL NOT NULL,
+    commission REAL NOT NULL,
+    slippage REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (order_id)
+);
+
+CREATE TABLE IF NOT EXISTS sleeve_transfer_events (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    signal_date TEXT NOT NULL,
+    execution_date TEXT NOT NULL,
+    from_sleeve TEXT NOT NULL,
+    to_sleeve TEXT NOT NULL,
+    gross_notional REAL NOT NULL,
+    cost REAL NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (account_id, signal_date, from_sleeve, to_sleeve)
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_positions_v2 (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    valuation_date TEXT NOT NULL,
+    sleeve TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    price_date TEXT NOT NULL,
+    value REAL NOT NULL,
+    weight REAL NOT NULL,
+    input_hash TEXT NOT NULL,
+    authoritative INTEGER NOT NULL CHECK (authoritative IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE (account_id, valuation_date, sleeve, symbol, input_hash)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_portfolio_positions_v2_authoritative
+ON portfolio_positions_v2(account_id, valuation_date, sleeve, symbol)
+WHERE authoritative = 1;
+
+CREATE TABLE IF NOT EXISTS portfolio_nav_v2 (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES paper_accounts(id) ON DELETE CASCADE,
+    valuation_date TEXT NOT NULL,
+    gross_nav REAL NOT NULL,
+    net_nav REAL NOT NULL,
+    cash REAL NOT NULL,
+    gross_exposure REAL NOT NULL,
+    daily_return REAL NOT NULL,
+    cumulative_return REAL NOT NULL,
+    drawdown REAL NOT NULL,
+    running_max REAL NOT NULL,
+    input_hash TEXT NOT NULL,
+    authoritative INTEGER NOT NULL CHECK (authoritative IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE (account_id, valuation_date, input_hash)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_portfolio_nav_v2_authoritative
+ON portfolio_nav_v2(account_id, valuation_date)
+WHERE authoritative = 1;
 """
 
 TABLES = frozenset(
@@ -132,6 +352,18 @@ TABLES = frozenset(
         "position_snapshots",
         "nav_snapshots",
         "data_quality_events",
+        "strategy_activations",
+        "data_quality_events_v2",
+        "universe_snapshots",
+        "universe_memberships",
+        "decision_runs",
+        "decision_items",
+        "paper_orders",
+        "paper_order_attempts",
+        "paper_executions",
+        "sleeve_transfer_events",
+        "portfolio_positions_v2",
+        "portfolio_nav_v2",
     }
 )
 

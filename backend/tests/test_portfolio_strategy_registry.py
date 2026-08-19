@@ -10,12 +10,14 @@ from portfolio_strategies.registry import (
 )
 
 
-def test_registry_exposes_two_official_paper_strategies():
+def test_registry_exposes_four_official_paper_strategies():
     strategies = list_paper_strategies()
 
     assert [strategy.strategy_id for strategy in strategies] == [
-        "btc_supertrend_satellite",
+        "risk_parity_core_next_open",
+        "core90_ma200_bull10",
         "theme_alpha",
+        "btc_supertrend_satellite",
     ]
     assert all(strategy.mode is StrategyMode.PAPER for strategy in strategies)
 
@@ -57,6 +59,28 @@ def test_btc_comparison_caps_are_not_paper_accounts():
         require_paper_strategy("btc_supertrend_satellite_5")
 
 
+def test_frozen_next_open_registry_configuration():
+    risk_parity = get_strategy("risk_parity_core_next_open")
+    bull = get_strategy("core90_ma200_bull10")
+    raw = get_strategy("core90_raw_bull10")
+
+    assert risk_parity.version == "1.0.0"
+    assert risk_parity.execution == "next_open"
+    assert risk_parity.params["risk_parity_window"] == 20
+    assert risk_parity.params["rebalance_sessions"] == 10
+    assert risk_parity.params["schedule_anchor_signal_date"] == "2026-07-01"
+    assert risk_parity.params["one_way_cost_bps"] == 10.0
+    assert bull.execution == "next_open"
+    assert bull.params["core_allocation"] == 0.90
+    assert bull.params["satellite_allocation"] == 0.10
+    assert bull.params["supertrend_atr_window"] == 7
+    assert bull.params["supertrend_multiplier"] == 3.0
+    assert bull.params["ma_window"] == 200
+    assert raw.mode is StrategyMode.COMPARISON
+    with pytest.raises(ComparisonStrategyError):
+        require_paper_strategy("core90_raw_bull10")
+
+
 def test_theme_alpha_registry_configuration():
     config = get_strategy("theme_alpha")
 
@@ -86,4 +110,3 @@ def test_strategy_configuration_is_immutable():
 
     with pytest.raises(TypeError):
         config.params["btc_cap"] = 0.50
-

@@ -17,6 +17,9 @@ class StrategyListItem(BaseModel):
     bootstrapped: bool = False
     bootstrapSignalDate: Optional[str] = None
     bootstrapValuationDate: Optional[str] = None
+    presentationGroup: str = "comparison"
+    isPrimary: bool = False
+    benchmarkStrategyId: Optional[str] = None
 
 
 class DiagnosticItem(BaseModel):
@@ -39,6 +42,7 @@ class PositionItem(BaseModel):
     quantity: float = 0.0
     price: Optional[float] = None
     value: float = 0.0
+    sleeve: str = ""
 
 
 class DatesBlock(BaseModel):
@@ -71,6 +75,65 @@ class LedgerBlock(BaseModel):
     signalDate: Optional[str] = None
 
 
+class PaperOrderItem(BaseModel):
+    orderId: int
+    symbol: str
+    market: str
+    sleeve: str
+    orderType: str
+    side: str
+    status: str
+    signalDate: str
+    expectedExecutionDate: Optional[str] = None
+    nextAttemptDate: Optional[str] = None
+    actualExecutionDate: Optional[str] = None
+    actualOpen: Optional[float] = None
+    requestedWeightDelta: Optional[float] = None
+    quantityDelta: Optional[float] = None
+    commission: Optional[float] = None
+    slippage: Optional[float] = None
+    delayReason: Optional[str] = None
+    rejectionReason: Optional[str] = None
+    due: bool = False
+
+
+class BullCandidateItem(BaseModel):
+    symbol: str
+    market: str
+    signalDate: str
+    eligible: bool
+    reason: str
+    permission: Optional[str] = None
+    referenceSymbol: Optional[str] = None
+    referenceDate: Optional[str] = None
+    referenceClose: Optional[float] = None
+    referenceMa: Optional[float] = None
+    riskOn: Optional[bool] = None
+    gateReason: Optional[str] = None
+
+
+class BenchmarkBlock(BaseModel):
+    strategyId: str = "risk_parity_core_next_open"
+    valuationDate: Optional[str] = None
+    benchmarkNav: Optional[float] = None
+    relativeNav: Optional[float] = None
+    relativeReturn: Optional[float] = None
+
+
+class OperationsBlock(BaseModel):
+    asOfDate: Optional[str] = None
+    orders: list[PaperOrderItem] = []
+    bullCandidates: list[BullCandidateItem] = []
+    dueOrderCount: int = 0
+    waitingOpenCount: int = 0
+    pendingOrderCount: int = 0
+    ma200AllowedCount: int = 0
+    ma200BlockedCount: int = 0
+    grossExposure: Optional[float] = None
+    dataQualityEventCount: int = 0
+    benchmark: BenchmarkBlock = {}
+
+
 class AssetMeta(BaseModel):
     symbol: str
     alias: str
@@ -93,6 +156,7 @@ class SnapshotResponse(BaseModel):
     sleeveWeights: dict[str, list[WeightItem]] = {}
     nav: NavBlock = {}
     ledger: LedgerBlock = {}
+    operations: OperationsBlock = {}
     calcError: Optional[str] = None
 
 

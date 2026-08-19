@@ -1,0 +1,4 @@
+interface:
+  display_name: "组合策略日报"
+  short_description: "只读查看纸面订单、MA200门控、持仓净值与审计异常"
+  default_prompt: "Use $portfolio-daily-brief to show today's deterministic paper-portfolio execution brief."

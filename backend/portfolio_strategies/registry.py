@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import AssetConfig, CostConfig, StrategyConfig, StrategyMode
+from .frozen_xquant import frozen_universe, load_frozen_spec
 
 
 class UnknownStrategyError(KeyError):
@@ -15,6 +16,12 @@ CORE_ASSETS = (
     AssetConfig("510300.SS", "沪深300ETF", "core"),
     AssetConfig("513100.SS", "纳指100ETF", "core_lvt"),
     AssetConfig("518880.SS", "黄金ETF", "core_lvt"),
+)
+
+NEXT_OPEN_CORE_ASSETS = (
+    AssetConfig("510300.SS", "沪深300ETF", "core", market="a_share"),
+    AssetConfig("513100.SS", "纳指100ETF", "core", market="a_share"),
+    AssetConfig("518880.SS", "黄金ETF", "core", market="a_share"),
 )
 
 BTC_ASSET = AssetConfig(
@@ -132,9 +139,107 @@ BTC_COMPARISON_10 = _btc_config(
     "BTC SuperTrend Satellite 10%",
 )
 
+
+_FROZEN_UNIVERSE = frozen_universe()
+_FROZEN_SPEC = load_frozen_spec()
+_BULL_ASSETS = tuple(
+    AssetConfig(
+        symbol,
+        symbol,
+        "satellite",
+        market=_FROZEN_UNIVERSE.market_by_symbol[symbol],
+        synthetic_proxy=_FROZEN_UNIVERSE.market_by_symbol[symbol]
+        in {"us", "crypto", "gold", "hong_kong"},
+    )
+    for symbol in _FROZEN_UNIVERSE.symbols
+)
+
+
+RISK_PARITY_CORE_NEXT_OPEN = StrategyConfig(
+    strategy_id="risk_parity_core_next_open",
+    version="1.0.0",
+    display_name="RiskParity Core",
+    description="Frozen three-asset inverse-volatility RiskParity benchmark.",
+    mode=StrategyMode.PAPER,
+    execution="next_open",
+    initial_nav=100_000.0,
+    base_currency="CNY",
+    assets=NEXT_OPEN_CORE_ASSETS,
+    params={
+        "risk_parity_window": 20,
+        "rebalance_sessions": 10,
+        "schedule_anchor_signal_date": "2026-07-01",
+        "one_way_cost_bps": 10.0,
+        "activation_mode": "cash_then_next_open",
+    },
+    costs=CostConfig(base_bps=10.0),
+)
+
+
+def _core_bull_config(
+    strategy_id: str,
+    display_name: str,
+    *,
+    ma200_filter: bool,
+    mode: StrategyMode,
+) -> StrategyConfig:
+    assets_by_symbol = {asset.symbol: asset for asset in _BULL_ASSETS}
+    assets_by_symbol.update({asset.symbol: asset for asset in NEXT_OPEN_CORE_ASSETS})
+    return StrategyConfig(
+        strategy_id=strategy_id,
+        version="1.0.0",
+        display_name=display_name,
+        description="Core90 plus a frozen policy-eligible bull-flip 10% sleeve.",
+        mode=mode,
+        execution="next_open",
+        initial_nav=100_000.0,
+        base_currency="CNY",
+        assets=tuple(assets_by_symbol.values()),
+        params={
+            "core_allocation": 0.90,
+            "satellite_allocation": 0.10,
+            "risk_parity_window": 20,
+            "rebalance_sessions": 10,
+            "schedule_anchor_signal_date": "2026-07-01",
+            "core_one_way_cost_bps": 10.0,
+            "sleeve_rebalance_cost_bps": 10.0,
+            "supertrend_atr_window": 7,
+            "supertrend_multiplier": 3.0,
+            "policy_version": _FROZEN_SPEC["policyVersion"],
+            "universe_version": _FROZEN_UNIVERSE.universe_version,
+            "ma200_entry_filter": ma200_filter,
+            "ma_window": 200,
+            "max_satellite_position_weight": 0.10,
+            "max_concurrent_positions": 10,
+            "max_satellite_gross_exposure": 1.0,
+            "bull_commission_bps": 5.0,
+            "bull_slippage_bps": 5.0,
+            "activation_mode": "cash_then_next_open_no_bull_backfill",
+        },
+        costs=CostConfig(base_bps=0.0),
+    )
+
+
+CORE90_MA200_BULL10 = _core_bull_config(
+    "core90_ma200_bull10",
+    "Core90 + MA200 Bull10",
+    ma200_filter=True,
+    mode=StrategyMode.PAPER,
+)
+
+CORE90_RAW_BULL10 = _core_bull_config(
+    "core90_raw_bull10",
+    "Core90 + Raw Bull10",
+    ma200_filter=False,
+    mode=StrategyMode.COMPARISON,
+)
+
 _STRATEGIES = (
-    BTC_OFFICIAL,
+    RISK_PARITY_CORE_NEXT_OPEN,
+    CORE90_MA200_BULL10,
     THEME_ALPHA,
+    BTC_OFFICIAL,
+    CORE90_RAW_BULL10,
     BTC_COMPARISON_5,
     BTC_COMPARISON_10,
 )
