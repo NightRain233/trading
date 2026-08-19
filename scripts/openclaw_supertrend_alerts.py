@@ -116,6 +116,11 @@ def fetch_portfolio_strategies(api_base: str, timeout: float) -> list[dict[str, 
     return sorted(result, key=lambda item: order.get(item.get("strategyId", ""), len(order)))
 
 
+def fetch_portfolio_job_status(api_base: str, timeout: float) -> dict[str, Any]:
+    payload = _api_get(api_base, "/portfolio-strategies/daily-job-status", timeout)
+    return payload if isinstance(payload, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Grouping / classification
 # ---------------------------------------------------------------------------
@@ -216,7 +221,10 @@ def _assess_data_freshness(supertrend_items: list[dict[str, Any]]) -> dict[str, 
     """Return a data-freshness summary for the header."""
     total = len(supertrend_items)
     if total == 0:
-        return {"status": "no_data", "stale_count": 0, "missing_count": 0, "total": 0}
+        return {
+            "status": "no_data", "stale_count": 0, "missing_count": 0,
+            "total": 0, "partial_refresh": 0,
+        }
 
     stale = sum(1 for item in supertrend_items if item.get("dataStale") or item.get("cacheStale"))
     missing = sum(1 for item in supertrend_items if item.get("dataIntegrity", {}).get("hasRecentGap", False))
@@ -338,7 +346,10 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
 
     operations = snapshot.get("operations") or {}
     orders = operations.get("orders") or []
-    active_orders = [order for order in orders if order.get("due") or order.get("status") in ("PENDING", "DELAYED")]
+    active_orders = [
+        order for order in orders
+        if order.get("due") or order.get("status") in ("PENDING", "WAITING_OPEN", "DELAYED")
+    ]
     for order in active_orders:
         execution_date = order.get("nextAttemptDate") or order.get("expectedExecutionDate") or "待定"
         reason = order.get("delayReason") or order.get("rejectionReason") or order.get("status", "PENDING")
@@ -450,7 +461,7 @@ def render_portfolio_summary_markdown(strategies: list[dict[str, Any]]) -> str:
             row = (name, order)
             if order.get("due"):
                 active_orders.append(row)
-            elif order.get("status") in ("PENDING", "DELAYED"):
+            elif order.get("status") in ("PENDING", "WAITING_OPEN", "DELAYED"):
                 waiting_orders.append(row)
 
     lines.append("### 执行优先")
@@ -492,6 +503,7 @@ def render_daily_brief_markdown(
     *,
     title: str,
     portfolio_strategies: Optional[list[dict[str, Any]]] = None,
+    portfolio_job_status: Optional[dict[str, Any]] = None,
 ) -> str:
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
     brief = build_daily_brief(supertrend_items)
@@ -514,6 +526,24 @@ def render_daily_brief_markdown(
         lines.append(f"> ⚠️ {freshness['stale_count']} 个标的数据可能过期，建议在面板中手动刷新。")
     if freshness["partial_refresh"] > 0:
         lines.append(f"> ⏳ 本次触发了部分刷新，未完成的标的可能数据不完整。")
+
+    if portfolio_job_status:
+        failures = [
+            strategy_id for strategy_id, row
+            in (portfolio_job_status.get("strategies") or {}).items()
+            if not row.get("ok")
+        ]
+        stale_markets = [
+            market for market, row
+            in (portfolio_job_status.get("marketReadiness") or {}).items()
+            if not row.get("ready")
+        ]
+        if not (portfolio_job_status.get("dataUpdate") or {}).get("ok", True):
+            lines.append("> 🔴 组合数据更新任务失败；各策略仅使用已有缓存独立刷新。")
+        if failures:
+            lines.append("> 🔴 组合刷新失败: " + " / ".join(failures))
+        if stale_markets:
+            lines.append("> ⏳ 尚未确认完成日线的市场: " + " / ".join(stale_markets))
 
     # SuperTrend sections
     _append_section(
@@ -651,6 +681,7 @@ def main() -> int:
 
     # Fetch portfolio (optional)
     portfolio_strategies = None
+    portfolio_job_status = None
     if args.include_portfolio and args.mode == "daily-brief":
         try:
             portfolio_strategies = fetch_portfolio_strategies(args.api_base, args.timeout)
@@ -658,6 +689,10 @@ def main() -> int:
             # Non-fatal: just skip portfolio section
             print(f"Portfolio fetch failed (continuing without it): {exc}", file=sys.stderr)
             portfolio_strategies = None
+        try:
+            portfolio_job_status = fetch_portfolio_job_status(args.api_base, args.timeout)
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            print(f"Portfolio job status fetch failed (continuing): {exc}", file=sys.stderr)
 
     # Render
     if args.format == "json":
@@ -669,6 +704,8 @@ def main() -> int:
             output["supertrend"] = build_daily_brief(supertrend_items)
             if portfolio_strategies is not None:
                 output["portfolio"] = portfolio_strategies
+            if portfolio_job_status is not None:
+                output["portfolioJobStatus"] = portfolio_job_status
         else:
             output["alerts"] = alerts
         print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -678,6 +715,7 @@ def main() -> int:
                 supertrend_items,
                 title=args.title,
                 portfolio_strategies=portfolio_strategies,
+                portfolio_job_status=portfolio_job_status,
             ))
         else:
             print(render_markdown(alerts, title=args.title))

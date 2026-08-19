@@ -106,7 +106,7 @@ def test_portfolio_markdown_prioritizes_orders_and_reports_policy_audit():
         "operations": {
             "orders": [
                 {"orderId": 1, "symbol": "AAPL", "side": "BUY", "status": "PENDING", "due": True},
-                {"orderId": 2, "symbol": "2800.HK", "side": "SELL", "status": "DELAYED", "due": False, "nextAttemptDate": "2026-08-20"},
+                {"orderId": 2, "symbol": "2800.HK", "side": "SELL", "status": "WAITING_OPEN", "due": False, "nextAttemptDate": "2026-08-20"},
             ],
             "bullCandidates": [
                 {"symbol": "AAPL", "eligible": True},
@@ -129,3 +129,22 @@ def test_portfolio_markdown_prioritizes_orders_and_reports_policy_audit():
     assert "总敞口 96.0%" in markdown
     assert "相对 RiskParity: +0.20%" in markdown
     assert "异常: 策略诊断 1 / 数据质量事件 1" in markdown
+
+
+def test_daily_brief_reports_independent_strategy_failure_and_stale_market():
+    markdown = openclaw_supertrend_alerts.render_daily_brief_markdown(
+        [], title="Daily", portfolio_strategies=[],
+        portfolio_job_status={
+            "dataUpdate": {"ok": False},
+            "strategies": {
+                "theme_alpha": {"ok": False},
+                "risk_parity_core_next_open": {"ok": True},
+            },
+            "marketReadiness": {
+                "us": {"ready": False}, "a_share": {"ready": True},
+            },
+        },
+    )
+    assert "组合数据更新任务失败" in markdown
+    assert "组合刷新失败: theme_alpha" in markdown
+    assert "尚未确认完成日线的市场: us" in markdown

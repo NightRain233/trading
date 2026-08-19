@@ -303,6 +303,7 @@ def calculate_bull_decision(
     held_symbols: Sequence[str] = (),
     pending_exit_symbols: Sequence[str] = (),
     universe: FrozenUniverse | None = None,
+    run_type: str = "BULL_DAILY",
 ) -> FrozenDecision:
     universe = universe or frozen_universe()
     held = set(held_symbols)
@@ -314,7 +315,11 @@ def calculate_bull_decision(
 
     for symbol, membership in selected_membership.items():
         item = by_symbol.get(symbol)
-        if item is None or not policy_eligible_bull_flip(item):
+        if (
+            item is None
+            or str(item.get("decisionAsOf") or "") != signal_date.isoformat()
+            or not policy_eligible_bull_flip(item)
+        ):
             continue
         market = universe.market_by_symbol[symbol]
         reference_symbol = universe.reference_symbol_by_market.get(market)
@@ -420,6 +425,7 @@ def calculate_bull_decision(
         "ma200EntryFilter": ma_filter,
         "decisionInputs": [{
             "symbol": item.get("symbol"),
+            "decisionAsOf": item.get("decisionAsOf"),
             "state": item.get("state"),
             "setup": _decision_field(item, "setup"),
             "permission": _decision_field(item, "permission"),
@@ -429,7 +435,7 @@ def calculate_bull_decision(
         "items": output,
     }
     return FrozenDecision(
-        run_type="BULL_DAILY",
+        run_type=run_type,
         market_data_date=signal_date,
         signal_date=signal_date,
         universe_version=str(config.params["universe_version"]),
@@ -438,4 +444,34 @@ def calculate_bull_decision(
         data_quality_status="OK",
         payload=payload,
         items=tuple(output),
+    )
+
+
+def bearish_signal_dates(
+    frame: pd.DataFrame,
+    *,
+    after_date: date,
+    through_date: date,
+    atr_window: int,
+    multiplier: float,
+) -> tuple[date, ...]:
+    """Return completed bearish ST dates strictly after a symbol cursor."""
+    normalized = normalize_daily(frame)
+    window = normalized.loc[
+        (normalized.index > pd.Timestamp(after_date))
+        & (normalized.index <= pd.Timestamp(through_date))
+    ]
+    if window.empty:
+        return ()
+    trend = supertrend(
+        normalized["High"],
+        normalized["Low"],
+        normalized["Close"],
+        atr_window=atr_window,
+        multiplier=multiplier,
+    )
+    return tuple(
+        timestamp.date()
+        for timestamp in window.index
+        if not bool(trend.at[timestamp, "direction"])
     )

@@ -9,6 +9,7 @@ from collections.abc import Mapping
 import pandas as pd
 
 from .ledger import PortfolioLedger
+from .event_ledger import EventPortfolioLedger
 from .market_data import PortfolioMarketData
 from .models import StrategyCalculation, StrategyConfig
 from .schedules import xshg_sessions
@@ -88,6 +89,54 @@ def _row_dict(row) -> dict:
 class PortfolioPaperEngine:
     def __init__(self, ledger: PortfolioLedger):
         self.ledger = ledger
+        self.events = EventPortfolioLedger(ledger)
+
+    def activate_cash(
+        self,
+        config: StrategyConfig,
+        *,
+        activation_date: date,
+    ) -> dict:
+        """Create an explicit first-live cash account without historical trades."""
+        with self.ledger.transaction() as conn:
+            activation = self.events.activate(
+                config,
+                activation_date=activation_date,
+                metadata={
+                    "mode": "cash_then_next_signal",
+                    "accountOrigin": "first_activation",
+                    "historicalContinuation": False,
+                    "historicalTradesBackfilled": False,
+                },
+                conn=conn,
+            )
+            account = self.ledger.get_account(config, conn=conn)
+            assert account is not None
+            existing = self.ledger.latest_nav(account["id"], conn=conn)
+            if existing is None:
+                self.ledger.save_position(
+                    account["id"],
+                    valuation_date=activation_date,
+                    symbol="CASH",
+                    quantity=float(config.initial_nav),
+                    price=1.0,
+                    value=float(config.initial_nav),
+                    weight=1.0,
+                    conn=conn,
+                )
+                self.ledger.save_nav(
+                    account["id"],
+                    valuation_date=activation_date,
+                    gross_nav=float(config.initial_nav),
+                    net_nav=float(config.initial_nav),
+                    cash=float(config.initial_nav),
+                    daily_return=0.0,
+                    cumulative_return=0.0,
+                    drawdown=0.0,
+                    running_max=float(config.initial_nav),
+                    conn=conn,
+                )
+            return dict(activation)
 
     def _price(
         self,

@@ -10,6 +10,8 @@ python /root/openclaw_supertrend_alerts.py \
   --include-portfolio
 ```
 
+The portfolio write-side job must run separately before this command. This command and the Skill are read-only. They also read `/api/portfolio-strategies/daily-job-status` so a failed refresh or unfinished market is not presented as a clean “no signal” day.
+
 ## 给 OpenClaw 的系统提示词
 
 交互式查看可使用只读 Skill：`/portfolio-daily-brief`。Skill 源码位于 `.agents/skills/portfolio-daily-brief/`，它读取同一组API和日报渲染器，不维护第二套策略规则。

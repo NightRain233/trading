@@ -12,7 +12,7 @@ cd frontend && pnpm dev
 
 Open `http://localhost:5173/portfolio-strategies` or click the "组合" tab.
 
-Click "刷新当前策略" to reconcile new market data and pending paper orders. Existing Theme Alpha and BTC accounts are never re-bootstrapped; a new frozen strategy starts only from its explicit activation date and does not invent historical paper trades.
+Click "刷新当前策略" to reconcile new market data and pending paper orders. Refresh never creates an account. Existing Theme Alpha and BTC accounts are never re-bootstrapped; every new account starts only from an explicit activation date and does not invent historical paper trades.
 
 ## Strategies
 
@@ -59,6 +59,8 @@ Click "刷新当前策略" to reconcile new market data and pending paper orders
 | GET | `/api/portfolio-strategies/{id}/rebalance-diff` | Current vs target delta |
 | GET | `/api/portfolio-strategies/{id}/ledger?limit=&cursor=` | Paginated events |
 | GET | `/api/portfolio-strategies/{id}/nav?start=&end=` | NAV history |
+| GET | `/api/portfolio-strategies/daily-job-status` | Last data-update and per-strategy job status |
+| POST | `/api/portfolio-strategies/{id}/activate` | Explicit cash-only first activation |
 | POST | `/api/portfolio-strategies/{id}/refresh` | Refresh, calculate, reconcile |
 
 Errors: 404 (unknown ID), 409 (comparison-only operation), 400 (invalid params).
@@ -75,7 +77,20 @@ Errors: 404 (unknown ID), 409 (comparison-only operation), 400 (invalid params).
 - `benchmark`: normalized NAV and return difference against `risk_parity_core_next_open`.
 - `dataQualityEventCount`: append-only correction/data-quality audit count.
 
-The strategy list also exposes `presentationGroup`, `isPrimary`, and `benchmarkStrategyId`. Daily surfaces expand only the four primary strategies; comparison strategies remain in the comparison area.
+The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only the four primary strategies; comparison strategies remain in the comparison area.
+
+### Explicit activation
+
+Activation is a deliberate operator action and is never called by startup, refresh, the scheduler, or the read-only Skill.
+
+```bash
+# Example only. Do not run until the paper start date has been approved.
+curl -X POST http://127.0.0.1:8000/api/portfolio-strategies/risk_parity_core_next_open/activate \
+  -H 'Content-Type: application/json' \
+  -d '{"activationDate":"YYYY-MM-DD"}'
+```
+
+Calling activation again with the same date is idempotent. A different date is rejected. A new account contains cash and an activation-date NAV only; signals on or before activation are ignored. Existing legacy Theme Alpha or BTC accounts are returned unchanged and identified as `legacy_preexisting` when no activation record exists.
 
 ## Database
 
@@ -92,9 +107,10 @@ WAL mode, foreign keys, busy timeout 5s. `BEGIN IMMEDIATE` for writes. Idempoten
 - **Next-close**: Signal at close of date D, executes at next ETF session close
 - **Next-open core**: Signal at common core Close D, executes only when all three core ETFs have a later finite positive Open
 - **Next-open satellite**: Each symbol has its own expected and actual execution date; one signal batch can execute on different dates
+- **Per-symbol signal cursor**: `BULL_DAILY:{symbol}` decisions advance only on that symbol's completed sessions. Held positions catch up every unprocessed session and stop at the first complete ST 7/3 bearish date
 - **Missing Open**: Keep the original expected date, append a delay attempt, and retry at the next valid Open; Close is never substituted
 - **Append-only correction audit**: The first decision remains authoritative. Corrected inputs append a revision and data-quality event instead of overwriting history
-- **Bootstrap**: Creates positions at target weights, no historical trades or costs
+- **Activation**: Creates cash only and no historical signals, positions, trades, or costs
 - **Threshold**: Turnover below threshold → skipped (no trades, still values positions)
 - **Max trade**: Theme Alpha clips per-asset deltas to 15%
 - **Blocked data**: Returns diagnostics, preserves last valid signal, no silent trades
@@ -110,16 +126,29 @@ WAL mode, foreign keys, busy timeout 5s. `BEGIN IMMEDIATE` for writes. Idempoten
 
 ## Daily Refresh
 
-Run after the relevant daily data refresh. Calls are idempotent.
+The maintained runner updates data, refreshes all four primary strategies independently, then renders the read-only OpenClaw report:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/portfolio-strategies/risk_parity_core_next_open/refresh
-curl -X POST http://127.0.0.1:8000/api/portfolio-strategies/core90_ma200_bull10/refresh
-curl -X POST http://127.0.0.1:8000/api/portfolio-strategies/theme_alpha/refresh
-curl -X POST http://127.0.0.1:8000/api/portfolio-strategies/btc_supertrend_satellite/refresh
+scripts/run_portfolio_daily.sh
 ```
 
-Run the OpenClaw report after all four refresh calls:
+It writes `backend/backtest_results/portfolio_daily_job_status.json` and `openclaw_portfolio_daily.md`. A strategy failure is recorded and does not stop the remaining strategies. File locks prevent overlapping runners and overlapping refreshes of one account.
+
+Recommended `Asia/Shanghai` schedule:
+
+- `16:40`: first pass after A-share/HK daily bars should be complete. US, gold, and UTC crypto keep their own latest completed dates and may remain pending.
+- `07:15`: second/full pass after the prior US session and data providers have settled; generate the official daily report after this pass.
+- If a market is not complete or is stale, do not synthesize a signal. The status/API and report show it as waiting/stale; a later rerun processes its next completed bar. Core staleness blocks only core rebalancing, not an independently completed satellite market.
+
+Example cron entries:
+
+```cron
+CRON_TZ=Asia/Shanghai
+40 16 * * 1-5 /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/backend/backtest_results/portfolio_daily.log 2>&1
+15 7 * * * /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/backend/backtest_results/portfolio_daily.log 2>&1
+```
+
+The report can also be generated independently after a successful refresh:
 
 ```bash
 python scripts/openclaw_supertrend_alerts.py \
@@ -130,6 +159,18 @@ python scripts/openclaw_supertrend_alerts.py \
 ```
 
 The report is deterministic and order-first: due orders, orders waiting for their own market's next valid Open, bull-flip/MA200 counts, holdings/cash/exposure, NAV/drawdown/relative RiskParity, then anomalies. It does not authorize the agent to modify a signal, parameter, allocation, or provide an out-of-rule trade recommendation.
+
+### Activation checklist
+
+Before calling any activation endpoint:
+
+1. Confirm the approved start date and Shanghai calendar date.
+2. Back up `portfolio_paper.sqlite` and verify the persistent volume points to `backend/backtest_results`.
+3. Record current account, activation, trade, execution, and NAV row counts.
+4. Confirm whether Theme Alpha/BTC are genuine legacy accounts. If absent, label them first activations; never imply historical continuation.
+5. Confirm all four strategy versions/config hashes and the frozen PIT fixture hash.
+6. Activate each approved account once, then verify cash-only NAV and zero new orders/executions.
+7. Run the daily job only after activation and verify the status JSON before enabling cron.
 
 ### OpenClaw skill
 

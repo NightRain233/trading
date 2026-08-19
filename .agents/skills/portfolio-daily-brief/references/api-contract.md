@@ -6,6 +6,7 @@ Use one API base for an entire answer.
 
 ```text
 GET {apiBase}/portfolio-strategies
+GET {apiBase}/portfolio-strategies/daily-job-status
 GET {apiBase}/portfolio-strategies/{strategyId}/snapshot
 GET {apiBase}/portfolio-strategies/{strategyId}/nav
 ```
@@ -14,6 +15,7 @@ This skill must not call:
 
 ```text
 POST {apiBase}/portfolio-strategies/{strategyId}/refresh
+POST {apiBase}/portfolio-strategies/{strategyId}/activate
 ```
 
 ## Strategy selection
@@ -58,3 +60,10 @@ Use `currentWeights` for holdings and sleeve attribution. Use `nav` for cash, NA
 - `READY` or `NOT_DUE`: no strategy-level block; still inspect individual orders.
 
 An empty `orders` array is “no recorded orders” only when the snapshot request succeeded. A failed request is “unavailable”.
+
+## Daily job status
+
+- `dataUpdate.ok=false`: the run continued from cached data; do not claim all markets are current.
+- `marketReadiness.{market}.ready=false`: that market's expected completed bar was not confirmed.
+- `strategies.{strategyId}.ok=false`: report that refresh failure independently; other successful strategies remain valid.
+- `strategies.{strategyId}.notActivated=true`: distinguish an inactive account from an activated all-cash portfolio.

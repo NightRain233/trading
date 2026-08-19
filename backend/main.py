@@ -52,6 +52,7 @@ from portfolio_strategies.registry import (
     list_strategies as list_portfolio_strategies,
 )
 from portfolio_strategies.service import PortfolioStrategyService
+from portfolio_strategies.operation_lock import PortfolioOperationLockedError
 from portfolio_strategies import api_models as pm
 import json
 import os
@@ -104,6 +105,7 @@ HISTORY_TRADES_CACHE_FILE = "backtest_results/history_trades_cache.sqlite"
 PREWARM_TZ = ZoneInfo("Asia/Shanghai")
 COLD_START_SYNC_TIMEOUT_SECONDS = 5.0
 PORTFOLIO_PAPER_DB = "backtest_results/portfolio_paper.sqlite"
+PORTFOLIO_DAILY_STATUS = "backtest_results/portfolio_daily_job_status.json"
 
 _portfolio_service: PortfolioStrategyService | None = None
 _prewarm_leader_handle = None
@@ -2916,6 +2918,17 @@ def api_list_portfolio_strategies():
     return _get_portfolio_service().list_strategies()
 
 
+@app.get("/api/portfolio-strategies/daily-job-status")
+def api_portfolio_daily_job_status():
+    path = Path(PORTFOLIO_DAILY_STATUS)
+    if not path.exists():
+        return {"state": "NEVER_RUN", "strategies": {}, "marketReadiness": {}}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail=f"Daily job status unreadable: {exc}")
+
+
 @app.get("/api/portfolio-strategies/{strategy_id}/snapshot", response_model=pm.SnapshotResponse)
 def api_portfolio_snapshot(strategy_id: str):
     try:
@@ -2978,6 +2991,23 @@ def api_portfolio_refresh(strategy_id: str):
         raise HTTPException(status_code=404, detail=str(exc))
     except ComparisonStrategyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except PortfolioOperationLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/api/portfolio-strategies/{strategy_id}/activate", response_model=pm.SnapshotResponse)
+def api_portfolio_activate(strategy_id: str, request: pm.ActivateRequest):
+    """Explicit, idempotent activation. Never called during startup or refresh."""
+    try:
+        return _get_portfolio_service().activate(
+            strategy_id, activation_date=request.activationDate,
+        )
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (ComparisonStrategyError, PortfolioOperationLockedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.on_event("startup")

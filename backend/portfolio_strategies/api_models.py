@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from datetime import date
 from typing import Any, Optional
 
 
@@ -20,6 +21,12 @@ class StrategyListItem(BaseModel):
     presentationGroup: str = "comparison"
     isPrimary: bool = False
     benchmarkStrategyId: Optional[str] = None
+    activationDate: Optional[str] = None
+    accountOrigin: str = "not_activated"
+
+
+class ActivateRequest(BaseModel):
+    activationDate: date
 
 
 class DiagnosticItem(BaseModel):

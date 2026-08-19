@@ -32,16 +32,19 @@ from .frozen_xquant import (
     evaluate_universe_snapshot,
     frozen_membership_snapshot,
     frozen_universe,
+    normalize_daily,
 )
 from .next_open_data import load_next_open_frames
 from .next_open_engine import NextOpenPaperEngine
 from .next_open_strategies import (
     CORE_SYMBOLS,
+    bearish_signal_dates,
     calculate_bull_decision,
     calculate_risk_parity_decision,
     core_common_sessions,
     core_signal_due,
 )
+from .operation_lock import portfolio_operation_lock
 from .registry import (
     ComparisonStrategyError,
     UnknownStrategyError,
@@ -128,6 +131,25 @@ class PortfolioStrategyService:
             }
             account = self.ledger.get_account(config) if config.mode == StrategyMode.PAPER else None
             entry["bootstrapped"] = account is not None
+            activation = (
+                self.events.activation(account["id"])
+                if account is not None else None
+            )
+            activation_metadata = (
+                json.loads(activation["metadata_json"])
+                if activation is not None else {}
+            )
+            entry["activationDate"] = (
+                activation["activation_date"] if activation is not None
+                else account["bootstrap_valuation_date"] if account is not None
+                else None
+            )
+            entry["accountOrigin"] = (
+                activation_metadata.get("accountOrigin")
+                if activation is not None
+                else "legacy_preexisting" if account is not None
+                else "not_activated"
+            )
             if account is not None:
                 entry["bootstrapSignalDate"] = account["bootstrap_signal_date"]
                 entry["bootstrapValuationDate"] = account["bootstrap_valuation_date"]
@@ -135,8 +157,14 @@ class PortfolioStrategyService:
         return result
 
     def _today(self) -> date:
-        now = self._clock()
-        aware = now.replace(tzinfo=ZoneInfo("Asia/Shanghai")) if now.tzinfo is None else now
+        return self._shanghai_date(self._clock())
+
+    @staticmethod
+    def _shanghai_date(value: datetime) -> date:
+        aware = (
+            value.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            if value.tzinfo is None else value
+        )
         return aware.astimezone(ZoneInfo("Asia/Shanghai")).date()
 
     def _benchmark_block(
@@ -373,15 +401,64 @@ class PortfolioStrategyService:
         )
         return response
 
+    def activate(
+        self,
+        strategy_id: str,
+        *,
+        activation_date: date,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        config = require_paper_strategy(strategy_id)
+        effective_now = now or self._clock()
+        local_today = self._shanghai_date(effective_now)
+        if activation_date > local_today:
+            raise ValueError("activationDate cannot be in the future")
+        with portfolio_operation_lock(self.db_path, f"strategy-{strategy_id}"):
+            account = self.ledger.get_account(config)
+            if account is not None:
+                existing = self.events.activation(account["id"])
+                if existing is None and config.execution == "next_open":
+                    raise ValueError(
+                        "Existing next-open account has no activation audit record; "
+                        "manual migration review is required"
+                    )
+                if (
+                    existing is not None
+                    and existing["activation_date"] != activation_date.isoformat()
+                ):
+                    raise ValueError(
+                        "Strategy is already activated on "
+                        f"{existing['activation_date']}"
+                    )
+                return self.get_snapshot(strategy_id)
+            if config.execution == "next_open":
+                self.next_open_engine.activate(
+                    config, activation_date=activation_date,
+                )
+            else:
+                self.engine.activate_cash(
+                    config, activation_date=activation_date,
+                )
+            return self.get_snapshot(strategy_id)
+
     def refresh(self, strategy_id: str, now: datetime | None = None) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)
+        with portfolio_operation_lock(self.db_path, f"strategy-{strategy_id}"):
+            return self._refresh_locked(config, now=now)
+
+    def _refresh_locked(
+        self,
+        config: StrategyConfig,
+        *,
+        now: datetime | None,
+    ) -> dict[str, Any]:
         if config.execution == "next_open":
             return self._refresh_next_open(config, now=now)
         effective_now = now or self._clock()
         market_data = self._refresh_and_load(config)
 
         if market_data.blocked:
-            return self.get_snapshot(strategy_id)
+            return self.get_snapshot(config.strategy_id)
 
         as_of = market_data.market_data_date or effective_now.date()
         try:
@@ -391,13 +468,15 @@ class PortfolioStrategyService:
 
         account = self.ledger.get_account(config)
         if account is None:
-            # Bootstrap
-            if calculation.signal_date is None:
-                return self.get_snapshot(strategy_id)
-            valuation_date = market_data.market_data_date or as_of
-            self.engine.bootstrap(config, calculation, market_data, valuation_date)
+            return self.get_snapshot(config.strategy_id)
         elif calculation.state == CalculationState.READY and calculation.signal_date is not None:
-            self.engine.queue_signal(config, calculation)
+            activation = self.events.activation(account["id"])
+            if (
+                activation is None
+                or calculation.signal_date
+                > date.fromisoformat(activation["activation_date"])
+            ):
+                self.engine.queue_signal(config, calculation)
 
         # Reconcile any pending rebalance
         try:
@@ -413,7 +492,7 @@ class PortfolioStrategyService:
             except (PaperAccountNotFoundError, ValueError):
                 pass
 
-        return self.get_snapshot(strategy_id)
+        return self.get_snapshot(config.strategy_id)
 
     def _next_open_frames(
         self,
@@ -575,7 +654,7 @@ class PortfolioStrategyService:
         now: datetime | None,
     ) -> dict[str, Any]:
         effective_now = now or self._clock()
-        through_date = effective_now.date()
+        through_date = self._shanghai_date(effective_now)
         if self._refresh_fn is not None:
             refresh_strategy_universe(config, 30.0, refresh_fn=self._refresh_fn)
         frames, errors = self._next_open_frames(
@@ -588,6 +667,10 @@ class PortfolioStrategyService:
             return self._get_next_open_snapshot(config, load_errors=errors)
         market_data_date = sessions[-1].date()
         account = self.ledger.get_account(config)
+        if account is not None and self.events.activation(account["id"]) is None:
+            errors = dict(errors)
+            errors["ACTIVATION_RECORD"] = "missing_for_existing_next_open_account"
+            return self._get_next_open_snapshot(config, load_errors=errors)
         expected_sessions = xcals.get_calendar("XSHG").sessions_in_range(
             pd.Timestamp(through_date) - pd.Timedelta(days=14),
             pd.Timestamp(through_date),
@@ -596,7 +679,8 @@ class PortfolioStrategyService:
             pd.Timestamp(expected_sessions[-1]).tz_localize(None).date()
             if not expected_sessions.empty else through_date
         )
-        if market_data_date < expected_core_date:
+        core_stale = market_data_date < expected_core_date
+        if core_stale:
             errors = dict(errors)
             errors["CORE_COMMON_SESSION"] = (
                 f"stale:{market_data_date.isoformat()}<expected:{expected_core_date.isoformat()}"
@@ -607,8 +691,8 @@ class PortfolioStrategyService:
                     account_id=account["id"], strategy_id=config.strategy_id,
                     strategy_version=config.version,
                     event_key=payload_hash([
-                        config.strategy_id, "STALE_CORE_DATA", market_data_date,
-                        expected_core_date,
+                        config.strategy_id, "STALE_CORE_DATA",
+                        market_data_date.isoformat(), expected_core_date.isoformat(),
                     ]),
                     observed_at=effective_now.isoformat(),
                     market_data_date=market_data_date,
@@ -616,9 +700,8 @@ class PortfolioStrategyService:
                     message="Core common-session data is stale; no new signal was generated",
                     details={"expectedDate": expected_core_date.isoformat()},
                 )
-            return self._get_next_open_snapshot(config, load_errors=errors)
         if account is None:
-            self.next_open_engine.activate(config, activation_date=through_date)
+            return self._get_next_open_snapshot(config, load_errors=errors)
 
         # First settle prior signals using each symbol's own valid Open.
         self.next_open_engine.reconcile(config, frames, through_date=through_date)
@@ -626,6 +709,9 @@ class PortfolioStrategyService:
         assert state is not None
         account = self.ledger.get_account(config)
         assert account is not None
+        activation = self.events.activation(account["id"])
+        assert activation is not None
+        activation_date = date.fromisoformat(activation["activation_date"])
         conn = connect(self.db_path)
         try:
             pending = conn.execute(
@@ -649,7 +735,7 @@ class PortfolioStrategyService:
         anchor = date.fromisoformat(str(
             last_core_signal or config.params["schedule_anchor_signal_date"]
         ))
-        if not pending_core and (
+        if not core_stale and market_data_date > activation_date and not pending_core and (
             not has_core
             or core_signal_due(
                 frames, market_data_date, anchor_signal_date=anchor,
@@ -666,30 +752,20 @@ class PortfolioStrategyService:
             if self._decision_provider is not None:
                 scan = self._decision_provider(frozen_universe().symbols)
                 items = list(scan.get("items", ()))
-                held = state.held_symbols("satellite")
-                pending_exit_symbols = {
-                    row["symbol"] for row in pending
-                    if row["order_type"] == "ST_BEAR_EXIT"
-                }
-                dates = sorted({
-                    date.fromisoformat(str(item["decisionAsOf"]))
-                    for item in items if item.get("decisionAsOf")
-                    and date.fromisoformat(str(item["decisionAsOf"])) <= through_date
-                })
-                for signal_date in dates:
-                    dated_items = [
-                        item for item in items
-                        if item.get("decisionAsOf")
-                        and date.fromisoformat(str(item["decisionAsOf"])) == signal_date
-                    ]
-                    decision = calculate_bull_decision(
-                        config, dated_items, frames,
-                        self._active_membership(signal_date),
-                        signal_date=signal_date,
-                        held_symbols=held,
-                        pending_exit_symbols=pending_exit_symbols,
-                    )
-                    self.next_open_engine.queue_decision(config, decision, frames)
+                for item_date_text in {
+                    str(item.get("decisionAsOf")) for item in items
+                    if item.get("decisionAsOf")
+                }:
+                    try:
+                        item_date = date.fromisoformat(item_date_text)
+                    except ValueError:
+                        continue
+                    if activation_date < item_date <= through_date:
+                        self._ensure_current_universe(frames, item_date)
+                self._refresh_bull_symbols(
+                    config, account, state, pending, frames, items,
+                    activation_date=activation_date,
+                )
 
         # Today-generated signals cannot execute on today's close; this pass
         # only catches independently-dated markets already due from prior days.
@@ -699,6 +775,109 @@ class PortfolioStrategyService:
         except ValueError:
             pass
         return self._get_next_open_snapshot(config, load_errors=errors)
+
+    def _refresh_bull_symbols(
+        self,
+        config: StrategyConfig,
+        account: Mapping[str, Any],
+        state: Any,
+        pending: Sequence[Mapping[str, Any]],
+        frames: Mapping[str, pd.DataFrame],
+        items: Sequence[Mapping[str, Any]],
+        *,
+        activation_date: date,
+    ) -> None:
+        """Advance every satellite symbol on its own completed daily calendar."""
+        universe = frozen_universe()
+        by_symbol = {
+            str(item["symbol"]): item for item in items if item.get("symbol")
+        }
+        held = state.held_symbols("satellite")
+        pending_exit_symbols = {
+            str(row["symbol"]) for row in pending
+            if row["order_type"] == "ST_BEAR_EXIT"
+            and row["status"] in ("PENDING", "WAITING_OPEN")
+        }
+        symbols = sorted(held | set(by_symbol))
+        conn = connect(self.db_path)
+        try:
+            cursors = {
+                row["run_type"].split(":", 1)[1]: date.fromisoformat(row["cursor_date"])
+                for row in conn.execute(
+                    """SELECT run_type, MAX(signal_date) AS cursor_date
+                    FROM decision_runs WHERE account_id = ? AND authoritative = 1
+                    AND run_type LIKE 'BULL_DAILY:%' GROUP BY run_type""",
+                    (account["id"],),
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+
+        for symbol in symbols:
+            frame = frames.get(symbol)
+            if frame is None or universe.market_by_symbol.get(symbol) is None:
+                continue
+            normalized = normalize_daily(frame)
+            if normalized.empty:
+                continue
+            latest_date = normalized.index[-1].date()
+            cursor = max(activation_date, cursors.get(symbol, activation_date))
+            run_type = f"BULL_DAILY:{symbol}"
+
+            if symbol in held:
+                if symbol in pending_exit_symbols:
+                    continue
+                candidate_dates = [
+                    timestamp.date() for timestamp in normalized.index
+                    if cursor < timestamp.date() <= latest_date
+                ]
+                if not candidate_dates:
+                    continue
+                bearish = set(bearish_signal_dates(
+                    frame,
+                    after_date=cursor,
+                    through_date=latest_date,
+                    atr_window=int(config.params["supertrend_atr_window"]),
+                    multiplier=float(config.params["supertrend_multiplier"]),
+                ))
+                for signal_date in candidate_dates:
+                    decision = calculate_bull_decision(
+                        config, (), frames, {}, signal_date=signal_date,
+                        held_symbols=(symbol,) if signal_date in bearish else (),
+                        pending_exit_symbols=pending_exit_symbols,
+                        run_type=run_type,
+                    )
+                    orders = self.next_open_engine.queue_decision(config, decision, frames)
+                    if orders:
+                        pending_exit_symbols.add(symbol)
+                        break
+                continue
+
+            item = by_symbol.get(symbol)
+            item_date_text = item.get("decisionAsOf") if item else None
+            try:
+                item_date = date.fromisoformat(str(item_date_text))
+            except (TypeError, ValueError):
+                continue
+            # A production decision is usable only for this symbol's own latest
+            # completed bar.  Another market's newer as-of date is irrelevant.
+            if (
+                item_date != latest_date
+                or item_date <= activation_date
+                or item_date < cursors.get(symbol, activation_date)
+            ):
+                continue
+            membership = self._active_membership(item_date)
+            own_membership = (
+                {symbol: membership[symbol]} if symbol in membership else {}
+            )
+            decision = calculate_bull_decision(
+                config, (item,), frames, own_membership,
+                signal_date=item_date,
+                pending_exit_symbols=pending_exit_symbols,
+                run_type=run_type,
+            )
+            self.next_open_engine.queue_decision(config, decision, frames)
 
     def _get_next_open_snapshot(
         self,
@@ -762,15 +941,19 @@ class PortfolioStrategyService:
             ).fetchall()
             latest_bull_run = conn.execute(
                 """SELECT * FROM decision_runs WHERE account_id = ?
-                AND authoritative = 1 AND run_type = 'BULL_DAILY'
+                AND authoritative = 1 AND run_type LIKE 'BULL_DAILY:%'
                 ORDER BY signal_date DESC, id DESC LIMIT 1""",
                 (account["id"],),
             ).fetchone()
             bull_rows = [] if latest_bull_run is None else conn.execute(
-                """SELECT * FROM decision_items WHERE decision_run_id = ?
-                AND event_type = 'BULL_FLIP_ENTRY'
-                ORDER BY priority DESC, symbol""",
-                (latest_bull_run["id"],),
+                """SELECT i.*, r.signal_date AS run_signal_date
+                FROM decision_items i JOIN decision_runs r
+                  ON r.id = i.decision_run_id
+                WHERE r.account_id = ? AND r.authoritative = 1
+                  AND r.run_type LIKE 'BULL_DAILY:%'
+                  AND r.signal_date = ? AND i.event_type = 'BULL_FLIP_ENTRY'
+                ORDER BY i.priority DESC, i.symbol""",
+                (account["id"], latest_bull_run["signal_date"]),
             ).fetchall()
             data_quality_count = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_events_v2 WHERE account_id = ?",
@@ -826,7 +1009,7 @@ class PortfolioStrategyService:
             payload = json.loads(row["payload_json"])
             bull_candidates.append({
                 "symbol": row["symbol"], "market": row["market"],
-                "signalDate": latest_bull_run["signal_date"],
+                "signalDate": row["run_signal_date"],
                 "eligible": bool(row["eligible"]), "reason": row["reason"],
                 "permission": payload.get("permission"),
                 "referenceSymbol": payload.get("referenceSymbol"),

@@ -55,6 +55,20 @@ def _entry(symbol: str, market: str) -> dict:
     }
 
 
+def _exit(symbol: str, market: str, signal_date: date) -> FrozenDecision:
+    item = {
+        "symbol": symbol, "event_type": "ST_BEAR_EXIT", "market": market,
+        "sleeve": "satellite", "eligible": True, "target_weight": 0.0,
+        "priority": 1_000_000_000.0, "reason": "first bearish close", "payload": {},
+    }
+    return FrozenDecision(
+        run_type=f"BULL_DAILY:{symbol}", market_data_date=signal_date,
+        signal_date=signal_date, universe_version="monthly_pit_v1",
+        config_hash="config", input_hash=payload_hash({"date": signal_date.isoformat()}),
+        data_quality_status="OK", payload={"items": [item]}, items=(item,),
+    )
+
+
 def test_multi_market_orders_execute_on_independent_dates_and_refresh_is_idempotent(tmp_path: Path):
     ledger = PortfolioLedger(tmp_path / "paper.sqlite")
     engine = NextOpenPaperEngine(ledger)
@@ -136,6 +150,53 @@ def test_missing_open_delays_to_next_valid_open_without_close_substitution(tmp_p
         order = conn.execute("SELECT * FROM paper_orders").fetchone()
         assert order["expected_execution_date"] == "2021-04-05"
         assert order["actual_execution_date"] == "2021-04-06"
+    finally:
+        conn.close()
+
+
+def test_bear_exit_executes_at_symbols_next_open_and_repeat_is_inert(tmp_path: Path):
+    ledger = PortfolioLedger(tmp_path / "paper.sqlite")
+    engine = NextOpenPaperEngine(ledger)
+    config = get_strategy("core90_ma200_bull10")
+    engine.activate(config, activation_date=date(2021, 3, 31))
+    prices = {"AAPL": _frame([
+        ("2021-04-01", 120.0, 120.0),
+        ("2021-04-05", 121.0, 121.0),
+        ("2021-04-06", 118.0, 118.0),
+    ])}
+    engine.queue_decision(
+        config, _bull_decision((_entry("AAPL", "us"),)), prices,
+    )
+    engine.reconcile(config, prices, through_date=date(2021, 4, 5))
+    exit_decision = _exit("AAPL", "us", date(2021, 4, 5))
+    engine.queue_decision(config, exit_decision, prices)
+    result = engine.reconcile(config, prices, through_date=date(2021, 4, 6))
+    assert result[0]["actual_execution_date"] == "2021-04-06"
+    assert result[0]["actual_open"] == 118.0
+    engine.value(config, prices, date(2021, 4, 6))
+
+    conn = connect(ledger.db_path)
+    try:
+        before = tuple(conn.execute(query).fetchone()[0] for query in (
+            "SELECT COUNT(*) FROM decision_runs",
+            "SELECT COUNT(*) FROM paper_orders",
+            "SELECT COUNT(*) FROM paper_executions",
+            "SELECT COUNT(*) FROM portfolio_nav_v2",
+        ))
+    finally:
+        conn.close()
+    engine.queue_decision(config, exit_decision, prices)
+    assert engine.reconcile(config, prices, through_date=date(2021, 4, 6)) == ()
+    engine.value(config, prices, date(2021, 4, 6))
+    conn = connect(ledger.db_path)
+    try:
+        after = tuple(conn.execute(query).fetchone()[0] for query in (
+            "SELECT COUNT(*) FROM decision_runs",
+            "SELECT COUNT(*) FROM paper_orders",
+            "SELECT COUNT(*) FROM paper_executions",
+            "SELECT COUNT(*) FROM portfolio_nav_v2",
+        ))
+        assert after == before
     finally:
         conn.close()
 

@@ -105,6 +105,8 @@ class NextOpenPaperEngine:
                 activation_date=activation_date,
                 metadata={
                     "mode": config.params["activation_mode"],
+                    "accountOrigin": "first_activation",
+                    "historicalContinuation": False,
                     "historicalTradesBackfilled": False,
                 },
                 conn=conn,

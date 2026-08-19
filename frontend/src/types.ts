@@ -238,6 +238,8 @@ export interface PortfolioStrategyItem {
   presentationGroup: 'primary' | 'comparison';
   isPrimary: boolean;
   benchmarkStrategyId?: string | null;
+  activationDate?: string | null;
+  accountOrigin: 'not_activated' | 'first_activation' | 'legacy_preexisting' | string;
 }
 
 export interface PortfolioWeightItem {

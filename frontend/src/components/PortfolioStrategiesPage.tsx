@@ -129,7 +129,9 @@ export default function PortfolioStrategiesPage() {
   const operations = snapshot?.operations || EMPTY_OPERATIONS;
   const allOrders = primary.flatMap(item => (snapshots[item.strategyId]?.operations || EMPTY_OPERATIONS).orders
     .map(order => ({ ...order, strategyName: item.displayName })));
-  const urgentOrders = allOrders.filter(order => order.due || order.status === 'PENDING' || order.status === 'DELAYED');
+  const urgentOrders = allOrders.filter(
+    order => order.due || ['PENDING', 'WAITING_OPEN', 'DELAYED'].includes(order.status),
+  );
   const totalDue = primary.reduce((sum, item) => sum + (snapshots[item.strategyId]?.operations?.dueOrderCount || 0), 0);
   const totalWaiting = primary.reduce((sum, item) => sum + (snapshots[item.strategyId]?.operations?.waitingOpenCount || 0), 0);
   const totalAnomalies = primary.reduce((sum, item) => {

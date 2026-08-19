@@ -25,7 +25,7 @@ python3 scripts/openclaw_supertrend_alerts.py \
   --include-portfolio
 ```
 
-Run it from the trading repository root. Substitute the configured production API base only under the source rule above. The script reads data; it does not refresh portfolios.
+Run it from the trading repository root. Substitute the configured production API base only under the source rule above. The script reads data and the latest daily-job status; it does not refresh or activate portfolios.
 
 For a focused question, query the API directly. Read [references/api-contract.md](references/api-contract.md) before constructing direct requests or interpreting fields.
 
@@ -46,6 +46,8 @@ Report in this order:
 4. Current holdings, cash, and gross exposure.
 5. NAV, drawdown, and difference versus RiskParity.
 6. Active diagnostics, calculation errors, and data-quality audit events.
+
+Before stating that data is current, inspect `GET /portfolio-strategies/daily-job-status`. Report a failed strategy independently and identify markets whose completed daily bar was not confirmed. An inactive account is not the same as an activated all-cash account.
 
 Do not describe a pending order as filled. For next-open strategies, a missing Open means delayed, never replaced with Close or silently cancelled. Different markets can execute on different dates. MA200 blocks only a new entry; it does not liquidate an existing holding or authorize a later catch-up purchase.
 
