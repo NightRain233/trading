@@ -17,7 +17,7 @@ cd "$project_dir"
 docker compose exec -T backend uv run --no-dev python portfolio_daily_job.py
 job_status=$?
 
-python3 scripts/openclaw_supertrend_alerts.py \
+docker compose exec -T backend uv run --no-dev python /app/scripts/openclaw_supertrend_alerts.py \
   --api-base "$api_base" \
   --mode daily-brief \
   --format markdown > "$report_path"

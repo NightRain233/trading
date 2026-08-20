@@ -29,6 +29,7 @@ services:
       - ./backend/data:/app/data
       - ./backend/backtest_results:/app/backtest_results
       - ./backend/watchlist.json:/app/watchlist.json
+      - ./scripts:/app/scripts:ro
 
   frontend:
     build:

@@ -151,7 +151,7 @@ CRON_TZ=Asia/Shanghai
 The report can also be generated independently after a successful refresh:
 
 ```bash
-python scripts/openclaw_supertrend_alerts.py \
+docker compose exec -T backend uv run --no-dev python /app/scripts/openclaw_supertrend_alerts.py \
   --api-base http://127.0.0.1:8000/api \
   --mode daily-brief \
   --format markdown \

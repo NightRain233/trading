@@ -3,8 +3,9 @@
 ## 调度设置
 
 ```bash
-python /root/openclaw_supertrend_alerts.py \
-  --api-base http://8.153.71.148/api \
+cd /home/zsd/trading
+docker compose exec -T backend uv run --no-dev python /app/scripts/openclaw_supertrend_alerts.py \
+  --api-base http://127.0.0.1:8000/api \
   --mode daily-brief \
   --format markdown \
   --include-portfolio
