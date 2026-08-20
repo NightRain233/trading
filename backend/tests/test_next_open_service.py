@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from portfolio_strategies.ledger import connect
+from portfolio_strategies.market_data import PortfolioMarketData
+from portfolio_strategies.models import CalculationState, StrategyCalculation, StrategyObservation
 from portfolio_strategies.next_open_data import _completed_through
 from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.service import PortfolioStrategyService
@@ -91,6 +93,39 @@ def test_activation_is_cash_only_idempotent_and_rejects_date_change(tmp_path: Pa
         service.activate(
             "core90_ma200_bull10", activation_date=date(2026, 8, 17),
         )
+
+
+def test_legacy_refresh_does_not_value_before_activation_date(tmp_path: Path, monkeypatch):
+    service = PortfolioStrategyService(
+        data_dir=tmp_path / "data", db_path=tmp_path / "paper.sqlite",
+        clock=lambda: datetime(2026, 8, 20, 0, 30),
+    )
+    service.activate(
+        "theme_alpha", activation_date=date(2026, 8, 20),
+        now=datetime(2026, 8, 20, 0, 30),
+    )
+    market = PortfolioMarketData(
+        open=pd.DataFrame(), high=pd.DataFrame(), low=pd.DataFrame(),
+        close=pd.DataFrame(), sessions=pd.DatetimeIndex([]),
+        market_data_date=date(2026, 8, 19), diagnostics=(),
+    )
+    calculation = StrategyCalculation(
+        strategy_id="theme_alpha", strategy_version="1.0.0",
+        state=CalculationState.NOT_DUE, market_data_date=date(2026, 8, 19),
+        signal_date=date(2026, 8, 10),
+        observation=StrategyObservation(
+            as_of_date=date(2026, 8, 19), state="NOT_DUE", reason="test",
+        ),
+    )
+    valued: list[date] = []
+    monkeypatch.setattr(service, "_refresh_and_load", lambda _config: market)
+    monkeypatch.setattr("portfolio_strategies.service._calculate", lambda *_args: calculation)
+    monkeypatch.setattr(service.engine, "reconcile", lambda *_args: ())
+    monkeypatch.setattr(
+        service.engine, "value", lambda _config, _market, valuation_date: valued.append(valuation_date),
+    )
+    service.refresh("theme_alpha", now=datetime(2026, 8, 20, 0, 30))
+    assert valued == []
 
 
 def test_stale_core_does_not_block_fresh_us_satellite_signal(tmp_path: Path, monkeypatch):

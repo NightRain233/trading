@@ -464,17 +464,21 @@ class PortfolioStrategyService:
         try:
             calculation = _calculate(config, market_data, as_of)
         except Exception:
-            return self.get_snapshot(strategy_id)
+            return self.get_snapshot(config.strategy_id)
 
         account = self.ledger.get_account(config)
         if account is None:
             return self.get_snapshot(config.strategy_id)
-        elif calculation.state == CalculationState.READY and calculation.signal_date is not None:
-            activation = self.events.activation(account["id"])
+        activation = self.events.activation(account["id"])
+        activation_date = (
+            date.fromisoformat(activation["activation_date"])
+            if activation is not None else None
+        )
+        if calculation.state == CalculationState.READY and calculation.signal_date is not None:
             if (
                 activation is None
                 or calculation.signal_date
-                > date.fromisoformat(activation["activation_date"])
+                > activation_date
             ):
                 self.engine.queue_signal(config, calculation)
 
@@ -486,7 +490,14 @@ class PortfolioStrategyService:
 
         # Daily valuation
         account = self.ledger.get_account(config)
-        if account is not None and market_data.market_data_date is not None:
+        if (
+            account is not None
+            and market_data.market_data_date is not None
+            and (
+                activation_date is None
+                or market_data.market_data_date >= activation_date
+            )
+        ):
             try:
                 self.engine.value(config, market_data, market_data.market_data_date)
             except (PaperAccountNotFoundError, ValueError):
