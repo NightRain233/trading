@@ -116,6 +116,40 @@ def test_multi_market_orders_execute_on_independent_dates_and_refresh_is_idempot
         conn.close()
 
 
+def test_catch_up_reconciles_crossed_actual_dates_in_chronological_order(tmp_path: Path):
+    ledger = PortfolioLedger(tmp_path / "paper.sqlite")
+    engine = NextOpenPaperEngine(ledger)
+    config = get_strategy("core90_ma200_bull10")
+    engine.activate(config, activation_date=date(2021, 4, 1))
+    prices = {
+        "002119.SZ": _frame([
+            ("2021-04-01", 10.0, 10.0),
+            ("2021-04-02", None, 10.0),
+            ("2021-04-10", 11.0, 11.0),
+        ]),
+        "AAPL": _frame([
+            ("2021-04-01", 120.0, 120.0),
+            ("2021-04-05", 121.0, 121.0),
+            ("2021-04-10", 122.0, 122.0),
+        ]),
+    }
+    decision = _bull_decision((
+        _entry("002119.SZ", "a_share"),
+        _entry("AAPL", "us"),
+    ))
+
+    engine.queue_decision(config, decision, prices)
+    executions = engine.reconcile(config, prices, through_date=date(2021, 4, 10))
+
+    assert [row["actual_execution_date"] for row in executions] == [
+        "2021-04-05",
+        "2021-04-10",
+    ]
+    state = engine.current_state(config)
+    assert state is not None
+    assert state.held_symbols("satellite") == {"002119.SZ", "AAPL"}
+
+
 def test_missing_open_delays_to_next_valid_open_without_close_substitution(tmp_path: Path):
     ledger = PortfolioLedger(tmp_path / "paper.sqlite")
     engine = NextOpenPaperEngine(ledger)

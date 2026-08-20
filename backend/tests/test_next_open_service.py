@@ -182,3 +182,41 @@ def test_completed_bar_cutoffs_are_market_specific():
     assert _completed_through("AAPL", china_evening) == date(2026, 6, 30)
     assert _completed_through("BTC-USD", china_evening) == date(2026, 6, 30)
     assert _completed_through("AAPL", datetime(2026, 7, 2, 6, 30)) == date(2026, 7, 1)
+
+
+def test_morning_refresh_uses_latest_completed_core_session_for_staleness_and_nav(
+    tmp_path: Path, monkeypatch,
+):
+    morning = datetime(2026, 7, 2, 7, 15)
+    service = PortfolioStrategyService(
+        data_dir=tmp_path,
+        db_path=tmp_path / "paper.sqlite",
+        clock=lambda: morning,
+    )
+    service.activate(
+        "risk_parity_core_next_open",
+        activation_date=date(2026, 6, 30),
+        now=morning,
+    )
+
+    dates = pd.bdate_range(end="2026-07-01", periods=40)
+    frames = {
+        symbol: pd.DataFrame({
+            "Open": 100.0 + offset,
+            "High": 101.0 + offset,
+            "Low": 99.0 + offset,
+            "Close": [100.0 + offset + index * 0.1 for index in range(len(dates))],
+            "Volume": 1_000_000.0,
+        }, index=dates)
+        for offset, symbol in enumerate(("510300.SS", "513100.SS", "518880.SS"))
+    }
+    monkeypatch.setattr(
+        service,
+        "_next_open_frames",
+        lambda *_args, **_kwargs: (frames, {}),
+    )
+
+    snapshot = service.refresh("risk_parity_core_next_open", now=morning)
+
+    assert snapshot["nav"]["valuationDate"] == "2026-07-01"
+    assert snapshot["operations"]["dataQualityEventCount"] == 0

@@ -34,7 +34,7 @@ from .frozen_xquant import (
     frozen_universe,
     normalize_daily,
 )
-from .next_open_data import load_next_open_frames
+from .next_open_data import _completed_through, load_next_open_frames
 from .next_open_engine import NextOpenPaperEngine
 from .next_open_strategies import (
     CORE_SYMBOLS,
@@ -682,13 +682,14 @@ class PortfolioStrategyService:
             errors = dict(errors)
             errors["ACTIVATION_RECORD"] = "missing_for_existing_next_open_account"
             return self._get_next_open_snapshot(config, load_errors=errors)
+        completed_core_cutoff = _completed_through("510300.SS", effective_now)
         expected_sessions = xcals.get_calendar("XSHG").sessions_in_range(
-            pd.Timestamp(through_date) - pd.Timedelta(days=14),
-            pd.Timestamp(through_date),
+            pd.Timestamp(completed_core_cutoff) - pd.Timedelta(days=14),
+            pd.Timestamp(completed_core_cutoff),
         )
         expected_core_date = (
             pd.Timestamp(expected_sessions[-1]).tz_localize(None).date()
-            if not expected_sessions.empty else through_date
+            if not expected_sessions.empty else completed_core_cutoff
         )
         core_stale = market_data_date < expected_core_date
         if core_stale:
@@ -782,7 +783,7 @@ class PortfolioStrategyService:
         # only catches independently-dated markets already due from prior days.
         self.next_open_engine.reconcile(config, frames, through_date=through_date)
         try:
-            self.next_open_engine.value(config, frames, through_date)
+            self.next_open_engine.value(config, frames, market_data_date)
         except ValueError:
             pass
         return self._get_next_open_snapshot(config, load_errors=errors)

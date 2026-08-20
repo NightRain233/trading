@@ -493,39 +493,84 @@ class NextOpenPaperEngine:
             results: list[dict[str, Any]] = []
 
             core_orders = [row for row in pending if row["order_type"] == "CORE_REBALANCE"]
-            if core_orders:
-                results.extend(self._reconcile_core_batch(
-                    conn, account, config, state, prices, core_orders, through_date
-                ))
-
             other = [row for row in pending if row["order_type"] != "CORE_REBALANCE"]
-            by_date: dict[date, list[sqlite3.Row]] = defaultdict(list)
+            work: list[tuple[date, int, float, str, int, object]] = []
+            if core_orders:
+                actual = self._candidate_core_execution_date(conn, prices, core_orders)
+                work.append((
+                    actual or date.max, 0, 0.0, "core",
+                    min(int(row["id"]) for row in core_orders), core_orders,
+                ))
             for order in other:
                 due = date.fromisoformat(
                     order["next_attempt_date"] or order["expected_execution_date"]
                 )
                 if due <= through_date:
-                    by_date[due].append(order)
-            for due_date in sorted(by_date):
-                orders = sorted(
-                    by_date[due_date],
-                    key=lambda row: (
-                        0 if row["side"] == "SELL" else 1,
-                        -float(row["priority"]), row["symbol"], row["id"],
-                    ),
+                    actual = self._candidate_single_execution_date(conn, prices, order)
+                    work.append((
+                        actual or date.max,
+                        1 if order["side"] == "SELL" else 2,
+                        -float(order["priority"]),
+                        str(order["symbol"]),
+                        int(order["id"]),
+                        order,
+                    ))
+
+            # Missing Opens can make an order with an earlier expected date
+            # execute after a later order. Apply state changes on the actual
+            # execution timeline so catch-up cannot write snapshots backwards.
+            for _actual, kind, _priority, _symbol, _id, payload in sorted(work):
+                if kind == 0:
+                    results.extend(self._reconcile_core_batch(
+                        conn, account, config, state, prices,
+                        payload, through_date,
+                    ))
+                    continue
+                result = self._reconcile_single_order(
+                    conn, account, config, state, prices, payload, through_date
                 )
-                for order in orders:
-                    result = self._reconcile_single_order(
-                        conn, account, config, state, prices, order, through_date
+                results.append(result)
+                actual_text = result.get("actual_execution_date")
+                if actual_text:
+                    self._save_snapshot(
+                        conn, account, config, date.fromisoformat(actual_text),
+                        state, prices, snapshot_reason="bull_order_execution",
                     )
-                    results.append(result)
-                    actual_text = result.get("actual_execution_date")
-                    if actual_text:
-                        self._save_snapshot(
-                            conn, account, config, date.fromisoformat(actual_text),
-                            state, prices, snapshot_reason="bull_order_execution",
-                        )
             return tuple(results)
+
+    @staticmethod
+    def _candidate_core_execution_date(
+        conn: sqlite3.Connection,
+        prices: Mapping[str, pd.DataFrame],
+        orders: list[sqlite3.Row],
+    ) -> date | None:
+        signal_date = date.fromisoformat(orders[0]["signal_date"])
+        last_attempt = conn.execute(
+            """
+            SELECT MAX(attempted_date) FROM paper_order_attempts
+            WHERE order_id IN ({})
+            """.format(",".join("?" for _ in orders)),
+            tuple(row["id"] for row in orders),
+        ).fetchone()[0]
+        search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
+        return next_core_valid_open_date(prices, search_after)
+
+    @staticmethod
+    def _candidate_single_execution_date(
+        conn: sqlite3.Connection,
+        prices: Mapping[str, pd.DataFrame],
+        order: sqlite3.Row,
+    ) -> date | None:
+        frame = prices.get(order["symbol"])
+        if frame is None:
+            return None
+        last_attempt = conn.execute(
+            "SELECT MAX(attempted_date) FROM paper_order_attempts WHERE order_id = ?",
+            (order["id"],),
+        ).fetchone()[0]
+        signal_date = date.fromisoformat(order["signal_date"])
+        search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
+        return next_valid_open_date(frame, search_after)
 
     def _reconcile_core_batch(
         self,
