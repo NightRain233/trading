@@ -65,6 +65,49 @@ def test_quote_extends_legacy_payload_with_unified_decision(monkeypatch):
     assert serialized["marketMode"] == "seek"
 
 
+def test_quote_returns_actual_weekly_candles_when_requested(monkeypatch):
+    daily_candles = [{"time": "2026-08-19", "close": 4551.0, "st_dir": 1}]
+    weekly_candles = [{"time": "2026-08-23", "close": 4551.0, "st_dir": -1}]
+    monkeypatch.setattr(
+        main,
+        "analyze_stock",
+        lambda symbol: {
+            "symbol": symbol,
+            "name": symbol,
+            "price": 4551.0,
+            "changePercent": 4.2,
+            "ema20": 4300.0,
+            "ema50": 4200.0,
+            "adx": 30.0,
+            "rsi": 60.0,
+            "rsiPeriod": 14,
+            "rsiStatus": "中性",
+            "rsiOverbought": 70.0,
+            "rsiOversold": 30.0,
+            "trend": "强势多头",
+            "signal": "持有",
+            "candles": daily_candles,
+            "weekly_candles": weekly_candles,
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "supertrend_scan",
+        lambda **kwargs: {
+            "items": [],
+            "coverage": {},
+            "thresholds": {},
+            "marketModes": {},
+        },
+    )
+
+    result = main.get_quote("GC=F", timeframe="1W")
+
+    assert result["candles"] == weekly_candles
+    assert result["candles"][0]["time"] != daily_candles[0]["time"]
+    assert result["candlesTimeframe"] == "1W"
+
+
 def test_quote_keeps_legacy_payload_available_when_decision_build_fails(monkeypatch):
     legacy = {
         "symbol": "AAPL",

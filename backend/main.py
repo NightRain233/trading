@@ -607,7 +607,7 @@ def api_data_source_status():
 
 
 @app.get("/api/quote/{symbol}", response_model=StockResponse)
-def get_quote(symbol: str):
+def get_quote(symbol: str, timeframe: Literal["1D", "1W"] = "1D"):
     normalized_symbol = symbol.upper()
     try:
         data = analyze_stock(normalized_symbol)
@@ -624,6 +624,13 @@ def get_quote(symbol: str):
         ) from exc
     if not data:
         raise HTTPException(status_code=404, detail="Stock not found or insufficient data")
+
+    # ``timeframe`` used to be silently ignored by this endpoint.  A caller
+    # requesting 1W therefore received daily candles (including daily ST_Dir)
+    # and could incorrectly compare them with the formal weeklyState field.
+    if timeframe == "1W":
+        data["candles"] = data.get("weekly_candles", [])
+    data["candlesTimeframe"] = timeframe
 
     try:
         decision_payload = supertrend_scan(

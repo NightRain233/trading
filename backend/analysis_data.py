@@ -820,6 +820,29 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if df_weekly['ATR'].isnull().all():
             df_weekly['ATR'] = 0
 
+        # Keep the weekly chart and the SuperTrend scan on the same indicator
+        # contract.  Previously weekly candles had no ST fields, which made a
+        # ``timeframe=1W`` consumer prone to mistaking daily ST values for the
+        # weekly direction.
+        st = ta.supertrend(
+            df_weekly['High'],
+            df_weekly['Low'],
+            df_weekly['Close'],
+            length=ST_LENGTH,
+            multiplier=ST_MULTIPLIER,
+        )
+        if st is not None and not st.empty:
+            val_col = next((
+                c for c in st.columns
+                if c.startswith('SUPERT_')
+                and not any(c.startswith(p) for p in ('SUPERTd_', 'SUPERTs_', 'SUPERTl_', 'SUPERTu_'))
+            ), None)
+            dir_col = next((c for c in st.columns if c.startswith('SUPERTd_')), None)
+            df_weekly['ST_Val'] = st[val_col] if val_col else None
+            df_weekly['ST_Dir'] = st[dir_col] if dir_col else None
+        else:
+            df_weekly['ST_Val'] = df_weekly['ST_Dir'] = None
+
         return df_weekly
 
 
