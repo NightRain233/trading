@@ -318,6 +318,60 @@ def test_pullback_requires_prior_zone_bar_and_current_restrengthening_close():
     assert by_symbol["NVDA"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
 
 
+def test_red_low_volatility_pullback_uses_seek_adx_threshold_twenty_only():
+    candles = [
+        {"time": "2026-08-14", "close": 100.5, "st_val": 100.0, "st_dir": 1},
+        {"time": "2026-08-17", "close": 101.0, "st_val": 100.0, "st_dir": 1},
+    ]
+    items = _representatives() + [
+        _item("512890.SS", adx=20.0, distance_atr=0.5, candles=candles),
+        _item("510880.SS", adx=20.0, distance_atr=0.5, candles=candles),
+    ]
+
+    response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
+    red_low_vol = next(item for item in response["items"] if item["symbol"] == "512890.SS")
+    other_dividend = next(item for item in response["items"] if item["symbol"] == "510880.SS")
+
+    assert red_low_vol["decision"]["permission"] == "buy"
+    assert red_low_vol["decision"]["reasonCodes"][-2:] == ["ADX_PASSED", "RESTRENGTH_CONFIRMED"]
+    assert other_dividend["decision"]["permission"] == "wait"
+    assert other_dividend["decision"]["failedGates"] == ["ADX_BELOW_25"]
+    assert response["thresholds"]["pullbackSeekAdxOverrides"] == {"512890.SS": 20.0}
+
+    breakout_items = _representatives() + [
+        _item("512890.SS", state="bull_flip", adx=20.0, distance_atr=0.5),
+    ]
+    breakout_response = build_scan_response(
+        breakout_items,
+        requested_symbols=[item["symbol"] for item in breakout_items],
+    )
+    breakout = next(item for item in breakout_response["items"] if item["symbol"] == "512890.SS")
+
+    assert breakout["decision"]["permission"] == "watch"
+    assert breakout["decision"]["failedGates"] == ["ADX_BELOW_25"]
+
+
+def test_red_low_volatility_pullback_keeps_cautious_market_threshold():
+    items = _representatives()
+    next(item for item in items if item["symbol"] == "000300.SS")["monthlyBoll"]["midDirection"] = "falling"
+    items.append(_item(
+        "512890.SS",
+        adx=25.0,
+        distance_atr=0.5,
+        candles=[
+            {"time": "2026-08-14", "close": 100.5, "st_val": 100.0, "st_dir": 1},
+            {"time": "2026-08-17", "close": 101.0, "st_val": 100.0, "st_dir": 1},
+        ],
+    ))
+
+    response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
+    red_low_vol = next(item for item in response["items"] if item["symbol"] == "512890.SS")
+
+    assert red_low_vol["marketMode"] == "cautious"
+    assert red_low_vol["decision"]["permission"] == "wait"
+    assert red_low_vol["decision"]["failedGates"] == ["ADX_BELOW_30"]
+
+
 def test_v_reversal_does_not_relabel_an_existing_daily_bull_trend():
     items = _representatives() + [
         _item("AAPL", state="bull", close=96.5, boll_lower=96.0, atr=2.0, ratio20=0.7),

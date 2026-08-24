@@ -45,7 +45,7 @@ Click "刷新当前策略" to reconcile new market data and pending paper orders
 - RiskParity core: 510300.SS / 513100.SS / 518880.SS, 20 common-session returns, inverse volatility, every 10 common sessions, 10 bps one-way cost.
 - Core signals are generated after the common Close and execute at the next common valid Open. Between rebalances, quantities remain unchanged and weights drift naturally.
 - Bull sleeve: fixed 10% total budget, 10% maximum per satellite position, 10 positions maximum, ST 7/3, 5 bps commission plus 5 bps slippage each side.
-- `setup=breakout` bull flips from production policy `scan_v2_right_side_5` are eligible even when formal permission is not `buy`.
+- `setup=breakout` bull flips captured under the frozen `scan_v2_right_side_5` research contract are eligible even when formal permission is not `buy`.
 - MA200 gates entries only. References are 510300.SS, 2800.HK, SPY, BTC-USD, and GC=F by market. A blocked signal is never bought later without a new bull flip.
 - The monthly observation pool is point-in-time. The frozen 2026-07-01 xquant membership is stored as a hashed fixture; later months are generated from the information available at their month-end snapshot.
 

@@ -10,13 +10,16 @@ from zoneinfo import ZoneInfo
 
 
 SCHEMA_VERSION = 2
-POLICY_VERSION = "scan_v2_right_side_5"
+POLICY_VERSION = "scan_v2_right_side_6"
 
 NORMAL_ADX_THRESHOLD = 25.0
 CAUTIOUS_ADX_THRESHOLD = 30.0
 BREAKOUT_MAX_NEXT_SESSION_GAP_ATR = 0.5
 PULLBACK_ZONE_ATR = 1.5
 PULLBACK_APPROACHING_ATR = 2.5
+PULLBACK_SEEK_ADX_OVERRIDES = {
+    "512890.SS": 20.0,
+}
 COMPRESSION_MAX_DISTANCE_ATR = 1.5
 COMPRESSION_MAX_TRIGGER_SLIPPAGE_ATR = 0.5
 COMPRESSION_NORMAL_ADX_MIN = 18.0
@@ -262,6 +265,17 @@ def _compression_adx_threshold(mode: str) -> Optional[float]:
     if mode == "cautious":
         return COMPRESSION_CAUTIOUS_ADX_MIN
     return None
+
+
+def _pullback_adx_threshold(
+    item: dict[str, Any],
+    market_context: dict[str, Any],
+) -> Optional[float]:
+    threshold = _finite_float(market_context.get("adxThreshold"))
+    if market_context.get("mode") != "seek":
+        return threshold
+    symbol = str(item.get("symbol") or "").upper()
+    return PULLBACK_SEEK_ADX_OVERRIDES.get(symbol, threshold)
 
 
 def _first_gate(failed: list[str]) -> Optional[str]:
@@ -871,6 +885,7 @@ def _decision(
     if pullback["enteredZone"]:
         reasons = ["DATA_VALID"]
         failed = []
+        pullback_threshold = _pullback_adx_threshold(item, market_context)
         if mode == "seek":
             reasons.append("MARKET_SEEK")
         elif mode == "cautious":
@@ -878,13 +893,13 @@ def _decision(
         else:
             failed.append("MARKET_MODE_INSUFFICIENT")
         reasons.extend(["WEEKLY_BULL", "PULLBACK_ZONE", "SUPPORT_HELD"])
-        if threshold is not None:
-            if adx is not None and adx >= threshold:
+        if pullback_threshold is not None:
+            if adx is not None and adx >= pullback_threshold:
                 reasons.append("ADX_PASSED")
             elif adx is None:
                 failed.append("ADX_UNAVAILABLE")
             else:
-                failed.append(f"ADX_BELOW_{int(threshold)}")
+                failed.append(f"ADX_BELOW_{int(pullback_threshold)}")
         if pullback["restrengthConfirmed"]:
             reasons.append("RESTRENGTH_CONFIRMED")
         else:
@@ -1262,6 +1277,7 @@ def build_scan_response(
             "compressionLiveTradingAllowed": False,
             "normalAdx": NORMAL_ADX_THRESHOLD,
             "cautiousAdx": CAUTIOUS_ADX_THRESHOLD,
+            "pullbackSeekAdxOverrides": dict(PULLBACK_SEEK_ADX_OVERRIDES),
             "breakoutMaxNextSessionGapAtr": BREAKOUT_MAX_NEXT_SESSION_GAP_ATR,
             "pullbackZoneAtr": PULLBACK_ZONE_ATR,
             "pullbackApproachingAtr": PULLBACK_APPROACHING_ATR,
