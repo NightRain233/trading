@@ -182,6 +182,12 @@ def test_hong_kong_fallback_representatives_cover_missing_hsi_series():
     assert hong_kong["mode"] == "seek"
     assert hong_kong["missingSymbols"] == ["^HSI"]
     assert hong_kong["effectiveRepresentatives"] == ["2800.HK", "513010.SS"]
+    assert hong_kong["fallbackUsed"] == ["513010.SS"]
+    assert hong_kong["effectiveRepresentativeDates"] == {
+        "2800.HK": "2026-08-07",
+        "513010.SS": "2026-08-07",
+    }
+    assert hong_kong["representativeDateMismatch"] is False
     candidate = next(item for item in response["items"] if item["symbol"] == "513120.SS")
     assert candidate["decision"]["permission"] != "wait"
 
@@ -194,6 +200,27 @@ def test_hong_kong_fallback_requires_two_usable_monthly_series():
         representative_items=[_item("513010.SS")],
     )
     assert response["marketModes"]["hong_kong"]["mode"] == "insufficient"
+
+
+def test_hong_kong_representatives_with_mixed_completed_dates_are_insufficient():
+    items = _representatives() + [_item("513120.SS")]
+    representative_items = [
+        _item("^HSI"),
+        {**_item("2800.HK"), "decisionAsOf": "2026-08-10", "latestDataDate": "2026-08-10"},
+    ]
+    response = build_scan_response(
+        items,
+        requested_symbols=[item["symbol"] for item in items],
+        representative_items=representative_items,
+    )
+
+    hong_kong = response["marketModes"]["hong_kong"]
+    assert hong_kong["mode"] == "insufficient"
+    assert hong_kong["representativeDateMismatch"] is True
+    assert hong_kong["effectiveRepresentativeDates"] == {
+        "^HSI": "2026-08-07",
+        "2800.HK": "2026-08-10",
+    }
 
 
 def test_crypto_uses_last_complete_daily_bar_when_current_utc_bar_is_provisional():

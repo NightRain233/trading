@@ -178,6 +178,17 @@ def _representative_status(item: Optional[dict[str, Any]]) -> str:
     return "available" if _monthly_direction(item) is not None else "monthly_direction_unavailable"
 
 
+def _representative_as_of(item: Optional[dict[str, Any]]) -> Optional[str]:
+    """Return the completed-bar date used by a market representative."""
+    if not item:
+        return None
+    decision_as_of = item.get("decisionAsOf")
+    if decision_as_of:
+        return str(decision_as_of)
+    latest_data_date = item.get("latestDataDate")
+    return str(latest_data_date) if latest_data_date else None
+
+
 def build_market_modes(items: Iterable[dict[str, Any]], representative_items: Iterable[dict[str, Any]] = ()) -> dict[str, dict[str, Any]]:
     item_map = {str(item.get("symbol") or "").upper(): item for item in items}
     item_map.update({str(item.get("symbol") or "").upper(): item for item in representative_items})
@@ -201,9 +212,25 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             if direction is not None:
                 directions[symbol] = direction
                 effective_directions[symbol] = direction
+        effective_symbols = list(effective_directions)
+        effective_dates = {
+            symbol: _representative_as_of(item_map.get(symbol))
+            for symbol in effective_symbols
+        }
+        distinct_dates = {value for value in effective_dates.values() if value}
+        representative_date_mismatch = len(distinct_dates) > 1
+        fallback_used = [
+            symbol for symbol in effective_symbols
+            if symbol in fallback_representatives
+        ]
         missing = [symbol for symbol in representatives if primary_directions[symbol] is None]
         values = list(effective_directions.values())
-        if len(values) < len(representatives):
+        if (
+            len(values) < len(representatives)
+            or len(effective_dates) < len(representatives)
+            or any(value is None for value in effective_dates.values())
+            or representative_date_mismatch
+        ):
             mode = "insufficient"
             adx_threshold = None
         elif all(direction in {"rising", "flat"} for direction in values):
@@ -220,6 +247,9 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             "representatives": list(representatives),
             "effectiveRepresentatives": list(effective_directions),
             "fallbackRepresentatives": list(fallback_representatives),
+            "fallbackUsed": fallback_used,
+            "effectiveRepresentativeDates": effective_dates,
+            "representativeDateMismatch": representative_date_mismatch,
             "directions": directions,
             "adxThreshold": adx_threshold,
             "missingSymbols": missing,
