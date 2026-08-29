@@ -6,6 +6,7 @@ import pandas as pd
 from analysis_divergence import (
     build_macd_divergence_summary,
     filter_completed_weekly_bars,
+    is_daily_session_complete,
 )
 
 
@@ -101,6 +102,15 @@ def test_incomplete_daily_session_cannot_confirm_divergence():
     assert before_close["candidate"]["type"] == "bearish"
     assert after_close["asOf"] == session_date
     assert after_close["confirmed"]["type"] == "bearish"
+
+
+def test_hong_kong_daily_session_uses_hong_kong_close_cutoff():
+    session_date = "2026-08-03"
+    before_close = datetime(2026, 8, 3, 16, 0, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+    after_close = datetime(2026, 8, 3, 16, 10, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+
+    assert is_daily_session_complete("2800.HK", session_date, now=before_close) is False
+    assert is_daily_session_complete("^HSI", session_date, now=after_close) is True
 
 
 def test_confirmed_history_does_not_change_when_future_bars_are_appended():

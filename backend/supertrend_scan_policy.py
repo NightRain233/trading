@@ -167,6 +167,21 @@ def _monthly_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
     return str(direction)
 
 
+def _representative_as_of(item: Optional[dict[str, Any]]) -> Optional[str]:
+    """Return the completed-bar date used by a market representative."""
+    if not item:
+        return None
+    raw_value = item.get("decisionAsOf")
+    if not raw_value and item.get("dailySessionComplete") is not False:
+        raw_value = item.get("latestDataDate")
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw_value)).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
 def _representative_status(item: Optional[dict[str, Any]]) -> str:
     if not item:
         return "missing"
@@ -175,18 +190,13 @@ def _representative_status(item: Optional[dict[str, Any]]) -> str:
     integrity = item.get("dataIntegrity") or {}
     if integrity.get("hasGap") or integrity.get("hasRecentGap"):
         return "data_gap"
+    if _representative_as_of(item) is None:
+        return "as_of_unavailable"
     return "available" if _monthly_direction(item) is not None else "monthly_direction_unavailable"
 
 
-def _representative_as_of(item: Optional[dict[str, Any]]) -> Optional[str]:
-    """Return the completed-bar date used by a market representative."""
-    if not item:
-        return None
-    decision_as_of = item.get("decisionAsOf")
-    if decision_as_of:
-        return str(decision_as_of)
-    latest_data_date = item.get("latestDataDate")
-    return str(latest_data_date) if latest_data_date else None
+def _representative_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
+    return _monthly_direction(item) if _representative_status(item) == "available" else None
 
 
 def build_market_modes(items: Iterable[dict[str, Any]], representative_items: Iterable[dict[str, Any]] = ()) -> dict[str, dict[str, Any]]:
@@ -194,7 +204,7 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
     item_map.update({str(item.get("symbol") or "").upper(): item for item in representative_items})
     modes: dict[str, dict[str, Any]] = {}
     for market, representatives in SYSTEM_MARKET_REPRESENTATIVES.items():
-        primary_directions = {symbol: _monthly_direction(item_map.get(symbol)) for symbol in representatives}
+        primary_directions = {symbol: _representative_direction(item_map.get(symbol)) for symbol in representatives}
         fallback_representatives = MARKET_REPRESENTATIVE_FALLBACKS.get(market, ())
         # Keep primary data whenever it is usable, and fill only unavailable
         # slots from the fallback pool.  Requiring two usable directions keeps
@@ -208,7 +218,7 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
         for symbol in fallback_representatives:
             if len(effective_directions) >= len(representatives):
                 break
-            direction = _monthly_direction(item_map.get(symbol))
+            direction = _representative_direction(item_map.get(symbol))
             if direction is not None:
                 directions[symbol] = direction
                 effective_directions[symbol] = direction
@@ -219,6 +229,24 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
         }
         distinct_dates = {value for value in effective_dates.values() if value}
         representative_date_mismatch = len(distinct_dates) > 1
+        effective_venues = {
+            symbol: classify_trading_venue(symbol)
+            for symbol in effective_symbols
+        }
+        # Different exchanges can have different latest completed sessions on
+        # the same wall-clock day. Each item has already passed its own exchange
+        # calendar freshness check, so only a same-venue mismatch is invalid.
+        date_mismatch_accepted = (
+            representative_date_mismatch
+            and len(set(effective_venues.values())) > 1
+        )
+        date_alignment = (
+            "cross_calendar"
+            if date_mismatch_accepted
+            else "same_calendar_mismatch"
+            if representative_date_mismatch
+            else "aligned"
+        )
         fallback_used = [
             symbol for symbol in effective_symbols
             if symbol in fallback_representatives
@@ -229,7 +257,7 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             len(values) < len(representatives)
             or len(effective_dates) < len(representatives)
             or any(value is None for value in effective_dates.values())
-            or representative_date_mismatch
+            or (representative_date_mismatch and not date_mismatch_accepted)
         ):
             mode = "insufficient"
             adx_threshold = None
@@ -249,19 +277,29 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             "fallbackRepresentatives": list(fallback_representatives),
             "fallbackUsed": fallback_used,
             "effectiveRepresentativeDates": effective_dates,
+            "effectiveRepresentativeStatus": {
+                symbol: _representative_status(item_map.get(symbol))
+                for symbol in effective_symbols
+            },
+            "effectiveRepresentativeVenues": effective_venues,
             "representativeDateMismatch": representative_date_mismatch,
+            "representativeDateMismatchAccepted": date_mismatch_accepted,
+            "representativeDateAlignment": date_alignment,
             "directions": directions,
             "adxThreshold": adx_threshold,
             "missingSymbols": missing,
-            "representativeStatus": {symbol: _representative_status(item_map.get(symbol)) for symbol in representatives},
+            "representativeStatus": {
+                symbol: _representative_status(item_map.get(symbol))
+                for symbol in (*representatives, *fallback_representatives)
+            },
             "role": "bond_risk_observation" if market.startswith("bond_") else "equity_permission",
         }
     modes["bond"] = {
         "mode": "insufficient" if any(modes[key]["missingSymbols"] for key in ("bond_cn", "bond_us")) else "cautious",
         "representatives": ["511010.SS", "TLT"],
-        "directions": {symbol: _monthly_direction(item_map.get(symbol)) for symbol in ("511010.SS", "TLT")},
+        "directions": {symbol: _representative_direction(item_map.get(symbol)) for symbol in ("511010.SS", "TLT")},
         "adxThreshold": None,
-        "missingSymbols": [symbol for symbol in ("511010.SS", "TLT") if _monthly_direction(item_map.get(symbol)) is None],
+        "missingSymbols": [symbol for symbol in ("511010.SS", "TLT") if _representative_direction(item_map.get(symbol)) is None],
         "representativeStatus": {symbol: _representative_status(item_map.get(symbol)) for symbol in ("511010.SS", "TLT")},
         "role": "bond_risk_observation",
     }

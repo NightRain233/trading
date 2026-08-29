@@ -1842,8 +1842,13 @@ def _st_data_stale(
     normalized = symbol.upper()
     if normalized.endswith("-USD"):
         reference_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        last_complete_date = reference_now.date() - timedelta(days=1)
-        return decision_date < last_complete_date
+        reference_date = reference_now.date()
+        last_complete_date = reference_date - timedelta(days=1)
+        return (
+            decision_date > reference_date
+            or (live_date is not None and live_date > reference_date)
+            or decision_date < last_complete_date
+        )
 
     if normalized.endswith((".SS", ".SZ")):
         calendar_name = "XSHG"
@@ -1854,13 +1859,27 @@ def _st_data_stale(
     else:
         calendar_name = "XNYS"
 
+    reference_now = pd.Timestamp(now or datetime.now(timezone.utc))
+    reference_now = reference_now.tz_localize("UTC") if reference_now.tzinfo is None else reference_now.tz_convert("UTC")
+    market_timezone = {
+        "XSHG": "Asia/Shanghai",
+        "XHKG": "Asia/Hong_Kong",
+        "CMES": "America/New_York",
+        "XNYS": "America/New_York",
+    }[calendar_name]
+    reference_date = reference_now.tz_convert(market_timezone).date()
+    if decision_date > reference_date:
+        return True
+    if live_date is not None and live_date < decision_date:
+        return True
+    if live_date is not None and live_date > reference_date:
+        return True
+
     try:
         calendar = _st_get_exchange_calendar(calendar_name)
-        reference_now = pd.Timestamp(now or datetime.now(timezone.utc))
-        reference_now = reference_now.tz_localize("UTC") if reference_now.tzinfo is None else reference_now.tz_convert("UTC")
         sessions = calendar.sessions_in_range(
             pd.Timestamp(decision_date + timedelta(days=1)),
-            pd.Timestamp(reference_now.date()),
+            pd.Timestamp(reference_date),
         )
         completed_after_decision = [
             session

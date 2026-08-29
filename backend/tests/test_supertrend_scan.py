@@ -115,6 +115,47 @@ def test_scan_cached_view_marks_changes_as_replay_without_mutating_source():
     assert payload["changes"]["replayedFromCache"] is False
 
 
+def test_scan_api_response_model_preserves_representative_fallback_observability():
+    payload = {
+        "schemaVersion": 2,
+        "policyVersion": "test",
+        "includesCandles": False,
+        "generatedAt": "2026-10-02T18:00:00+08:00",
+        "coverage": {"requested": 0, "returned": 0, "missing": []},
+        "thresholds": {},
+        "marketModes": {
+            "hong_kong": {
+                "mode": "seek",
+                "representatives": ["^HSI", "2800.HK"],
+                "directions": {"2800.HK": "rising", "513010.SS": "rising"},
+                "adxThreshold": 25,
+                "missingSymbols": ["^HSI"],
+                "fallbackUsed": ["513010.SS"],
+                "effectiveRepresentatives": ["2800.HK", "513010.SS"],
+                "effectiveRepresentativeDates": {
+                    "2800.HK": "2026-10-02",
+                    "513010.SS": "2026-09-30",
+                },
+                "effectiveRepresentativeStatus": {
+                    "2800.HK": "available",
+                    "513010.SS": "available",
+                },
+                "representativeDateAlignment": "cross_calendar",
+            },
+        },
+        "groups": {},
+        "items": [],
+    }
+
+    serialized = main.SupertrendScanResponse.model_validate(payload).model_dump()
+
+    hong_kong = serialized["marketModes"]["hong_kong"]
+    assert hong_kong["fallbackUsed"] == ["513010.SS"]
+    assert hong_kong["effectiveRepresentativeDates"]["513010.SS"] == "2026-09-30"
+    assert hong_kong["effectiveRepresentativeStatus"]["513010.SS"] == "available"
+    assert hong_kong["representativeDateAlignment"] == "cross_calendar"
+
+
 def test_scan_cache_ttl_expires(monkeypatch):
     monkeypatch.setattr(main, "_st_scan_cache", {"data": {}, "ts": 100.0})
     assert main._st_scan_cache_fresh(now=159.9) is True
@@ -155,6 +196,40 @@ def test_staleness_respects_a_share_exchange_holiday():
         "510300.SS", "2026-09-30", "2026-09-30", True, {"hasGap": False},
         now=datetime(2026, 10, 5, 12, 0, tzinfo=main.PREWARM_TZ),
     ) is False
+
+
+def test_staleness_allows_different_latest_sessions_across_hk_and_shanghai_holidays():
+    now = datetime(2026, 10, 2, 18, 0, tzinfo=main.ZoneInfo("Asia/Hong_Kong"))
+
+    assert main._st_data_stale(
+        "^HSI", "2026-10-02", "2026-10-02", True, {"hasGap": False}, now=now,
+    ) is False
+    assert main._st_data_stale(
+        "513010.SS", "2026-09-30", "2026-09-30", True, {"hasGap": False}, now=now,
+    ) is False
+
+
+def test_staleness_rejects_a_truly_old_fallback_during_shanghai_holiday():
+    assert main._st_data_stale(
+        "513010.SS", "2026-09-29", "2026-09-29", True, {"hasGap": False},
+        now=datetime(2026, 10, 2, 18, 0, tzinfo=main.ZoneInfo("Asia/Hong_Kong")),
+    ) is True
+
+
+def test_staleness_rejects_future_decision_dates():
+    now = datetime(2026, 10, 2, 18, 0, tzinfo=main.ZoneInfo("Asia/Hong_Kong"))
+
+    assert main._st_data_stale(
+        "^HSI", "2026-10-03", "2026-10-03", True, {"hasGap": False}, now=now,
+    ) is True
+
+
+def test_staleness_rejects_future_latest_data_date():
+    now = datetime(2026, 10, 2, 18, 0, tzinfo=main.ZoneInfo("Asia/Hong_Kong"))
+
+    assert main._st_data_stale(
+        "2800.HK", "2026-10-02", "2026-10-03", True, {"hasGap": False}, now=now,
+    ) is True
 
 
 def test_supertrend_monthly_decision_direction_uses_last_completed_month():
@@ -485,7 +560,7 @@ def test_supertrend_scan_cache_invalidates_when_daily_parquet_mtime_changes(monk
 
 
 def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
-    latest_date = pd.Timestamp.now().normalize()
+    latest_date = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
     index = pd.date_range(end=latest_date, periods=3, freq="D")
     daily = pd.DataFrame(
         {

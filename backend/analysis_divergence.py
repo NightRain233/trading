@@ -107,6 +107,9 @@ def is_daily_session_complete(
     if normalized.endswith((".SS", ".SZ")):
         local_now = current.astimezone(ZoneInfo("Asia/Shanghai"))
         close_cutoff = datetime_time(15, 10)
+    elif normalized.endswith(".HK") or normalized == "^HSI":
+        local_now = current.astimezone(ZoneInfo("Asia/Hong_Kong"))
+        close_cutoff = datetime_time(16, 10)
     else:
         local_now = current.astimezone(ZoneInfo("America/New_York"))
         close_cutoff = (

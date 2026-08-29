@@ -45,11 +45,15 @@ def _api_get(api_base: str, path: str, timeout: float) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def fetch_supertrend_scan(api_base: str, timeout: float) -> list[dict[str, Any]]:
+def fetch_supertrend_scan(api_base: str, timeout: float) -> dict[str, Any]:
     payload = _api_get(api_base, "/supertrend/scan?include_candles=false", timeout)
-    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("items"), list)
+        or not isinstance(payload.get("marketModes"), dict)
+    ):
         raise ValueError("SuperTrend scan returned an invalid schema-v2 payload")
-    return payload["items"]
+    return payload
 
 
 def filter_alerts(
@@ -138,9 +142,21 @@ def _is_daily_bear(item: dict[str, Any]) -> bool:
     return item.get("state") == "bear"
 
 
+def _is_formal_new_entry(item: dict[str, Any]) -> bool:
+    """Only a formal, currently executable decision belongs in the buy section."""
+    decision = item.get("decision") or {}
+    execution = item.get("executionStatus") or {}
+    return bool(
+        decision.get("permission") == "buy"
+        and decision.get("setup") in {"breakout", "pullback"}
+        and execution.get("executable") is True
+    )
+
+
 def build_daily_brief(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Group scan rows by how a human should use them in a daily review."""
     new_entries = []
+    bull_flip_watch = []
     prepare_watch = []
     position_management = []
     background_trends = []
@@ -149,8 +165,16 @@ def build_daily_brief(items: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
     for item in items:
         symbol = str(item.get("symbol") or "")
-        if _is_weekly_bullish(item) and _is_daily_bull_flip(item):
+        if _is_weekly_bullish(item) and _is_daily_bull_flip(item) and _is_formal_new_entry(item):
             new_entries.append(item)
+            assigned_symbols.add(symbol)
+
+    for item in items:
+        symbol = str(item.get("symbol") or "")
+        if symbol in assigned_symbols:
+            continue
+        if _is_weekly_bullish(item) and _is_daily_bull_flip(item):
+            bull_flip_watch.append(item)
             assigned_symbols.add(symbol)
 
     for item in items:
@@ -184,6 +208,7 @@ def build_daily_brief(items: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
     return {
         "new_entries": _sort_by_priority_distance_symbol(new_entries),
+        "bull_flip_watch": _sort_by_priority_distance_symbol(bull_flip_watch),
         "prepare_watch": _sort_by_distance_symbol(prepare_watch),
         "position_management": _sort_by_priority_distance_symbol(position_management),
         "background_trends": _sort_by_distance_symbol(background_trends),
@@ -246,6 +271,67 @@ def _assess_data_freshness(supertrend_items: list[dict[str, Any]]) -> dict[str, 
         "total": total,
         "partial_refresh": partial_refresh,
     }
+
+
+MARKET_LABELS = {
+    "a_share": "A 股",
+    "hong_kong": "港股",
+    "us": "美股",
+    "crypto": "加密资产",
+    "gold": "黄金",
+    "bond_cn": "中国债券",
+    "bond_us": "美国债券",
+}
+
+
+def _format_effective_representatives(mode: dict[str, Any]) -> str:
+    dates = mode.get("effectiveRepresentativeDates") or {}
+    statuses = mode.get("effectiveRepresentativeStatus") or {}
+    rows = []
+    for symbol in mode.get("effectiveRepresentatives") or []:
+        rows.append(f"{symbol}@{dates.get(symbol) or '?'} [{statuses.get(symbol) or '?'}]")
+    return " / ".join(rows) if rows else "无"
+
+
+def render_market_mode_data_quality(market_modes: dict[str, Any]) -> list[str]:
+    """Render only representative fallback or coverage problems."""
+    notices = []
+    for market, mode in market_modes.items():
+        if not isinstance(mode, dict) or mode.get("role") != "equity_permission":
+            continue
+        label = MARKET_LABELS.get(market, market)
+        fallback_used = mode.get("fallbackUsed") or []
+        missing = mode.get("missingSymbols") or []
+        effective = mode.get("effectiveRepresentatives") or []
+        required = len(mode.get("representatives") or [])
+        actual = _format_effective_representatives(mode)
+        if mode.get("mode") == "insufficient":
+            all_statuses = mode.get("representativeStatus") or {}
+            problem_rows = [
+                f"{symbol}={status}"
+                for symbol, status in all_statuses.items()
+                if status != "available"
+            ]
+            problem_text = " / ".join(problem_rows) if problem_rows else "状态不可比"
+            if mode.get("representativeDateAlignment") == "same_calendar_mismatch" and len(effective) >= required:
+                reason_text = "代表日期不一致，阻断市场许可"
+            else:
+                reason_text = f"有效代表不足（{len(effective)}/{required}），阻断市场许可"
+            notices.append(f"- 🔴 {label}: {reason_text}；异常 {problem_text}；实际采用 {actual}")
+        elif fallback_used:
+            all_statuses = mode.get("representativeStatus") or {}
+            missing_text = " / ".join(
+                f"{symbol}={all_statuses.get(symbol) or 'unavailable'}"
+                for symbol in missing
+            ) if missing else "无"
+            fallback_text = " / ".join(fallback_used)
+            alignment = mode.get("representativeDateAlignment")
+            alignment_text = "；跨市场交易日错位已按各自日历校验" if alignment == "cross_calendar" else ""
+            notices.append(
+                f"- 🟡 {label}: 主代表不可用 {missing_text}，fallback {fallback_text} 正常{alignment_text}；"
+                f"实际采用 {actual}"
+            )
+    return notices
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +588,7 @@ def render_daily_brief_markdown(
     supertrend_items: list[dict[str, Any]],
     *,
     title: str,
+    market_modes: Optional[dict[str, Any]] = None,
     portfolio_strategies: Optional[list[dict[str, Any]]] = None,
     portfolio_job_status: Optional[dict[str, Any]] = None,
 ) -> str:
@@ -514,11 +601,11 @@ def render_daily_brief_markdown(
         "",
         f"**{now} Asia/Shanghai** | 数据: {freshness['status']} | 扫描: {freshness['total']} 个标的",
         "",
-        f"| 新仓候选 | 预备观察 | 持仓风控 | 趋势延续 |",
-        f"|---------|---------|---------|---------|",
-        f"| **{len(brief['new_entries'])}** | {len(brief['prepare_watch'])} | {len(brief['position_management'])} | {len(brief['background_trends'])} |",
+        f"| 正式可执行 | 刚翻多观察 | 预备观察 | 持仓风控 | 趋势延续 |",
+        f"|---------|---------|---------|---------|---------|",
+        f"| **{len(brief['new_entries'])}** | {len(brief['bull_flip_watch'])} | {len(brief['prepare_watch'])} | {len(brief['position_management'])} | {len(brief['background_trends'])} |",
         "",
-        "> 使用原则：只把「周线多头 + 日线刚翻多」视为新仓候选；「周多日空」是等待名单，现在不买。",
+        "> 使用原则：只有正式 decision=buy 且当前 executionStatus=executable 才是可执行；bull_flip 未通过正式门槛时只作观察。",
     ]
 
     # Data freshness warning
@@ -526,6 +613,10 @@ def render_daily_brief_markdown(
         lines.append(f"> ⚠️ {freshness['stale_count']} 个标的数据可能过期，建议在面板中手动刷新。")
     if freshness["partial_refresh"] > 0:
         lines.append(f"> ⏳ 本次触发了部分刷新，未完成的标的可能数据不完整。")
+
+    market_notices = render_market_mode_data_quality(market_modes or {})
+    if market_notices:
+        lines.extend(["", "## 市场代表数据", *market_notices])
 
     if portfolio_job_status:
         failures = [
@@ -550,8 +641,15 @@ def render_daily_brief_markdown(
         lines,
         "🔥 今日可开新仓",
         brief["new_entries"],
-        empty="暂无周线多头且日线刚翻多的标的。",
+        empty="暂无正式可执行的新仓信号。",
         note="新仓候选",
+    )
+    _append_section(
+        lines,
+        "🔎 刚翻多观察：等待正式确认",
+        brief["bull_flip_watch"],
+        empty="暂无刚翻多但尚未通过正式门槛的标的。",
+        note="观察信号，不等于买入；先看正式失败门槛和组合许可",
     )
     _append_section(
         lines,
@@ -673,7 +771,9 @@ def main() -> int:
 
     # Fetch SuperTrend
     try:
-        supertrend_items = fetch_supertrend_scan(args.api_base, args.timeout)
+        supertrend_scan = fetch_supertrend_scan(args.api_base, args.timeout)
+        supertrend_items = supertrend_scan["items"]
+        market_modes = supertrend_scan["marketModes"]
         alerts = filter_alerts(supertrend_items, min_priority=args.min_priority, only_actionable=args.only_actionable)
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         print(f"SuperTrend alert fetch failed: {exc}", file=sys.stderr)
@@ -702,6 +802,7 @@ def main() -> int:
         }
         if args.mode == "daily-brief":
             output["supertrend"] = build_daily_brief(supertrend_items)
+            output["marketModes"] = market_modes
             if portfolio_strategies is not None:
                 output["portfolio"] = portfolio_strategies
             if portfolio_job_status is not None:
@@ -714,6 +815,7 @@ def main() -> int:
             print(render_daily_brief_markdown(
                 supertrend_items,
                 title=args.title,
+                market_modes=market_modes,
                 portfolio_strategies=portfolio_strategies,
                 portfolio_job_status=portfolio_job_status,
             ))

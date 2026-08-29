@@ -28,7 +28,7 @@ The portfolio write-side job must run separately before this command. This comma
 
 ### 输出结构（严格按顺序）
 1. **今日纸面执行** — 先逐笔列出今日应执行订单，再列等待下一有效 Open 的订单；不得把等待订单说成已成交
-2. **Bull flip / MA200** — 候选数、允许数、拦截数，拦截信号不得建议补买
+2. **Bull flip / MA200** — 刚翻多观察数、MA200 允许/拦截数；观察信号和正式可执行买点必须分开，拦截信号不得建议补买
 3. **组合状态** — 只展开 RiskParity、Core90 + MA200 Bull10、Theme Alpha、BTC 7.5% 四个主组合；列持仓、现金、敞口、NAV、回撤及相对 RiskParity
 4. **数据异常** — 数据、信号、订单和账本异常必须明确列出
 5. **SuperTrend 扫描** — 新仓候选与风控提醒放在纸面组合之后；其他背景只报数量
@@ -41,6 +41,8 @@ The portfolio write-side job must run separately before this command. This comma
 - **执行语义**：next-open 订单按各标的市场日历分日执行；Open 缺失只表示延迟，不能用 Close 代替，也不能声称永久取消
 - **策略隔离**：Theme Alpha 与 BTC 继续使用各自既有账本；不要暗示重新初始化或合并账户
 - **数据解读**：保留订单日期、状态、MA200 允许/拦截和异常数字；其他信息可转化为简洁解释
+  - 市场主代表缺失但报告明确写明 fallback 正常时，不得说成市场数据不足；保留实际采用的代表及其日期
+  - 报告写明有效代表不足时，必须归入数据异常，并说明该市场许可已阻断
   - 例：不要写「距离ST 1.5%」，写成「距支撑很近，关注是否守住」
   - 例：不要写「ATR 1.2」，写成「波动正常」
 - **风格**：给朋友汇报的风格，不是给老板汇报——直接、有用、不废话

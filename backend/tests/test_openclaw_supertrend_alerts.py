@@ -36,13 +36,82 @@ def test_fetch_supertrend_scan_reads_items_from_schema_v2_envelope(monkeypatch):
         alert_type="buy_candidate",
         priority="high",
     )
+    payload = {"schemaVersion": 2, "marketModes": {"us": {"mode": "seek"}}, "items": [item]}
     monkeypatch.setattr(
         openclaw_supertrend_alerts,
         "_api_get",
-        lambda *args, **kwargs: {"schemaVersion": 2, "items": [item]},
+        lambda *args, **kwargs: payload,
     )
 
-    assert openclaw_supertrend_alerts.fetch_supertrend_scan("http://example.test/api", 1.0) == [item]
+    assert openclaw_supertrend_alerts.fetch_supertrend_scan("http://example.test/api", 1.0) == payload
+
+
+def test_daily_brief_distinguishes_healthy_hong_kong_fallback_from_missing_market_data():
+    markdown = openclaw_supertrend_alerts.render_daily_brief_markdown(
+        [],
+        title="Daily",
+        market_modes={
+            "hong_kong": {
+                "mode": "seek",
+                "representatives": ["^HSI", "2800.HK"],
+                "effectiveRepresentatives": ["2800.HK", "513010.SS"],
+                "fallbackUsed": ["513010.SS"],
+                "missingSymbols": ["^HSI"],
+                "effectiveRepresentativeDates": {
+                    "2800.HK": "2026-10-02",
+                    "513010.SS": "2026-09-30",
+                },
+                "effectiveRepresentativeStatus": {
+                    "2800.HK": "available",
+                    "513010.SS": "available",
+                },
+                "representativeStatus": {
+                    "^HSI": "missing",
+                    "2800.HK": "available",
+                    "513010.SS": "available",
+                    "510900.SS": "missing",
+                },
+                "role": "equity_permission",
+                "representativeDateAlignment": "cross_calendar",
+            },
+        },
+    )
+
+    assert "主代表不可用 ^HSI=missing，fallback 513010.SS 正常" in markdown
+    assert "跨市场交易日错位已按各自日历校验" in markdown
+    assert "2800.HK@2026-10-02 [available]" in markdown
+    assert "513010.SS@2026-09-30 [available]" in markdown
+    assert "有效代表不足" not in markdown
+
+
+def test_daily_brief_blocks_hong_kong_when_effective_representatives_are_insufficient():
+    markdown = openclaw_supertrend_alerts.render_daily_brief_markdown(
+        [],
+        title="Daily",
+        market_modes={
+            "hong_kong": {
+                "mode": "insufficient",
+                "representatives": ["^HSI", "2800.HK"],
+                "effectiveRepresentatives": ["2800.HK"],
+                "fallbackUsed": [],
+                "missingSymbols": ["^HSI"],
+                "effectiveRepresentativeDates": {"2800.HK": "2026-10-02"},
+                "effectiveRepresentativeStatus": {"2800.HK": "available"},
+                "representativeStatus": {
+                    "^HSI": "missing",
+                    "2800.HK": "available",
+                    "513010.SS": "stale",
+                    "510900.SS": "missing",
+                },
+                "role": "equity_permission",
+            },
+        },
+    )
+
+    assert "有效代表不足（1/2），阻断市场许可" in markdown
+    assert "^HSI=missing" in markdown
+    assert "513010.SS=stale" in markdown
+    assert "实际采用 2800.HK@2026-10-02 [available]" in markdown
 
 
 def test_daily_brief_groups_new_entries_prepare_watch_and_risk_sections():
@@ -50,7 +119,11 @@ def test_daily_brief_groups_new_entries_prepare_watch_and_risk_sections():
         _item("OLD", state="bull", weekly_state="bull", alert_type="hold_bull", priority="low", distance=9.0),
         _item("WAIT", state="bear", weekly_state="bull", alert_type="avoid_bear", priority="low", distance=1.5),
         _item("RISK", state="bear_flip", weekly_state="bull", alert_type="sell_or_risk", actionable=True, distance=7.0),
-        _item("BUY", state="bull_flip", weekly_state="bull", alert_type="buy_candidate", priority="high", actionable=True, distance=4.0),
+        {
+            **_item("BUY", state="bull_flip", weekly_state="bull", alert_type="buy_candidate", priority="high", actionable=True, distance=4.0),
+            "decision": {"permission": "buy", "setup": "breakout", "nextGate": None},
+            "executionStatus": {"executable": True, "status": "executable"},
+        },
         _item("PULLBACK", state="bull", weekly_state="bull", alert_type="support_test", priority="high", actionable=True, distance=0.8),
     ]
 
@@ -60,6 +133,28 @@ def test_daily_brief_groups_new_entries_prepare_watch_and_risk_sections():
     assert [item["symbol"] for item in brief["prepare_watch"]] == ["WAIT"]
     assert [item["symbol"] for item in brief["position_management"]] == ["PULLBACK", "RISK"]
     assert [item["symbol"] for item in brief["background_trends"]] == ["OLD"]
+
+
+def test_daily_brief_keeps_unconfirmed_bull_flip_out_of_buy_section():
+    item = _item(
+        "OBSERVE",
+        state="bull_flip",
+        weekly_state="bull",
+        alert_type="buy_candidate",
+        priority="high",
+        actionable=True,
+    )
+    item["decision"] = {
+        "permission": "watch",
+        "setup": "breakout",
+        "nextGate": "ADX_BELOW_25",
+    }
+    item["executionStatus"] = {"executable": False, "status": "not_applicable"}
+
+    brief = openclaw_supertrend_alerts.build_daily_brief([item])
+
+    assert brief["new_entries"] == []
+    assert [row["symbol"] for row in brief["bull_flip_watch"]] == ["OBSERVE"]
 
 
 def test_daily_brief_markdown_explains_prepare_watch_is_not_a_buy_signal():
