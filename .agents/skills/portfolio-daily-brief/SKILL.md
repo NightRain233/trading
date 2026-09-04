@@ -31,12 +31,9 @@ For a focused question, query the API directly. Read [references/api-contract.md
 
 ## Reporting rules
 
-Expand exactly these four primary portfolios in this order:
-
-1. `risk_parity_core_next_open`
-2. `core90_ma200_bull10`
-3. `theme_alpha`
-4. `btc_supertrend_satellite`
+Expand only the primary portfolio: `core90_ma200_bull10`. Keep RiskParity,
+Theme Alpha, and BTC satellite collapsed as forward comparisons unless the user
+explicitly asks to compare them.
 
 Report in this order:
 
@@ -44,7 +41,7 @@ Report in this order:
 2. Pending or delayed orders waiting for each symbol's next valid Open.
 3. Today's policy-eligible bull flips and MA200 allowed/blocked counts.
 4. Current holdings, cash, and gross exposure.
-5. NAV, drawdown, and difference versus RiskParity.
+5. NAV, drawdown, and the recorded difference versus RiskParity.
 6. Active diagnostics, calculation errors, and data-quality audit events.
 
 Before stating that data is current, inspect `GET /portfolio-strategies/daily-job-status`. Report a failed strategy independently and identify markets whose completed daily bar was not confirmed. An inactive account is not the same as an activated all-cash account.

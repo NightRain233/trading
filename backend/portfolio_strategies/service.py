@@ -47,6 +47,7 @@ from .next_open_strategies import (
 from .operation_lock import portfolio_operation_lock
 from .registry import (
     ComparisonStrategyError,
+    PRIMARY_STRATEGY_IDS,
     UnknownStrategyError,
     get_strategy,
     list_paper_strategies,
@@ -104,12 +105,7 @@ class PortfolioStrategyService:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def list_strategies(self) -> list[dict[str, Any]]:
-        primary_ids = {
-            "risk_parity_core_next_open",
-            "core90_ma200_bull10",
-            "theme_alpha",
-            "btc_supertrend_satellite",
-        }
+        primary_ids = set(PRIMARY_STRATEGY_IDS)
         result = []
         for config in list_strategies():
             entry: dict[str, Any] = {

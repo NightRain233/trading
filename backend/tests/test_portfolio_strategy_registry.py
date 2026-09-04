@@ -3,11 +3,16 @@ import pytest
 from portfolio_strategies.models import StrategyMode
 from portfolio_strategies.registry import (
     ComparisonStrategyError,
+    PRIMARY_STRATEGY_IDS,
     get_strategy,
     list_paper_strategies,
     list_strategies,
     require_paper_strategy,
 )
+
+
+def test_long_sample_convergence_exposes_one_primary_strategy():
+    assert PRIMARY_STRATEGY_IDS == ("core90_ma200_bull10",)
 
 
 def test_registry_exposes_four_official_paper_strategies():

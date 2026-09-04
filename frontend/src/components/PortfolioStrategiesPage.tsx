@@ -18,10 +18,7 @@ import {
 import { buildAssetRows, fmtDate, fmtNum, fmtPct, stateTone } from '../portfolioStrategies.js';
 
 const PRIMARY_ORDER = [
-  'risk_parity_core_next_open',
   'core90_ma200_bull10',
-  'theme_alpha',
-  'btc_supertrend_satellite',
 ];
 
 const EMPTY_OPERATIONS: PortfolioSnapshot['operations'] = {

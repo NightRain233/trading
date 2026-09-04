@@ -32,7 +32,7 @@ export function deriveDisplaySignal(item) {
     return { key: 'fresh_bull', label: '刚翻多', tone: 'emerald', rank: 0 };
   }
   if (isDailyBull(item) && item.alertType === 'support_test') {
-    return { key: 'pullback_buy', label: '回踩买点', tone: 'cyan', rank: 1 };
+    return { key: 'pullback_watch', label: '回踩观察', tone: 'cyan', rank: 4 };
   }
   if (isWeeklyBull(item) && isDailyBear(item) && item.alertType === 'resistance_test') {
     return { key: 'pre_bull', label: '预备翻多', tone: 'amber', rank: 2 };

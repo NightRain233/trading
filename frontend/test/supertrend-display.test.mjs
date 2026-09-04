@@ -49,14 +49,14 @@ test('pre-bull is only weekly-bull daily-bear near resistance', () => {
   assert.equal(deriveDisplaySignal(tooFar), null);
 });
 
-test('fresh bull and pullback buy are the strongest buy-point labels', () => {
+test('fresh bull is the entry label and pullbacks remain observation only', () => {
   assert.deepEqual(
     deriveDisplaySignal(item({ state: 'bull_flip', weeklyState: 'bull', alertType: 'buy_candidate', alertPriority: 'high', justFlipped: true })),
     { key: 'fresh_bull', label: '刚翻多', tone: 'emerald', rank: 0 },
   );
   assert.deepEqual(
     deriveDisplaySignal(item({ state: 'bull', weeklyState: 'bull', alertType: 'support_test', alertPriority: 'high' })),
-    { key: 'pullback_buy', label: '回踩买点', tone: 'cyan', rank: 1 },
+    { key: 'pullback_watch', label: '回踩观察', tone: 'cyan', rank: 4 },
   );
 });
 
@@ -92,7 +92,7 @@ test('default sorting forms the evening review opportunity queue', () => {
 
   const sorted = sortSupertrendItems(rows, { MARKED: 'watch' });
 
-  assert.deepEqual(sorted.map(row => row.symbol), ['FRESH', 'PULL', 'PRE', 'RISK', 'MARKED', 'OTHER']);
+  assert.deepEqual(sorted.map(row => row.symbol), ['FRESH', 'PRE', 'RISK', 'MARKED', 'PULL', 'OTHER']);
 });
 
 test('confluence label keeps weekly and daily state without colored pills', () => {

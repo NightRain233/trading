@@ -78,7 +78,7 @@ def test_daily_brief_distinguishes_healthy_hong_kong_fallback_from_missing_marke
     )
 
     assert "主代表不可用 ^HSI=missing，fallback 513010.SS 正常" in markdown
-    assert "跨市场交易日错位已按各自日历校验" in markdown
+    assert "日期错位已回放到共同完整交易日" in markdown
     assert "2800.HK@2026-10-02 [available]" in markdown
     assert "513010.SS@2026-09-30 [available]" in markdown
     assert "有效代表不足" not in markdown
@@ -171,11 +171,12 @@ def test_daily_brief_markdown_explains_prepare_watch_is_not_a_buy_signal():
     assert "## 👀 预备观察：周多日空，等待日线翻多" in markdown
 
 
-def test_fetch_portfolio_strategies_keeps_only_four_primary_in_fixed_order(monkeypatch):
+def test_fetch_portfolio_strategies_keeps_only_converged_primary(monkeypatch):
     strategies = [
         {"strategyId": "theme_alpha", "displayName": "Theme", "paperEnabled": True, "isPrimary": True},
         {"strategyId": "core90_raw_bull10", "displayName": "Raw", "paperEnabled": True, "isPrimary": False},
         {"strategyId": "risk_parity_core_next_open", "displayName": "RP", "paperEnabled": True, "isPrimary": True},
+        {"strategyId": "core90_ma200_bull10", "displayName": "Core90", "paperEnabled": True, "isPrimary": True},
     ]
 
     def fake_get(_base, path, _timeout):
@@ -187,7 +188,7 @@ def test_fetch_portfolio_strategies_keeps_only_four_primary_in_fixed_order(monke
 
     result = openclaw_supertrend_alerts.fetch_portfolio_strategies("http://example.test/api", 1.0)
 
-    assert [item["strategyId"] for item in result] == ["risk_parity_core_next_open", "theme_alpha"]
+    assert [item["strategyId"] for item in result] == ["core90_ma200_bull10"]
 
 
 def test_portfolio_markdown_prioritizes_orders_and_reports_policy_audit():

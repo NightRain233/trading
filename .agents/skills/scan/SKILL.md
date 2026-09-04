@@ -44,12 +44,24 @@ uv run python scripts/trading_analysis_helper.py \
 
 每个市场独立读取 `marketModes`，不能拿 A 股状态替代美股、黄金或加密。债券代表只作风险观察。市场模式不足或数据异常时，不自行补造许可。
 
-`bull_flip` 是趋势变化观察信号，不自动等于买入。只有 API 同时返回 `decision.permission=buy`、`decision.setup` 为正式突破/回踩路径且 `executionStatus.executable=true`，才能放入正式可执行买点。其余刚翻多标的必须单独列为“刚翻多观察”，说明未通过的 `nextGate`；不能写成“今日可开新仓”。
+两个代表品种日期不同时，读取 `commonRepresentativeDate`，并只使用该共同完整交易日
+可见的历史月线方向计算市场模式。`representativeLagDays` 记录自然日差，
+`representativeLagSessions` 记录相对最新代表行情落后的已完成时段数；只有后者超过
+`representativeLagToleranceSessions` 才因滞后转为 `insufficient`。不得把
+`representativeDateMismatch=true` 单独解释成市场数据不可用。
 
-正式新仓路径只有：
+`bull_flip` 是趋势变化观察信号，不自动等于买入。只有 API 同时返回
+`decision.permission=buy`、`decision.setup=breakout` 且
+`executionStatus.executable=true`，才能放入正式可执行买点。其余刚翻多标的必须单独
+列为“刚翻多观察”，说明未通过的 `nextGate`；不能写成“今日可开新仓”。
 
-- `breakout`：完整日线翻多后的右侧突破。
-- `pullback`：已确认多头趋势中的回踩再走强。
+正式技术新仓路径只有：
+
+- `breakout`：完整日线 `bull_flip` 后的右侧突破；组合层的冻结 bull-flip
+  策略仍独立检查 MA200、仓位和账本。
+
+`pullback` 只记录已确认多头趋势中的回踩再走强，固定为观察标签，不能返回正式
+`buy`、最高接受价或技术可执行状态。不得使用单标的 ADX 特例将回踩升级为入口。
 
 `compression_breakout` 是尚未完成样本外和交易成本验证的实验路径：即使上一完整收盘给出 `conditional`、盘中进入 `paper_armed_triggered`，也只能记录纸面触发，`executionStatus.executable` 必须为 false。不得建议实盘小仓、挂单或成交。`authorization.consumptionTracked=false` 时也不得推断已成交或信号已消费。
 
@@ -69,7 +81,7 @@ V 型反转、黄灯追踪、MACD 背离、RSI、KDJ、BOLL 和量能只用于�
 2. 各市场模式；A 股扫描时附上证、沪深300、中证500、科创50、中证2000的紧凑环境表。
 3. 真实新增、升级、降级、失效和自选增删。
 4. 全部持仓/风控项。
-5. 正式突破买点与回踩买点，并写当前 execution 状态。
+5. 正式 bull-flip 突破买点及其 execution 状态；回踩只列观察项。
 6. 刚翻多观察项：说明它只是观察信号、当前 `decision.permission`/`executionStatus` 和唯一 `nextGate`。
 7. 压缩突破纸面实验项，显著标注“禁止实盘执行”。
 8. 最接近触发的 3–5 项：权限、唯一 nextGate、触发/上限/失效条件。

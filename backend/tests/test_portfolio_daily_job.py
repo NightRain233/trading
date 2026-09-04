@@ -44,7 +44,7 @@ def test_daily_job_updates_first_isolates_failures_and_writes_status(
         now=datetime(2026, 8, 19, 7, 15),
     )
     assert events == ["update"]
-    assert service.calls == list(portfolio_daily_job.PRIMARY_STRATEGIES)
+    assert service.calls == list(portfolio_daily_job.TRACKED_STRATEGIES)
     assert result["strategies"]["theme_alpha"]["ok"] is False
     assert result["strategies"]["btc_supertrend_satellite"]["notActivated"] is True
     assert result["strategies"]["risk_parity_core_next_open"]["ok"] is True

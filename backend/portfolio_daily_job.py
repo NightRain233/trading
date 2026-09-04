@@ -21,7 +21,7 @@ from portfolio_strategies.service import PortfolioStrategyService
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-PRIMARY_STRATEGIES = (
+TRACKED_STRATEGIES = (
     "risk_parity_core_next_open",
     "core90_ma200_bull10",
     "theme_alpha",
@@ -85,7 +85,7 @@ def run_daily_job(
     started = now or datetime.now(SHANGHAI)
     symbols = sorted({
         symbol
-        for strategy_id in PRIMARY_STRATEGIES
+        for strategy_id in TRACKED_STRATEGIES
         for symbol in get_strategy(strategy_id).symbols
     })
     status: dict[str, Any] = {
@@ -115,7 +115,7 @@ def run_daily_job(
         except Exception as exc:
             status["marketReadinessError"] = f"{type(exc).__name__}: {exc}"
 
-        for strategy_id in PRIMARY_STRATEGIES:
+        for strategy_id in TRACKED_STRATEGIES:
             try:
                 snapshot = service.refresh(strategy_id, now=started)
                 status["strategies"][strategy_id] = {
@@ -141,7 +141,7 @@ def run_daily_job(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Refresh the four primary paper portfolios")
+    parser = argparse.ArgumentParser(description="Refresh the four tracked paper portfolios")
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--db", default="backtest_results/portfolio_paper.sqlite")
     parser.add_argument(

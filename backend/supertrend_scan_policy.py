@@ -4,22 +4,20 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 
 SCHEMA_VERSION = 2
-POLICY_VERSION = "scan_v2_right_side_6"
+POLICY_VERSION = "scan_v2_right_side_8"
 
 NORMAL_ADX_THRESHOLD = 25.0
 CAUTIOUS_ADX_THRESHOLD = 30.0
+MAX_REPRESENTATIVE_LAG_SESSIONS = 1
 BREAKOUT_MAX_NEXT_SESSION_GAP_ATR = 0.5
 PULLBACK_ZONE_ATR = 1.5
 PULLBACK_APPROACHING_ATR = 2.5
-PULLBACK_SEEK_ADX_OVERRIDES = {
-    "512890.SS": 20.0,
-}
 COMPRESSION_MAX_DISTANCE_ATR = 1.5
 COMPRESSION_MAX_TRIGGER_SLIPPAGE_ATR = 0.5
 COMPRESSION_NORMAL_ADX_MIN = 18.0
@@ -146,7 +144,11 @@ def classify_trend_state(directions: Iterable[Any]) -> tuple[str, bool]:
     return ("bear_flip" if just_flipped else "bear", just_flipped)
 
 
-def _monthly_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
+def _monthly_direction(
+    item: Optional[dict[str, Any]],
+    *,
+    as_of: Optional[str] = None,
+) -> Optional[str]:
     if not item:
         return None
     if item.get("dataStale") is True:
@@ -155,6 +157,17 @@ def _monthly_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
     if integrity.get("hasGap") or integrity.get("hasRecentGap"):
         return None
     context = item.get("monthlyBoll") or {}
+    if as_of is not None:
+        history = context.get("decisionHistory") or []
+        snapshots = [
+            snapshot for snapshot in history
+            if snapshot.get("availableAsOf")
+            and str(snapshot["availableAsOf"]) <= as_of
+        ]
+        if snapshots:
+            context = max(snapshots, key=lambda snapshot: str(snapshot["availableAsOf"]))
+        elif _representative_as_of(item) != as_of:
+            return None
     direction = (
         context.get("decisionMidDirection")
         if "decisionMidDirection" in context
@@ -199,6 +212,88 @@ def _representative_direction(item: Optional[dict[str, Any]]) -> Optional[str]:
     return _monthly_direction(item) if _representative_status(item) == "available" else None
 
 
+def _representative_completed_dates(item: Optional[dict[str, Any]]) -> set[str]:
+    if not item:
+        return set()
+    dates = {
+        str(value) for value in (item.get("completedDailyDates") or [])
+        if value
+    }
+    dates.update(
+        str(point["date"])
+        for point in (item.get("decisionHistory") or [])
+        if point.get("date")
+    )
+    as_of = _representative_as_of(item)
+    if as_of:
+        dates.add(as_of)
+    return dates
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _representative_replay_context(
+    symbols: list[str],
+    item_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    effective_dates = {
+        symbol: _representative_as_of(item_map.get(symbol))
+        for symbol in symbols
+    }
+    completed_dates = {
+        symbol: _representative_completed_dates(item_map.get(symbol))
+        for symbol in symbols
+    }
+    common_dates = (
+        set.intersection(*(completed_dates[symbol] for symbol in symbols))
+        if symbols and all(completed_dates[symbol] for symbol in symbols)
+        else set()
+    )
+    common_date = max(common_dates) if common_dates else None
+    valid_latest_dates = [value for value in effective_dates.values() if value]
+    latest_date = max(valid_latest_dates) if valid_latest_dates else None
+    freshest_symbols = [
+        symbol for symbol, value in effective_dates.items()
+        if value == latest_date
+    ]
+    reference_sessions = set().union(*(
+        completed_dates[symbol] for symbol in freshest_symbols
+    )) if freshest_symbols else set()
+
+    lag_sessions: dict[str, Optional[int]] = {}
+    lag_days: dict[str, Optional[int]] = {}
+    latest_parsed = _parse_iso_date(latest_date)
+    for symbol, value in effective_dates.items():
+        lag_sessions[symbol] = (
+            len([session for session in reference_sessions if value < session <= latest_date])
+            if value and latest_date else None
+        )
+        parsed = _parse_iso_date(value)
+        lag_days[symbol] = (
+            (latest_parsed - parsed).days
+            if latest_parsed is not None and parsed is not None else None
+        )
+
+    directions = {
+        symbol: _monthly_direction(item_map.get(symbol), as_of=common_date)
+        if common_date else None
+        for symbol in symbols
+    }
+    return {
+        "effectiveDates": effective_dates,
+        "commonDate": common_date,
+        "latestDate": latest_date,
+        "lagSessions": lag_sessions,
+        "lagDays": lag_days,
+        "directions": directions,
+    }
+
+
 def build_market_modes(items: Iterable[dict[str, Any]], representative_items: Iterable[dict[str, Any]] = ()) -> dict[str, dict[str, Any]]:
     item_map = {str(item.get("symbol") or "").upper(): item for item in items}
     item_map.update({str(item.get("symbol") or "").upper(): item for item in representative_items})
@@ -223,26 +318,17 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
                 directions[symbol] = direction
                 effective_directions[symbol] = direction
         effective_symbols = list(effective_directions)
-        effective_dates = {
-            symbol: _representative_as_of(item_map.get(symbol))
-            for symbol in effective_symbols
-        }
+        replay = _representative_replay_context(effective_symbols, item_map)
+        effective_dates = replay["effectiveDates"]
         distinct_dates = {value for value in effective_dates.values() if value}
         representative_date_mismatch = len(distinct_dates) > 1
         effective_venues = {
             symbol: classify_trading_venue(symbol)
             for symbol in effective_symbols
         }
-        # Different exchanges can have different latest completed sessions on
-        # the same wall-clock day. Each item has already passed its own exchange
-        # calendar freshness check, so only a same-venue mismatch is invalid.
-        date_mismatch_accepted = (
-            representative_date_mismatch
-            and len(set(effective_venues.values())) > 1
-        )
         date_alignment = (
             "cross_calendar"
-            if date_mismatch_accepted
+            if representative_date_mismatch and len(set(effective_venues.values())) > 1
             else "same_calendar_mismatch"
             if representative_date_mismatch
             else "aligned"
@@ -252,12 +338,26 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             if symbol in fallback_representatives
         ]
         missing = [symbol for symbol in representatives if primary_directions[symbol] is None]
-        values = list(effective_directions.values())
+        replay_directions = replay["directions"]
+        directions.update(replay_directions)
+        values = list(replay_directions.values())
+        lag_exceeded_representatives = [
+            symbol for symbol, value in replay["lagSessions"].items()
+            if value is None or value > MAX_REPRESENTATIVE_LAG_SESSIONS
+        ]
+        date_mismatch_accepted = bool(
+            representative_date_mismatch
+            and replay["commonDate"]
+            and not lag_exceeded_representatives
+            and all(value is not None for value in values)
+        )
         if (
             len(values) < len(representatives)
             or len(effective_dates) < len(representatives)
             or any(value is None for value in effective_dates.values())
-            or (representative_date_mismatch and not date_mismatch_accepted)
+            or replay["commonDate"] is None
+            or any(value is None for value in values)
+            or lag_exceeded_representatives
         ):
             mode = "insufficient"
             adx_threshold = None
@@ -285,6 +385,16 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             "representativeDateMismatch": representative_date_mismatch,
             "representativeDateMismatchAccepted": date_mismatch_accepted,
             "representativeDateAlignment": date_alignment,
+            "commonRepresentativeDate": replay["commonDate"],
+            "latestRepresentativeDate": replay["latestDate"],
+            "representativeLagDays": replay["lagDays"],
+            "representativeLagSessions": replay["lagSessions"],
+            "representativeLagToleranceSessions": MAX_REPRESENTATIVE_LAG_SESSIONS,
+            "lagExceededRepresentatives": lag_exceeded_representatives,
+            "replayedToCommonDate": bool(
+                replay["commonDate"] and representative_date_mismatch
+            ),
+            "latestDirections": effective_directions,
             "directions": directions,
             "adxThreshold": adx_threshold,
             "missingSymbols": missing,
@@ -333,17 +443,6 @@ def _compression_adx_threshold(mode: str) -> Optional[float]:
     if mode == "cautious":
         return COMPRESSION_CAUTIOUS_ADX_MIN
     return None
-
-
-def _pullback_adx_threshold(
-    item: dict[str, Any],
-    market_context: dict[str, Any],
-) -> Optional[float]:
-    threshold = _finite_float(market_context.get("adxThreshold"))
-    if market_context.get("mode") != "seek":
-        return threshold
-    symbol = str(item.get("symbol") or "").upper()
-    return PULLBACK_SEEK_ADX_OVERRIDES.get(symbol, threshold)
 
 
 def _first_gate(failed: list[str]) -> Optional[str]:
@@ -953,7 +1052,7 @@ def _decision(
     if pullback["enteredZone"]:
         reasons = ["DATA_VALID"]
         failed = []
-        pullback_threshold = _pullback_adx_threshold(item, market_context)
+        pullback_threshold = _finite_float(market_context.get("adxThreshold"))
         if mode == "seek":
             reasons.append("MARKET_SEEK")
         elif mode == "cautious":
@@ -973,16 +1072,9 @@ def _decision(
         else:
             failed.append("RESTRENGTH_NOT_CONFIRMED")
         if not failed:
-            permission, label, stage, group = "buy", "可买·回踩入场", "pullback_confirmed", "pullback_buy"
+            permission, label, stage, group = "watch", "只观察·回踩重新走强", "pullback_observation", "wait_confirmation"
         else:
             permission, label, stage, group = "wait", "等确认·已进入回踩区，支撑暂未失守", "pullback_wait_restrength", "wait_confirmation"
-        pullback_st = _finite_float(item.get("stVal"))
-        pullback_atr = _finite_float((item.get("indicators") or {}).get("atr"))
-        pullback_max_price = (
-            pullback_st + PULLBACK_ZONE_ATR * pullback_atr
-            if pullback_st is not None and pullback_atr is not None
-            else None
-        )
         return ({
             "permission": permission,
             "label": label,
@@ -990,9 +1082,11 @@ def _decision(
             "stage": stage,
             "reasonCodes": reasons,
             "failedGates": failed,
-            "nextTrigger": "下一交易日不超过回踩区上限时执行" if permission == "buy" else "已进入回踩区，支撑暂未失守；等待后续完整日线重新走强",
+            "nextTrigger": "仅记录后续表现；正式新仓等待下一次完整日线 bull flip" if permission == "watch" else "已进入回踩区，支撑暂未失守；等待后续完整日线重新走强",
             "invalidation": "日线收盘跌破SuperTrend",
-            "maxAcceptablePrice": pullback_max_price,
+            "maxAcceptablePrice": None,
+            "paperOnly": True,
+            "technicalExecutionEligible": False,
         }, group, tags)
 
     if v_reversal["candidate"]:
@@ -1345,7 +1439,8 @@ def build_scan_response(
             "compressionLiveTradingAllowed": False,
             "normalAdx": NORMAL_ADX_THRESHOLD,
             "cautiousAdx": CAUTIOUS_ADX_THRESHOLD,
-            "pullbackSeekAdxOverrides": dict(PULLBACK_SEEK_ADX_OVERRIDES),
+            "formalEntryMode": "bull_flip_only",
+            "pullbackLiveTradingAllowed": False,
             "breakoutMaxNextSessionGapAtr": BREAKOUT_MAX_NEXT_SESSION_GAP_ATR,
             "pullbackZoneAtr": PULLBACK_ZONE_ATR,
             "pullbackApproachingAtr": PULLBACK_APPROACHING_ATR,

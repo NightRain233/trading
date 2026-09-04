@@ -29,7 +29,7 @@ The portfolio write-side job must run separately before this command. This comma
 ### 输出结构（严格按顺序）
 1. **今日纸面执行** — 先逐笔列出今日应执行订单，再列等待下一有效 Open 的订单；不得把等待订单说成已成交
 2. **Bull flip / MA200** — 刚翻多观察数、MA200 允许/拦截数；观察信号和正式可执行买点必须分开，拦截信号不得建议补买
-3. **组合状态** — 只展开 RiskParity、Core90 + MA200 Bull10、Theme Alpha、BTC 7.5% 四个主组合；列持仓、现金、敞口、NAV、回撤及相对 RiskParity
+3. **组合状态** — 只展开唯一主策略 Core90 + MA200 Bull10；列持仓、现金、敞口、NAV、回撤及相对 RiskParity；其他账户仅作后台前向对照
 4. **数据异常** — 数据、信号、订单和账本异常必须明确列出
 5. **SuperTrend 扫描** — 新仓候选与风控提醒放在纸面组合之后；其他背景只报数量
 

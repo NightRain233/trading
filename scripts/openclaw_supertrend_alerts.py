@@ -89,15 +89,12 @@ def _priority_allowed(item: dict[str, Any], min_priority: str) -> bool:
 # ---------------------------------------------------------------------------
 
 PRIMARY_PORTFOLIO_ORDER = [
-    "risk_parity_core_next_open",
     "core90_ma200_bull10",
-    "theme_alpha",
-    "btc_supertrend_satellite",
 ]
 
 
 def fetch_portfolio_strategies(api_base: str, timeout: float) -> list[dict[str, Any]]:
-    """Return the four primary paper strategies with their latest snapshots."""
+    """Return the primary paper strategy with its latest snapshot."""
     strategies = _api_get(api_base, "/portfolio-strategies", timeout)
     if not isinstance(strategies, list):
         return []
@@ -105,7 +102,7 @@ def fetch_portfolio_strategies(api_base: str, timeout: float) -> list[dict[str, 
     result = []
     for st in strategies:
         strategy_id = st.get("strategyId", "")
-        is_primary = st.get("isPrimary", strategy_id in PRIMARY_PORTFOLIO_ORDER)
+        is_primary = strategy_id in PRIMARY_PORTFOLIO_ORDER and st.get("isPrimary", True)
         if not st.get("paperEnabled") or not is_primary:
             continue
         try:
@@ -148,7 +145,7 @@ def _is_formal_new_entry(item: dict[str, Any]) -> bool:
     execution = item.get("executionStatus") or {}
     return bool(
         decision.get("permission") == "buy"
-        and decision.get("setup") in {"breakout", "pullback"}
+        and decision.get("setup") == "breakout"
         and execution.get("executable") is True
     )
 
@@ -313,8 +310,11 @@ def render_market_mode_data_quality(market_modes: dict[str, Any]) -> list[str]:
                 if status != "available"
             ]
             problem_text = " / ".join(problem_rows) if problem_rows else "状态不可比"
-            if mode.get("representativeDateAlignment") == "same_calendar_mismatch" and len(effective) >= required:
-                reason_text = "代表日期不一致，阻断市场许可"
+            lag_exceeded = mode.get("lagExceededRepresentatives") or []
+            if lag_exceeded:
+                reason_text = f"代表行情滞后超限（{' / '.join(lag_exceeded)}），阻断市场许可"
+            elif len(effective) >= required:
+                reason_text = "缺少可回放的共同完整交易日，阻断市场许可"
             else:
                 reason_text = f"有效代表不足（{len(effective)}/{required}），阻断市场许可"
             notices.append(f"- 🔴 {label}: {reason_text}；异常 {problem_text}；实际采用 {actual}")
@@ -326,7 +326,7 @@ def render_market_mode_data_quality(market_modes: dict[str, Any]) -> list[str]:
             ) if missing else "无"
             fallback_text = " / ".join(fallback_used)
             alignment = mode.get("representativeDateAlignment")
-            alignment_text = "；跨市场交易日错位已按各自日历校验" if alignment == "cross_calendar" else ""
+            alignment_text = "；日期错位已回放到共同完整交易日" if alignment in {"cross_calendar", "same_calendar_mismatch"} else ""
             notices.append(
                 f"- 🟡 {label}: 主代表不可用 {missing_text}，fallback {fallback_text} 正常{alignment_text}；"
                 f"实际采用 {actual}"

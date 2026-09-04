@@ -2062,11 +2062,28 @@ def _st_multitimeframe_context(
 
     monthly_boll = _st_boll_context(monthly_close, as_of=latest_close_date)
     decision_monthly_boll = _st_boll_context(completed_monthly_close)
+    monthly_direction_history = []
+    if not completed_monthly_close.empty:
+        close_periods = close.index.to_period("M")
+        actual_month_end_dates = {
+            period: pd.Timestamp(group.index[-1]).date().isoformat()
+            for period, group in close.groupby(close_periods)
+        }
+        for offset in range(len(completed_monthly_close)):
+            snapshot = _st_boll_context(completed_monthly_close.iloc[:offset + 1])
+            period = completed_monthly_close.index[offset].to_period("M")
+            monthly_direction_history.append({
+                "availableAsOf": actual_month_end_dates.get(period),
+                "decisionAsOf": snapshot.get("asOf"),
+                "midDirection": snapshot.get("midDirection"),
+                "slopeSampleSufficient": snapshot.get("slopeSampleSufficient"),
+            })
     monthly_boll.update({
         "periodComplete": monthly_period_complete,
         "decisionMidDirection": decision_monthly_boll.get("midDirection"),
         "decisionMidSlopePct": decision_monthly_boll.get("midSlopePct"),
         "decisionAsOf": decision_monthly_boll.get("asOf"),
+        "decisionHistory": monthly_direction_history[-36:],
     })
 
     return {
@@ -2432,6 +2449,10 @@ def _build_supertrend_scan_item(
         "dataIntegrity": integrity,
         "indicators": indicators,
         "decisionHistory": decision_history,
+        "completedDailyDates": [
+            pd.Timestamp(ts).date().isoformat()
+            for ts in decision_daily.dropna(subset=["Close"]).tail(40).index
+        ],
         "macdDivergence": macd_divergence,
         "bollWidth": boll_width,
         "bollSqueeze": is_squeeze,

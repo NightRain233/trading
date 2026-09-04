@@ -12,6 +12,8 @@
 - `decision.setup` 只使用 `breakout`、`pullback`、`compression_breakout`、观察或风险类型；`decision.stage` 描述生命周期阶段。
 - `decision.nextGate` 是权限升级前的首要门槛；`readinessScore` 只用于同权限内排序，不能覆盖硬门槛。
 - 正式 `breakout` 必须同时满足完整日线 `bull_flip`、周线多头、对应市场允许、ADX 门槛与 MACD 柱为正。其 `triggerPrice` 是正式翻多收盘价，`maxAcceptablePrice=triggerPrice+0.5×ATR`，`invalidationPrice` 是该正式收盘对应的 ST；下一交易日高于上限或盘中低于正式 ST 时取消执行。这里不再使用翻多后新生成的 ST 与收盘之间的距离作为入场门槛。
+- `pullback` 固定为趋势中回踩的观察标签，即使重新走强也不能授予正式 `buy`、最高接受价或技术执行资格；正式新仓等待下一次完整日线 `bull_flip`。组合层可以按冻结 bull-flip 合同独立处理技术扫描未授予 `buy` 的事件，但仍必须通过 MA200、仓位、账本和数据质量检查。
+- 市场两个代表品种必须回放到 `commonRepresentativeDate` 后再计算月线方向。日期不同本身只记审计；`representativeLagSessions` 超过统一容忍值才转为 `insufficient`，不能混用不同日期，也不能因一个交易日的正常错位直接阻断。
 
 ## 2. 条件纸面计划
 

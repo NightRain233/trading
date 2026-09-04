@@ -1,4 +1,5 @@
 from supertrend_scan_policy import (
+    MAX_REPRESENTATIVE_LAG_SESSIONS,
     POLICY_VERSION,
     SCHEMA_VERSION,
     build_scan_response,
@@ -51,7 +52,14 @@ def _item(
         "monthlyBoll": {
             "midDirection": monthly_direction,
             "slopeSampleSufficient": True,
+            "decisionHistory": [{
+                "availableAsOf": "2026-07-31",
+                "decisionAsOf": "2026-07-31",
+                "midDirection": monthly_direction,
+                "slopeSampleSufficient": True,
+            }],
         },
+        "completedDailyDates": ["2026-08-06", "2026-08-07"],
         "volumeContext": {
             "sessionComplete": daily_complete,
             "ratio20Completed": ratio20 if daily_complete else None,
@@ -84,6 +92,11 @@ def _representatives() -> list[dict]:
         _item("GC=F"),
         _item("518880.SS"),
     ]
+
+
+def _set_monthly_direction(item: dict, direction: str) -> None:
+    item["monthlyBoll"]["midDirection"] = direction
+    item["monthlyBoll"]["decisionHistory"][-1]["midDirection"] = direction
 
 
 def test_trend_flip_only_applies_to_the_latest_direction_change():
@@ -121,7 +134,7 @@ def test_scan_response_has_versioned_envelope_and_complete_primary_group_coverag
 
 def test_market_mode_uses_two_representatives_and_marks_missing_data():
     items = _representatives()
-    next(item for item in items if item["symbol"] == "QQQ")["monthlyBoll"]["midDirection"] = "falling"
+    _set_monthly_direction(next(item for item in items if item["symbol"] == "QQQ"), "falling")
 
     response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
 
@@ -209,8 +222,18 @@ def test_hong_kong_fallback_requires_two_usable_monthly_series():
 def test_hong_kong_fallback_allows_fresh_cross_calendar_holiday_date_difference():
     items = _representatives() + [_item("513120.SS")]
     representative_items = [
-        {**_item("^HSI"), "decisionAsOf": "2026-10-02", "latestDataDate": "2026-10-02"},
-        {**_item("513010.SS"), "decisionAsOf": "2026-09-30", "latestDataDate": "2026-09-30"},
+        {
+            **_item("^HSI"),
+            "decisionAsOf": "2026-10-02",
+            "latestDataDate": "2026-10-02",
+            "completedDailyDates": ["2026-09-30", "2026-10-02"],
+        },
+        {
+            **_item("513010.SS"),
+            "decisionAsOf": "2026-09-30",
+            "latestDataDate": "2026-09-30",
+            "completedDailyDates": ["2026-09-30"],
+        },
     ]
     response = build_scan_response(
         items,
@@ -224,17 +247,25 @@ def test_hong_kong_fallback_allows_fresh_cross_calendar_holiday_date_difference(
     assert hong_kong["representativeDateMismatch"] is True
     assert hong_kong["representativeDateMismatchAccepted"] is True
     assert hong_kong["representativeDateAlignment"] == "cross_calendar"
+    assert hong_kong["commonRepresentativeDate"] == "2026-09-30"
+    assert hong_kong["representativeLagSessions"] == {"^HSI": 0, "513010.SS": 1}
     assert hong_kong["effectiveRepresentativeDates"] == {
         "^HSI": "2026-10-02",
         "513010.SS": "2026-09-30",
     }
 
 
-def test_hong_kong_same_calendar_date_mismatch_is_insufficient():
+def test_hong_kong_representatives_replay_to_latest_common_completed_date():
     items = _representatives() + [_item("513120.SS")]
+    newer_tracker = {
+        **_item("2800.HK"),
+        "decisionAsOf": "2026-08-10",
+        "latestDataDate": "2026-08-10",
+        "completedDailyDates": ["2026-08-07", "2026-08-10"],
+    }
     representative_items = [
         _item("^HSI"),
-        {**_item("2800.HK"), "decisionAsOf": "2026-08-10", "latestDataDate": "2026-08-10"},
+        newer_tracker,
     ]
 
     response = build_scan_response(
@@ -244,10 +275,21 @@ def test_hong_kong_same_calendar_date_mismatch_is_insufficient():
     )
 
     hong_kong = response["marketModes"]["hong_kong"]
-    assert hong_kong["mode"] == "insufficient"
+    assert hong_kong["mode"] == "seek"
     assert hong_kong["representativeDateMismatch"] is True
-    assert hong_kong["representativeDateMismatchAccepted"] is False
+    assert hong_kong["representativeDateMismatchAccepted"] is True
     assert hong_kong["representativeDateAlignment"] == "same_calendar_mismatch"
+    assert hong_kong["effectiveRepresentativeDates"] == {
+        "^HSI": "2026-08-07",
+        "2800.HK": "2026-08-10",
+    }
+    assert hong_kong["commonRepresentativeDate"] == "2026-08-07"
+    assert hong_kong["latestRepresentativeDate"] == "2026-08-10"
+    assert hong_kong["representativeLagDays"] == {"^HSI": 3, "2800.HK": 0}
+    assert hong_kong["representativeLagSessions"] == {"^HSI": 1, "2800.HK": 0}
+    assert hong_kong["representativeLagToleranceSessions"] == MAX_REPRESENTATIVE_LAG_SESSIONS
+    assert hong_kong["lagExceededRepresentatives"] == []
+    assert hong_kong["replayedToCommonDate"] is True
 
 
 def test_hong_kong_stale_fallback_does_not_complete_effective_coverage():
@@ -286,6 +328,59 @@ def test_hong_kong_fallback_does_not_use_an_incomplete_live_bar_as_decision_date
     hong_kong = response["marketModes"]["hong_kong"]
     assert hong_kong["mode"] == "insufficient"
     assert hong_kong["representativeStatus"]["513010.SS"] == "as_of_unavailable"
+
+
+def test_hong_kong_common_date_replay_uses_historical_monthly_direction():
+    newer_tracker = {
+        **_item("2800.HK", monthly_direction="rising"),
+        "decisionAsOf": "2026-08-10",
+        "latestDataDate": "2026-08-10",
+        "completedDailyDates": ["2026-08-07", "2026-08-10"],
+    }
+    newer_tracker["monthlyBoll"] = {
+        **newer_tracker["monthlyBoll"],
+        "decisionHistory": [{
+            "availableAsOf": "2026-07-31",
+            "decisionAsOf": "2026-07-31",
+            "midDirection": "falling",
+            "slopeSampleSufficient": True,
+        }],
+    }
+
+    response = build_scan_response(
+        _representatives() + [_item("513120.SS")],
+        requested_symbols=[item["symbol"] for item in _representatives()] + ["513120.SS"],
+        representative_items=[_item("^HSI"), newer_tracker],
+    )
+
+    hong_kong = response["marketModes"]["hong_kong"]
+    assert hong_kong["mode"] == "cautious"
+    assert hong_kong["latestDirections"]["2800.HK"] == "rising"
+    assert hong_kong["directions"]["2800.HK"] == "falling"
+
+
+def test_hong_kong_representative_lag_beyond_tolerance_is_insufficient():
+    stale_hsi = _item("^HSI")
+    newer_tracker = {
+        **_item("2800.HK"),
+        "decisionAsOf": "2026-08-14",
+        "latestDataDate": "2026-08-14",
+        "completedDailyDates": [
+            "2026-08-07", "2026-08-10", "2026-08-11",
+            "2026-08-12", "2026-08-13", "2026-08-14",
+        ],
+    }
+    response = build_scan_response(
+        _representatives() + [_item("513120.SS")],
+        requested_symbols=[item["symbol"] for item in _representatives()] + ["513120.SS"],
+        representative_items=[stale_hsi, newer_tracker],
+    )
+
+    hong_kong = response["marketModes"]["hong_kong"]
+    assert hong_kong["mode"] == "insufficient"
+    assert hong_kong["commonRepresentativeDate"] == "2026-08-07"
+    assert hong_kong["representativeLagSessions"]["^HSI"] == 5
+    assert hong_kong["lagExceededRepresentatives"] == ["^HSI"]
 
 
 def test_crypto_uses_last_complete_daily_bar_when_current_utc_bar_is_provisional():
@@ -354,7 +449,7 @@ def test_breakout_blocks_when_macd_histogram_is_unavailable():
 
 def test_cautious_market_raises_breakout_adx_threshold_to_thirty():
     items = _representatives()
-    next(item for item in items if item["symbol"] == "QQQ")["monthlyBoll"]["midDirection"] = "falling"
+    _set_monthly_direction(next(item for item in items if item["symbol"] == "QQQ"), "falling")
     items.append(_item("AAPL", state="bull_flip", adx=28, distance_atr=1.0))
 
     response = build_scan_response(items, requested_symbols=[item["symbol"] for item in items])
@@ -401,8 +496,11 @@ def test_pullback_requires_prior_zone_bar_and_current_restrengthening_close():
         "confirmedAt": "2026-08-07",
         "failed": False,
     }
-    assert by_symbol["AAPL"]["decision"]["label"] == "可买·回踩入场"
-    assert by_symbol["AAPL"]["decision"]["maxAcceptablePrice"] == 103.0
+    assert by_symbol["AAPL"]["decision"]["permission"] == "watch"
+    assert by_symbol["AAPL"]["decision"]["label"] == "只观察·回踩重新走强"
+    assert by_symbol["AAPL"]["decision"]["paperOnly"] is True
+    assert by_symbol["AAPL"]["decision"]["technicalExecutionEligible"] is False
+    assert by_symbol["AAPL"]["decision"]["maxAcceptablePrice"] is None
     assert by_symbol["MU"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
     assert by_symbol["NVDA"]["pullback"]["enteredZone"] is True
     assert by_symbol["NVDA"]["pullback"]["enteredAt"] == "2026-08-07"
@@ -410,7 +508,7 @@ def test_pullback_requires_prior_zone_bar_and_current_restrengthening_close():
     assert by_symbol["NVDA"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
 
 
-def test_red_low_volatility_pullback_uses_seek_adx_threshold_twenty_only():
+def test_pullback_is_observation_only_without_symbol_specific_adx_override():
     candles = [
         {"time": "2026-08-14", "close": 100.5, "st_val": 100.0, "st_dir": 1},
         {"time": "2026-08-17", "close": 101.0, "st_val": 100.0, "st_dir": 1},
@@ -424,11 +522,13 @@ def test_red_low_volatility_pullback_uses_seek_adx_threshold_twenty_only():
     red_low_vol = next(item for item in response["items"] if item["symbol"] == "512890.SS")
     other_dividend = next(item for item in response["items"] if item["symbol"] == "510880.SS")
 
-    assert red_low_vol["decision"]["permission"] == "buy"
-    assert red_low_vol["decision"]["reasonCodes"][-2:] == ["ADX_PASSED", "RESTRENGTH_CONFIRMED"]
+    assert red_low_vol["decision"]["permission"] == "wait"
+    assert red_low_vol["decision"]["failedGates"] == ["ADX_BELOW_25"]
     assert other_dividend["decision"]["permission"] == "wait"
     assert other_dividend["decision"]["failedGates"] == ["ADX_BELOW_25"]
-    assert response["thresholds"]["pullbackSeekAdxOverrides"] == {"512890.SS": 20.0}
+    assert response["thresholds"]["pullbackLiveTradingAllowed"] is False
+    assert response["thresholds"]["formalEntryMode"] == "bull_flip_only"
+    assert "pullbackSeekAdxOverrides" not in response["thresholds"]
 
     breakout_items = _representatives() + [
         _item("512890.SS", state="bull_flip", adx=20.0, distance_atr=0.5),
@@ -445,7 +545,7 @@ def test_red_low_volatility_pullback_uses_seek_adx_threshold_twenty_only():
 
 def test_red_low_volatility_pullback_keeps_cautious_market_threshold():
     items = _representatives()
-    next(item for item in items if item["symbol"] == "000300.SS")["monthlyBoll"]["midDirection"] = "falling"
+    _set_monthly_direction(next(item for item in items if item["symbol"] == "000300.SS"), "falling")
     items.append(_item(
         "512890.SS",
         adx=25.0,
@@ -743,10 +843,12 @@ def test_waiting_stages_readiness_attention_themes_and_changes_are_structured():
     )
     aapl = next(item for item in second["items"] if item["symbol"] == "AAPL")
 
-    assert aapl["decision"]["stage"] == "pullback_confirmed"
-    assert aapl["transition"]["changes"]["permission"] == {"from": "wait", "to": "buy"}
+    assert aapl["decision"]["stage"] == "pullback_observation"
+    assert aapl["transition"]["changes"]["permission"] == {"from": "wait", "to": "watch"}
     assert second["changes"]["baselineAvailable"] is True
     assert second["changes"]["count"] >= 1
-    assert "AAPL" in second["attention"]["executable"]
+    assert "AAPL" not in second["attention"]["executable"]
+    assert "AAPL" not in second["attention"]["formalBuySignals"]
+    assert aapl["primaryGroup"] == "wait_confirmation"
     assert any(theme["themeId"] == "gold" for theme in second["themes"])
     assert any(theme["themeId"] == "csi300" for theme in second["themes"])

@@ -14,6 +14,22 @@ from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.service import PortfolioStrategyService
 
 
+def test_strategy_listing_has_one_primary_and_keeps_existing_paper_comparisons(tmp_path: Path):
+    service = PortfolioStrategyService(
+        data_dir=tmp_path / "data", db_path=tmp_path / "paper.sqlite",
+    )
+
+    strategies = service.list_strategies()
+    primary = [item["strategyId"] for item in strategies if item["isPrimary"]]
+    by_id = {item["strategyId"]: item for item in strategies}
+
+    assert primary == ["core90_ma200_bull10"]
+    assert by_id["risk_parity_core_next_open"]["paperEnabled"] is True
+    assert by_id["risk_parity_core_next_open"]["presentationGroup"] == "comparison"
+    assert by_id["theme_alpha"]["paperEnabled"] is True
+    assert by_id["btc_supertrend_satellite"]["paperEnabled"] is True
+
+
 def test_service_seeds_frozen_july_pit_snapshot_without_xquant_runtime(tmp_path: Path):
     service = PortfolioStrategyService(
         data_dir=Path(__file__).parents[1] / "data",

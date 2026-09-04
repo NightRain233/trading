@@ -42,6 +42,13 @@ Click "刷新当前策略" to reconcile new market data and pending paper orders
 
 ### Frozen xquant Next-Open Strategies
 
+The primary paper strategy is `core90_ma200_bull10`. The other paper accounts
+remain active as forward comparisons, but they are not co-equal production
+candidates. This convergence is based on the frozen 2015-01-01 through
+2026-07-10 research window: the Core90 + MA200 Bull10 structure reduced the
+historical maximum drawdown to about 13.49%, shortened maximum recovery to 283
+days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
+
 - RiskParity core: 510300.SS / 513100.SS / 518880.SS, 20 common-session returns, inverse volatility, every 10 common sessions, 10 bps one-way cost.
 - Core signals are generated after the common Close and execute at the next common valid Open. Between rebalances, quantities remain unchanged and weights drift naturally.
 - Bull sleeve: fixed 10% total budget, 10% maximum per satellite position, 10 positions maximum, ST 7/3, 5 bps commission plus 5 bps slippage each side.
@@ -77,7 +84,7 @@ Errors: 404 (unknown ID), 409 (comparison-only operation), 400 (invalid params).
 - `benchmark`: normalized NAV and return difference against `risk_parity_core_next_open`.
 - `dataQualityEventCount`: append-only correction/data-quality audit count.
 
-The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only the four primary strategies; comparison strategies remain in the comparison area.
+The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only `core90_ma200_bull10` as the primary strategy; the other paper accounts remain in the comparison area and continue accumulating forward records.
 
 ### Explicit activation
 
@@ -126,7 +133,7 @@ WAL mode, foreign keys, busy timeout 5s. `BEGIN IMMEDIATE` for writes. Idempoten
 
 ## Daily Refresh
 
-The maintained runner updates data, refreshes all four primary strategies independently, then renders the read-only OpenClaw report:
+The maintained runner updates data, refreshes all four tracked paper accounts independently, then renders the read-only OpenClaw report with only `core90_ma200_bull10` expanded as primary:
 
 ```bash
 scripts/run_portfolio_daily.sh

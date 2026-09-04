@@ -460,8 +460,8 @@ export function SupertrendPage() {
           <div className="text-lg font-semibold text-emerald-300">{signalCounts.fresh_bull || 0}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">回踩买点</div>
-          <div className="text-lg font-semibold text-cyan-300">{signalCounts.pullback_buy || 0}</div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">回踩观察</div>
+          <div className="text-lg font-semibold text-cyan-300">{signalCounts.pullback_watch || 0}</div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
           <div className="text-[10px] text-zinc-600 uppercase tracking-widest">预备翻多</div>
@@ -533,7 +533,7 @@ export function SupertrendPage() {
             <div className="flex-1">
               <div className="text-xs font-semibold text-zinc-300">晚上复盘：优先显示明天最值得盯的买点队列</div>
               <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                默认保留刚翻多、回踩买点、预备翻多、风控，以及带高优先级信号的手动关注/持有；其他标的仍可展开查看。
+                默认保留刚翻多、回踩观察、预备翻多、风控，以及带高优先级信号的手动关注/持有；其他标的仍可展开查看。
               </div>
             </div>
             <button

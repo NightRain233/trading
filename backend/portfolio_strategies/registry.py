@@ -12,6 +12,11 @@ class ComparisonStrategyError(ValueError):
     pass
 
 
+# Long-sample convergence decision: this is the sole user-facing primary.
+# Other paper accounts continue accumulating forward comparison records.
+PRIMARY_STRATEGY_IDS = ("core90_ma200_bull10",)
+
+
 CORE_ASSETS = (
     AssetConfig("510300.SS", "沪深300ETF", "core"),
     AssetConfig("513100.SS", "纳指100ETF", "core_lvt"),

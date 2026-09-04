@@ -248,6 +248,12 @@ def test_supertrend_monthly_decision_direction_uses_last_completed_month():
     assert context["monthlyBoll"]["periodComplete"] is False
     assert context["monthlyBoll"]["decisionMidDirection"] == "rising"
     assert context["monthlyBoll"]["decisionAsOf"] == "2026-07-31"
+    assert context["monthlyBoll"]["decisionHistory"][-1] == {
+        "availableAsOf": "2026-07-31",
+        "decisionAsOf": "2026-07-31",
+        "midDirection": "rising",
+        "slopeSampleSufficient": True,
+    }
 
 
 def test_supertrend_volume_context_excludes_incomplete_session_ratio():
@@ -582,7 +588,7 @@ def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
             index=close.index,
         )
 
-    daily_path = Path(tmp_path) / "TEST.parquet"
+    daily_path = Path(tmp_path) / "TEST-USD.parquet"
     daily.to_parquet(daily_path)
     data_mtime = time.time()
     main.os.utime(daily_path, (data_mtime, data_mtime))
@@ -593,7 +599,7 @@ def test_supertrend_scan_returns_data_freshness_metadata(monkeypatch, tmp_path):
         types.SimpleNamespace(fake_supertrend=fake_supertrend, supertrend=fake_supertrend, atr=lambda *args, **kwargs: pd.Series([1.0] * len(index), index=index)),
     )
     monkeypatch.setattr(analysis, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "TEST", "alias": ""}]}])
+    monkeypatch.setattr(main, "load_watchlist", lambda: [{"symbols": [{"symbol": "TEST-USD", "alias": ""}]}])
     monkeypatch.setattr(main, "batch_fetch_and_update", lambda symbols: {})
     main._st_scan_cache = {"data": None, "ts": 0.0}
 

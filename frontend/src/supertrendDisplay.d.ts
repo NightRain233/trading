@@ -1,5 +1,5 @@
 export type SupertrendDisplaySignal = {
-  key: 'fresh_bull' | 'pullback_buy' | 'pre_bull' | 'risk';
+  key: 'fresh_bull' | 'pullback_watch' | 'pre_bull' | 'risk';
   label: string;
   tone: 'emerald' | 'cyan' | 'amber' | 'red';
   rank: number;
