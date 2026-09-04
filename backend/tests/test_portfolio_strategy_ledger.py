@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -50,6 +51,45 @@ def test_database_connection_enables_required_sqlite_safety(tmp_path: Path):
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+def test_existing_decision_ledger_is_upgraded_with_provenance_columns(tmp_path: Path):
+    db_path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE decision_runs (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                strategy_id TEXT NOT NULL,
+                strategy_version TEXT NOT NULL,
+                run_type TEXT NOT NULL,
+                market_data_date TEXT NOT NULL,
+                signal_date TEXT NOT NULL,
+                universe_version TEXT,
+                config_hash TEXT NOT NULL,
+                input_hash TEXT NOT NULL,
+                data_quality_status TEXT NOT NULL,
+                authoritative INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (strategy_id, strategy_version, run_type, signal_date, input_hash)
+            )
+            """
+        )
+
+    PortfolioLedger(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(decision_runs)")
+        }
+    assert {
+        "signal_contract_version",
+        "signal_code_commit_sha",
+        "signal_code_hash",
+        "price_snapshot_hash",
+    } <= columns
 
 
 def test_creating_same_account_twice_returns_one_account(ledger):

@@ -22,7 +22,7 @@ Click "刷新当前策略" to reconcile new market data and pending paper orders
 | `core90_ma200_bull10` | Core90 + MA200 Bull10 | Paper | Core every 10 sessions; bull orders per market |
 | `btc_supertrend_satellite` | BTC SuperTrend Satellite 7.5% | Paper | Every 10 ETF sessions |
 | `theme_alpha` | Theme Alpha | Paper | ~10th/25th monthly |
-| `core90_raw_bull10` | Core90 + Raw Bull10 | Comparison | No paper account |
+| `core90_raw_bull10` | Core90 + Raw Bull10 | Paper comparison | Independent forward ledger; not primary |
 | `btc_supertrend_satellite_5` | BTC 5% variant | Comparison | — |
 | `btc_supertrend_satellite_10` | BTC 10% variant | Comparison | — |
 
@@ -52,7 +52,7 @@ days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
 - RiskParity core: 510300.SS / 513100.SS / 518880.SS, 20 common-session returns, inverse volatility, every 10 common sessions, 10 bps one-way cost.
 - Core signals are generated after the common Close and execute at the next common valid Open. Between rebalances, quantities remain unchanged and weights drift naturally.
 - Bull sleeve: fixed 10% total budget, 10% maximum per satellite position, 10 positions maximum, ST 7/3, 5 bps commission plus 5 bps slippage each side.
-- `setup=breakout` bull flips captured under the frozen `scan_v2_right_side_5` research contract are eligible even when formal permission is not `buy`.
+- Bull entries are generated directly from completed OHLC. The primary uses `bull_flip_ma200_v1`; the Raw comparison uses `bull_flip_raw_v1`. Scanner permissions, ADX, MACD, weekly state, pullback labels, and readiness scores cannot change either portfolio trade set.
 - MA200 gates entries only. References are 510300.SS, 2800.HK, SPY, BTC-USD, and GC=F by market. A blocked signal is never bought later without a new bull flip.
 - The monthly observation pool is point-in-time. The frozen 2026-07-01 xquant membership is stored as a hashed fixture; later months are generated from the information available at their month-end snapshot.
 
@@ -70,18 +70,18 @@ days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
 | POST | `/api/portfolio-strategies/{id}/activate` | Explicit cash-only first activation |
 | POST | `/api/portfolio-strategies/{id}/refresh` | Refresh, calculate, reconcile |
 
-Errors: 404 (unknown ID), 409 (comparison-only operation), 400 (invalid params).
+Errors: 404 (unknown ID), 409 (research-only comparison operation), 400 (invalid params).
 
 ### Snapshot operations contract
 
 `GET .../{id}/snapshot` and `POST .../{id}/refresh` include an `operations` block used by both the frontend and OpenClaw:
 
 - `orders`: per-symbol paper orders with signal, expected/actual execution dates, next attempt, actual Open, side, quantity/weight delta, costs, status, and delay/rejection reason.
-- `bullCandidates`: policy-eligible bull flips with PIT universe context and MA200 reference price, average, decision, and reason.
+- `bullCandidates`: frozen-contract bull flips with PIT universe context and MA200 reference price, average, decision, and reason.
 - `dueOrderCount`, `waitingOpenCount`, `pendingOrderCount`: execution queue counts. A missing Open remains pending and is retried.
 - `ma200AllowedCount`, `ma200BlockedCount`: entry-gate counts; a block does not schedule a later catch-up buy.
 - `grossExposure`: current non-cash exposure.
-- `benchmark`: normalized NAV and return difference against `risk_parity_core_next_open`.
+- `benchmark`: normalized NAV and return difference against `risk_parity_core_next_open`, calculated only when both accounts have the exact same valuation date. Otherwise `comparisonStatus=BENCHMARK_DATE_MISMATCH` and relative values are null.
 - `dataQualityEventCount`: append-only correction/data-quality audit count.
 
 The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only `core90_ma200_bull10` as the primary strategy; the other paper accounts remain in the comparison area and continue accumulating forward records.

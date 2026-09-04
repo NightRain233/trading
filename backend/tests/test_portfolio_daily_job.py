@@ -49,3 +49,36 @@ def test_daily_job_updates_first_isolates_failures_and_writes_status(
     assert result["strategies"]["btc_supertrend_satellite"]["notActivated"] is True
     assert result["strategies"]["risk_parity_core_next_open"]["ok"] is True
     assert json.loads(status_path.read_text())["marketReadiness"]["us"]["ready"] is False
+
+
+def test_market_readiness_reuses_structured_freshness_statuses(tmp_path: Path, monkeypatch):
+    frames = {"510300.SS": object(), "AAPL": object()}
+    monkeypatch.setattr(
+        portfolio_daily_job,
+        "load_next_open_frames",
+        lambda *_args, **_kwargs: (frames, {}),
+    )
+
+    def fake_freshness(symbol, frame, *, known_at, source_error=None):
+        assert frame is frames[symbol]
+        assert known_at == datetime(2026, 10, 2, 12, 0)
+        return {
+            "symbol": symbol,
+            "venue": "XSHG" if symbol.endswith(".SS") else "XNYS",
+            "expectedLastCompletedSession": "2026-09-30",
+            "actualLastCompletedSession": "2026-09-30",
+            "missingExpectedSessions": [],
+            "closedByCalendarSessions": ["2026-10-01"],
+            "freshnessStatus": "OK" if symbol.endswith(".SS") else "SOURCE_STALE",
+        }
+
+    monkeypatch.setattr(portfolio_daily_job, "assess_freshness", fake_freshness, raising=False)
+
+    result = portfolio_daily_job.assess_market_readiness(
+        tmp_path, ["510300.SS", "AAPL"], datetime(2026, 10, 2, 12, 0),
+    )
+
+    assert result["a_share"]["symbols"][0]["freshnessStatus"] == "OK"
+    assert result["a_share"]["ready"] is True
+    assert result["us"]["symbols"][0]["freshnessStatus"] == "SOURCE_STALE"
+    assert result["us"]["ready"] is False

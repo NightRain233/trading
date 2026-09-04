@@ -194,6 +194,10 @@ CREATE TABLE IF NOT EXISTS decision_runs (
     config_hash TEXT NOT NULL,
     input_hash TEXT NOT NULL,
     data_quality_status TEXT NOT NULL,
+    signal_contract_version TEXT,
+    signal_code_commit_sha TEXT,
+    signal_code_hash TEXT,
+    price_snapshot_hash TEXT,
     authoritative INTEGER NOT NULL CHECK (authoritative IN (0, 1)),
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -391,6 +395,17 @@ class PortfolioLedger:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with connect(self.db_path) as conn:
             conn.executescript(SCHEMA)
+            decision_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(decision_runs)")
+            }
+            for column in (
+                "signal_contract_version",
+                "signal_code_commit_sha",
+                "signal_code_hash",
+                "price_snapshot_hash",
+            ):
+                if column not in decision_columns:
+                    conn.execute(f"ALTER TABLE decision_runs ADD COLUMN {column} TEXT")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

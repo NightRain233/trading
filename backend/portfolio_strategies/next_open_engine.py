@@ -17,6 +17,7 @@ from .event_ledger import (
     deterministic_key,
     payload_hash,
 )
+from .execution_rules import market_fill_price
 from .frozen_xquant import normalize_daily
 from .ledger import PortfolioLedger, _utc_now
 from .models import StrategyConfig
@@ -398,10 +399,40 @@ class NextOpenPaperEngine:
                 config_hash=decision.config_hash,
                 input_hash=decision.input_hash,
                 data_quality_status=decision.data_quality_status,
+                signal_contract_version=decision.signal_contract_version,
+                signal_code_commit_sha=decision.signal_code_commit_sha,
+                signal_code_hash=decision.signal_code_hash,
+                price_snapshot_hash=decision.price_snapshot_hash,
                 payload=decision.payload,
                 items=decision.items,
                 conn=conn,
             )
+            if bool(run["authoritative"]) and decision.data_quality_status != "OK":
+                self.events.record_data_quality(
+                    account_id=account["id"],
+                    strategy_id=config.strategy_id,
+                    strategy_version=config.version,
+                    event_key=deterministic_key(
+                        "DECISION_DATA_QUALITY",
+                        config.strategy_id,
+                        config.version,
+                        decision.run_type,
+                        decision.signal_date,
+                        decision.data_quality_status,
+                    ),
+                    observed_at=_utc_now(),
+                    market_data_date=decision.market_data_date,
+                    code=decision.data_quality_status,
+                    message="Frozen decision was blocked by input data quality",
+                    symbol=str(decision.payload.get("symbol") or "") or None,
+                    current_input_hash=decision.input_hash,
+                    details={
+                        "runType": decision.run_type,
+                        "signalDate": decision.signal_date.isoformat(),
+                        "marketGate": decision.payload.get("marketGate"),
+                    },
+                    conn=conn,
+                )
             if not bool(run["authoritative"]):
                 return ()
             state = self._load_state(account["id"], conn=conn)
@@ -800,7 +831,7 @@ class NextOpenPaperEngine:
         sleeve = order["sleeve"]
         key = (sleeve, symbol)
         commission_rate = float(config.params["bull_commission_bps"]) / 10_000.0
-        slippage_rate = float(config.params["bull_slippage_bps"]) / 10_000.0
+        slippage_bps = float(config.params["bull_slippage_bps"])
         values, _dates, total_nav = self._mark_state(state, prices, actual, field="Open")
         sleeve_nav = state.cash.get(sleeve, 0.0) + sum(
             value for (item_sleeve, _symbol), value in values.items()
@@ -811,7 +842,9 @@ class NextOpenPaperEngine:
             if quantity <= 1e-12:
                 rejected = self.events.reject_order(order["id"], reason="NO_POSITION", conn=conn)
                 return dict(rejected)
-            execution_price = actual_open * (1.0 - slippage_rate)
+            execution_price = market_fill_price(
+                actual_open, side="SELL", slippage_bps=slippage_bps,
+            )
             gross_notional = quantity * execution_price
             commission = gross_notional * commission_rate
             slippage = quantity * (actual_open - execution_price)
@@ -843,7 +876,9 @@ class NextOpenPaperEngine:
             if gross_notional <= 1e-9:
                 rejected = self.events.reject_order(order["id"], reason="CAPITAL_LIMIT", conn=conn)
                 return dict(rejected)
-            execution_price = actual_open * (1.0 + slippage_rate)
+            execution_price = market_fill_price(
+                actual_open, side="BUY", slippage_bps=slippage_bps,
+            )
             quantity_delta = gross_notional / execution_price
             commission = gross_notional * commission_rate
             slippage = quantity_delta * (execution_price - actual_open)

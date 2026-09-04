@@ -33,6 +33,7 @@ DEPLOY_HOST ?=
 DEPLOY_PATH ?=
 DEPLOY_HOST_TX ?=
 DEPLOY_PATH_TX ?=
+TRADING_BUILD_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || echo unavailable)
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -65,11 +66,11 @@ build: build-fe ## Build all (frontend only for now, backend is interpreted)
 # --- Docker Management ---
 
 docker-build: ## Build docker images using docker compose
-	docker compose build
+	TRADING_BUILD_SHA=$(TRADING_BUILD_SHA) docker compose build
 
 docker-build-x: ## Build linux/amd64 images locally (for cross-platform deploy to x86 servers)
 	@echo "Building backend image for linux/amd64..."
-	docker buildx build --platform linux/amd64 -t trading-backend:latest ./backend --load
+	docker buildx build --platform linux/amd64 --build-arg TRADING_BUILD_SHA=$(TRADING_BUILD_SHA) -t trading-backend:latest ./backend --load
 	@echo "Building frontend image for linux/amd64..."
 	docker buildx build --platform linux/amd64 -t trading-frontend:latest ./frontend --load
 

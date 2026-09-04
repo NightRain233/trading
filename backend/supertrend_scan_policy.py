@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from datetime import date, datetime
+from itertools import combinations
 from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
@@ -60,7 +61,6 @@ THEME_DEFINITIONS = {
 PRIMARY_GROUPS = (
     "risk",
     "breakout_buy",
-    "pullback_buy",
     "breakout_armed",
     "wait_confirmation",
     "compression_watch",
@@ -198,6 +198,12 @@ def _representative_as_of(item: Optional[dict[str, Any]]) -> Optional[str]:
 def _representative_status(item: Optional[dict[str, Any]]) -> str:
     if not item:
         return "missing"
+    freshness = (
+        item.get("freshnessStatus")
+        or (item.get("freshness") or {}).get("freshnessStatus")
+    )
+    if freshness and freshness not in {"OK", "EXPECTED_CLOSED"}:
+        return str(freshness).lower()
     if item.get("dataStale") is True:
         return "stale"
     integrity = item.get("dataIntegrity") or {}
@@ -257,21 +263,26 @@ def _representative_replay_context(
     common_date = max(common_dates) if common_dates else None
     valid_latest_dates = [value for value in effective_dates.values() if value]
     latest_date = max(valid_latest_dates) if valid_latest_dates else None
-    freshest_symbols = [
-        symbol for symbol, value in effective_dates.items()
-        if value == latest_date
-    ]
-    reference_sessions = set().union(*(
-        completed_dates[symbol] for symbol in freshest_symbols
-    )) if freshest_symbols else set()
-
     lag_sessions: dict[str, Optional[int]] = {}
     lag_days: dict[str, Optional[int]] = {}
     latest_parsed = _parse_iso_date(latest_date)
     for symbol, value in effective_dates.items():
+        venue = classify_trading_venue(symbol)
+        venue_dates = {
+            peer: peer_date for peer, peer_date in effective_dates.items()
+            if classify_trading_venue(peer) == venue and peer_date
+        }
+        venue_latest = max(venue_dates.values()) if venue_dates else None
+        freshest_peers = [
+            peer for peer, peer_date in venue_dates.items()
+            if peer_date == venue_latest
+        ]
+        reference_sessions = set().union(*(
+            completed_dates[peer] for peer in freshest_peers
+        )) if freshest_peers else set()
         lag_sessions[symbol] = (
-            len([session for session in reference_sessions if value < session <= latest_date])
-            if value and latest_date else None
+            len([session for session in reference_sessions if value < session <= venue_latest])
+            if value and venue_latest else None
         )
         parsed = _parse_iso_date(value)
         lag_days[symbol] = (
@@ -301,24 +312,80 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
     for market, representatives in SYSTEM_MARKET_REPRESENTATIVES.items():
         primary_directions = {symbol: _representative_direction(item_map.get(symbol)) for symbol in representatives}
         fallback_representatives = MARKET_REPRESENTATIVE_FALLBACKS.get(market, ())
-        # Keep primary data whenever it is usable, and fill only unavailable
-        # slots from the fallback pool.  Requiring two usable directions keeps
-        # a single ETF from silently deciding the whole market mode.
         directions = dict(primary_directions)
+        candidate_pool = (*representatives, *fallback_representatives)
+        candidate_rows = []
+        for candidate_index, candidate_set in enumerate(
+            combinations(candidate_pool, len(representatives))
+        ):
+            candidate_symbols = list(candidate_set)
+            candidate_directions = {
+                symbol: _representative_direction(item_map.get(symbol))
+                for symbol in candidate_symbols
+            }
+            candidate_replay = _representative_replay_context(
+                candidate_symbols, item_map,
+            )
+            lag_exceeded = [
+                symbol for symbol, value in candidate_replay["lagSessions"].items()
+                if value is None or value > MAX_REPRESENTATIVE_LAG_SESSIONS
+            ]
+            freshness_states = {
+                symbol: (
+                    item_map.get(symbol, {}).get("freshnessStatus")
+                    or (item_map.get(symbol, {}).get("freshness") or {}).get(
+                        "freshnessStatus"
+                    )
+                    or "OK"
+                )
+                for symbol in candidate_symbols
+            }
+            valid = bool(
+                all(value is not None for value in candidate_directions.values())
+                and candidate_replay["commonDate"]
+                and all(
+                    value is not None
+                    for value in candidate_replay["directions"].values()
+                )
+                and not lag_exceeded
+                and all(
+                    value in {"OK", "EXPECTED_CLOSED"}
+                    for value in freshness_states.values()
+                )
+            )
+            candidate_rows.append({
+                "symbols": candidate_symbols,
+                "directions": candidate_directions,
+                "replay": candidate_replay,
+                "valid": valid,
+                "primaryCount": sum(
+                    symbol in representatives for symbol in candidate_symbols
+                ),
+                "usableCount": sum(
+                    value is not None for value in candidate_directions.values()
+                ),
+                "historyCount": sum(
+                    len(_representative_completed_dates(item_map.get(symbol)))
+                    for symbol in candidate_symbols
+                ),
+                "freshness": freshness_states,
+                "lagExceeded": lag_exceeded,
+                "candidateIndex": candidate_index,
+            })
+        selected = max(
+            candidate_rows,
+            key=lambda row: (
+                int(row["valid"]), row["primaryCount"], row["usableCount"],
+                row["replay"]["commonDate"] or "", row["historyCount"],
+                -row["candidateIndex"],
+            ),
+        )
         effective_directions = {
-            symbol: direction
-            for symbol, direction in primary_directions.items()
+            symbol: direction for symbol, direction in selected["directions"].items()
             if direction is not None
         }
-        for symbol in fallback_representatives:
-            if len(effective_directions) >= len(representatives):
-                break
-            direction = _representative_direction(item_map.get(symbol))
-            if direction is not None:
-                directions[symbol] = direction
-                effective_directions[symbol] = direction
         effective_symbols = list(effective_directions)
-        replay = _representative_replay_context(effective_symbols, item_map)
+        replay = selected["replay"]
         effective_dates = replay["effectiveDates"]
         distinct_dates = {value for value in effective_dates.values() if value}
         representative_date_mismatch = len(distinct_dates) > 1
@@ -341,10 +408,7 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
         replay_directions = replay["directions"]
         directions.update(replay_directions)
         values = list(replay_directions.values())
-        lag_exceeded_representatives = [
-            symbol for symbol, value in replay["lagSessions"].items()
-            if value is None or value > MAX_REPRESENTATIVE_LAG_SESSIONS
-        ]
+        lag_exceeded_representatives = selected["lagExceeded"]
         date_mismatch_accepted = bool(
             representative_date_mismatch
             and replay["commonDate"]
@@ -376,6 +440,13 @@ def build_market_modes(items: Iterable[dict[str, Any]], representative_items: It
             "effectiveRepresentatives": list(effective_directions),
             "fallbackRepresentatives": list(fallback_representatives),
             "fallbackUsed": fallback_used,
+            "candidateSetsEvaluated": len(candidate_rows),
+            "selectedRepresentativeSet": selected["symbols"],
+            "selectionReason": (
+                "freshest_replayable_candidate_set"
+                if selected["valid"] else "no_fully_replayable_candidate_set"
+            ),
+            "perSymbolFreshness": selected["freshness"],
             "effectiveRepresentativeDates": effective_dates,
             "effectiveRepresentativeStatus": {
                 symbol: _representative_status(item_map.get(symbol))
@@ -1329,10 +1400,10 @@ def _build_attention(groups: dict[str, dict[str, Any]], item_map: dict[str, dict
     )[:5]
     return {
         "mustAct": list(groups["risk"]["symbols"]),
-        "formalBuySignals": list(groups["breakout_buy"]["symbols"] + groups["pullback_buy"]["symbols"]),
+        "formalBuySignals": list(groups["breakout_buy"]["symbols"]),
         "executable": [
             symbol
-            for symbol in groups["breakout_buy"]["symbols"] + groups["pullback_buy"]["symbols"]
+            for symbol in groups["breakout_buy"]["symbols"]
             if (item_map[symbol].get("executionStatus") or {}).get("executable") is True
         ],
         "armed": list(groups["breakout_armed"]["symbols"]),
@@ -1412,7 +1483,7 @@ def build_scan_response(
                 -(_finite_float((item_map[symbol].get("indicators") or {}).get("adx")) or 0.0),
                 symbol,
             ))
-        elif name in {"breakout_buy", "pullback_buy", "breakout_armed", "wait_confirmation", "compression_watch"}:
+        elif name in {"breakout_buy", "breakout_armed", "wait_confirmation", "compression_watch"}:
             group["symbols"].sort(key=lambda symbol: (
                 -int((item_map[symbol].get("decision") or {}).get("readinessScore") or 0),
                 _absolute_or_infinity(item_map[symbol].get("distanceToSupertrendAtr")),

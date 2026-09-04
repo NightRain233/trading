@@ -52,6 +52,8 @@ from portfolio_strategies.registry import (
     list_strategies as list_portfolio_strategies,
 )
 from portfolio_strategies.service import PortfolioStrategyService
+from portfolio_strategies.market_freshness import assess_freshness
+from portfolio_strategies.period_bars import completed_bars
 from portfolio_strategies.operation_lock import PortfolioOperationLockedError
 from portfolio_strategies import api_models as pm
 import json
@@ -117,11 +119,6 @@ def _get_portfolio_service() -> PortfolioStrategyService:
         _portfolio_service = PortfolioStrategyService(
             data_dir=DATA_DIR,
             db_path=PORTFOLIO_PAPER_DB,
-            decision_provider=lambda symbols: supertrend_scan(
-                force=False,
-                include_candles=False,
-                requested_symbols=",".join(symbols),
-            ),
         )
     return _portfolio_service
 
@@ -2033,14 +2030,24 @@ def _st_multitimeframe_context(
 
     ordered = daily.sort_index()
     close = pd.to_numeric(ordered["Close"], errors="coerce").dropna()
-    weekly_close = close.resample("W").last().dropna()
+    reference_now = now or datetime.now(timezone.utc)
+    weekly_periods = completed_bars(
+        ordered, timeframe="1W", known_at=reference_now,
+    )
+    weekly_close = weekly_periods["Close"] if not weekly_periods.empty else pd.Series(dtype=float)
     monthly_close = close.resample("ME").last().dropna()
     latest_close_date = pd.Timestamp(close.index[-1]).date().isoformat() if not close.empty else None
-    reference_now = now or datetime.now(timezone.utc)
-    current_month = pd.Timestamp(reference_now.date()).to_period("M")
-    latest_month = pd.Timestamp(close.index[-1]).to_period("M") if not close.empty else None
-    monthly_period_complete = latest_month is not None and latest_month < current_month
-    completed_monthly_close = monthly_close if monthly_period_complete else monthly_close.iloc[:-1]
+    monthly_periods = completed_bars(
+        ordered, timeframe="1M", known_at=reference_now,
+    )
+    completed_monthly_close = (
+        monthly_periods["Close"] if not monthly_periods.empty else pd.Series(dtype=float)
+    )
+    completed_source_date = (
+        pd.Timestamp(monthly_periods.iloc[-1]["source_last_session"]).date().isoformat()
+        if not monthly_periods.empty else None
+    )
+    monthly_period_complete = bool(completed_source_date == latest_close_date)
 
     volume_context = empty_volume.copy()
     if "Volume" in ordered.columns:
@@ -2064,30 +2071,35 @@ def _st_multitimeframe_context(
     decision_monthly_boll = _st_boll_context(completed_monthly_close)
     monthly_direction_history = []
     if not completed_monthly_close.empty:
-        close_periods = close.index.to_period("M")
-        actual_month_end_dates = {
-            period: pd.Timestamp(group.index[-1]).date().isoformat()
-            for period, group in close.groupby(close_periods)
-        }
         for offset in range(len(completed_monthly_close)):
             snapshot = _st_boll_context(completed_monthly_close.iloc[:offset + 1])
-            period = completed_monthly_close.index[offset].to_period("M")
+            available_as_of = pd.Timestamp(
+                monthly_periods.iloc[offset]["source_last_session"],
+            ).date().isoformat()
             monthly_direction_history.append({
-                "availableAsOf": actual_month_end_dates.get(period),
-                "decisionAsOf": snapshot.get("asOf"),
+                "availableAsOf": available_as_of,
+                "decisionAsOf": available_as_of,
                 "midDirection": snapshot.get("midDirection"),
                 "slopeSampleSufficient": snapshot.get("slopeSampleSufficient"),
             })
+    decision_as_of = (
+        pd.Timestamp(monthly_periods.iloc[-1]["source_last_session"]).date().isoformat()
+        if not monthly_periods.empty else None
+    )
     monthly_boll.update({
         "periodComplete": monthly_period_complete,
         "decisionMidDirection": decision_monthly_boll.get("midDirection"),
         "decisionMidSlopePct": decision_monthly_boll.get("midSlopePct"),
-        "decisionAsOf": decision_monthly_boll.get("asOf"),
+        "decisionAsOf": decision_as_of,
         "decisionHistory": monthly_direction_history[-36:],
     })
 
+    weekly_as_of = (
+        pd.Timestamp(weekly_periods.iloc[-1]["source_last_session"]).date().isoformat()
+        if not weekly_periods.empty else None
+    )
     return {
-        "weeklyBoll": _st_boll_context(weekly_close, as_of=latest_close_date),
+        "weeklyBoll": _st_boll_context(weekly_close, as_of=weekly_as_of),
         "monthlyBoll": monthly_boll,
         "volumeContext": volume_context,
     }
@@ -2417,6 +2429,9 @@ def _build_supertrend_scan_item(
         just_flipped=state in ("bull_flip", "bear_flip"),
         trend_age_bars=trend_age_bars,
     )
+    freshness = assess_freshness(
+        sym, daily, known_at=now or datetime.now(timezone.utc),
+    )
     return {
         "symbol": sym,
         "alias": alias,
@@ -2445,6 +2460,8 @@ def _build_supertrend_scan_item(
         "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
         "cacheStale": cache_stale,
         "dataStale": data_stale,
+        "freshness": freshness,
+        "freshnessStatus": freshness["freshnessStatus"],
         "refreshTriggered": refresh_triggered,
         "dataIntegrity": integrity,
         "indicators": indicators,
@@ -2773,6 +2790,9 @@ def _supertrend_scan_impl(
             trend_age_bars=trend_age_bars,
         )
 
+        freshness = assess_freshness(
+            sym, daily, known_at=datetime.now(timezone.utc),
+        )
         return {
             "symbol": sym.upper(),
             "alias": alias_map.get(sym, ""),
@@ -2801,6 +2821,8 @@ def _supertrend_scan_impl(
             "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
             "cacheStale": cache_stale,
             "dataStale": data_stale,
+            "freshness": freshness,
+            "freshnessStatus": freshness["freshnessStatus"],
             "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
             "dataIntegrity": data_integrity,
             "indicators": indicators,

@@ -48,7 +48,6 @@ def _pending(service: PortfolioStrategyService, account_id: int):
     finally:
         conn.close()
 
-
 def test_held_symbols_advance_on_own_dates_catch_up_and_do_not_duplicate(
     tmp_path: Path, monkeypatch,
 ):
@@ -74,13 +73,29 @@ def test_held_symbols_advance_on_own_dates_catch_up_and_do_not_duplicate(
     state = engine.current_state(config)
     assert state is not None and state.held_symbols("satellite") == {"002119.SZ", "AAPL"}
 
-    def fake_bearish(frame, **_kwargs):
-        latest = frame.index[-1].date()
-        return (latest,)
+    def fake_calculate(
+        _config, prices, _membership, *, symbol, signal_date, run_type, **_kwargs,
+    ):
+        items = ()
+        if signal_date == prices[symbol].index[-1].date():
+            items = ({
+                "symbol": symbol, "event_type": "ST_BEAR_EXIT",
+                "market": "us" if symbol == "AAPL" else "a_share",
+                "sleeve": "satellite", "eligible": True, "target_weight": 0.0,
+                "priority": 1_000_000_000.0, "reason": "bear", "payload": {},
+            },)
+        return FrozenDecision(
+            run_type=run_type, market_data_date=signal_date, signal_date=signal_date,
+            universe_version="monthly_pit_v1", config_hash="config",
+            input_hash=payload_hash([symbol, signal_date.isoformat()]),
+            data_quality_status="OK", payload={"items": list(items)}, items=items,
+        )
 
-    monkeypatch.setattr("portfolio_strategies.service.bearish_signal_dates", fake_bearish)
+    monkeypatch.setattr("portfolio_strategies.service.calculate_bull_decision", fake_calculate)
+    monkeypatch.setattr(service, "_ensure_current_universe", lambda *_args: None)
+    monkeypatch.setattr(service, "_active_membership", lambda _date: {})
     service._refresh_bull_symbols(
-        config, account, state, _pending(service, account["id"]), frames, (),
+        config, account, state, _pending(service, account["id"]), frames,
         activation_date=date(2021, 3, 31),
     )
 
@@ -108,7 +123,7 @@ def test_held_symbols_advance_on_own_dates_catch_up_and_do_not_duplicate(
 
     # Existing pending exits and authoritative symbol/date decisions make retry inert.
     service._refresh_bull_symbols(
-        config, account, state, _pending(service, account["id"]), frames, (),
+        config, account, state, _pending(service, account["id"]), frames,
         activation_date=date(2021, 3, 31),
     )
     conn = connect(ledger.db_path)
@@ -124,7 +139,7 @@ def test_held_symbols_advance_on_own_dates_catch_up_and_do_not_duplicate(
         conn.close()
 
 
-def test_bull_flip_uses_each_symbols_own_latest_decision_as_of(
+def test_bull_replay_uses_each_symbols_own_completed_dates(
     tmp_path: Path, monkeypatch,
 ):
     service = PortfolioStrategyService(data_dir=tmp_path, db_path=tmp_path / "paper.sqlite")
@@ -138,15 +153,12 @@ def test_bull_flip_uses_each_symbols_own_latest_decision_as_of(
         "002119.SZ": _frame(["2021-04-01", "2021-04-02"], 10),
         "AAPL": _frame(["2021-04-01"], 120),
     }
-    items = (
-        {"symbol": "002119.SZ", "decisionAsOf": "2021-04-02", "state": "bull_flip"},
-        {"symbol": "AAPL", "decisionAsOf": "2021-04-01", "state": "bull_flip"},
-    )
-    calls: list[tuple[str, date, str]] = []
+    calls: list[tuple[str, date]] = []
 
-    def fake_calculate(_config, decision_items, _prices, _membership, *, signal_date, run_type, **_kwargs):
-        symbol = str(decision_items[0]["symbol"])
-        calls.append((symbol, signal_date, str(decision_items[0]["decisionAsOf"])))
+    def fake_calculate(
+        _config, _prices, _membership, *, symbol, signal_date, run_type, **_kwargs,
+    ):
+        calls.append((symbol, signal_date))
         return FrozenDecision(
             run_type=run_type, market_data_date=signal_date, signal_date=signal_date,
             universe_version="monthly_pit_v1", config_hash="config",
@@ -158,21 +170,169 @@ def test_bull_flip_uses_each_symbols_own_latest_decision_as_of(
         "002119.SZ": {"effectiveDate": "2021-04-01"},
         "AAPL": {"effectiveDate": "2021-04-01"},
     })
+    monkeypatch.setattr(service, "_ensure_current_universe", lambda *_args: None)
     monkeypatch.setattr("portfolio_strategies.service.calculate_bull_decision", fake_calculate)
     service._refresh_bull_symbols(
-        config, account, state, (), frames, items,
+        config, account, state, (), frames,
         activation_date=date(2021, 3, 31),
     )
     assert calls == [
-        ("002119.SZ", date(2021, 4, 2), "2021-04-02"),
-        ("AAPL", date(2021, 4, 1), "2021-04-01"),
+        ("002119.SZ", date(2021, 4, 1)),
+        ("002119.SZ", date(2021, 4, 2)),
+        ("AAPL", date(2021, 4, 1)),
     ]
 
-    # A foreign-market date presented for AAPL is ignored, not coerced.
-    calls.clear()
+
+def test_unheld_symbol_replays_every_unprocessed_session_and_retry_is_idempotent(
+    tmp_path: Path, monkeypatch,
+):
+    service = PortfolioStrategyService(data_dir=tmp_path, db_path=tmp_path / "paper.sqlite")
+    config = get_strategy("core90_ma200_bull10")
+    service.next_open_engine.activate(config, activation_date=date(2021, 3, 31))
+    account = service.ledger.get_account(config)
+    assert account is not None
+    state = service.next_open_engine.current_state(config)
+    assert state is not None
+    frames = {
+        "AAPL": _frame([
+            "2021-04-01", "2021-04-05", "2021-04-06", "2021-04-07",
+        ], 120),
+    }
+    replayed: list[date] = []
+
+    def fake_calculate(
+        _config, _prices, _membership, *, symbol, signal_date, run_type, **_kwargs,
+    ):
+        replayed.append(signal_date)
+        items = ()
+        if signal_date == date(2021, 4, 5):
+            items = ({
+                "symbol": symbol, "event_type": "BULL_FLIP_ENTRY", "market": "us",
+                "sleeve": "satellite", "eligible": True, "target_weight": 0.10,
+                "priority": 1.0, "reason": "frozen bull flip", "payload": {},
+            },)
+        return FrozenDecision(
+            run_type=run_type, market_data_date=signal_date, signal_date=signal_date,
+            universe_version="monthly_pit_v1", config_hash="config",
+            input_hash=payload_hash([symbol, signal_date.isoformat()]),
+            data_quality_status="OK", payload={"items": list(items)}, items=items,
+        )
+
+    monkeypatch.setattr(service, "_ensure_current_universe", lambda *_args: None)
+    monkeypatch.setattr(service, "_active_membership", lambda _date: {
+        "AAPL": {"effectiveDate": "2021-04-01", "liquidityRank": 1},
+    })
+    monkeypatch.setattr("portfolio_strategies.service.calculate_bull_decision", fake_calculate)
+
     service._refresh_bull_symbols(
         config, account, state, (), frames,
-        ({"symbol": "AAPL", "decisionAsOf": "2021-04-02", "state": "bull_flip"},),
         activation_date=date(2021, 3, 31),
     )
-    assert calls == []
+
+    assert replayed == [date(2021, 4, 1), date(2021, 4, 5)]
+    conn = connect(service.db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM decision_runs").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM paper_orders").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+    replayed.clear()
+    service._refresh_bull_symbols(
+        config, account, state, _pending(service, account["id"]), frames,
+        activation_date=date(2021, 3, 31),
+    )
+    assert replayed == []
+    conn = connect(service.db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM decision_runs").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM paper_orders").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_continuous_and_outage_recovery_reach_the_same_authoritative_state(
+    tmp_path: Path, monkeypatch,
+):
+    full_frame = _frame([
+        "2021-04-01", "2021-04-05", "2021-04-06", "2021-04-07",
+    ], 120)
+
+    def fake_calculate(
+        _config, _prices, _membership, *, symbol, signal_date, run_type, **_kwargs,
+    ):
+        items = ()
+        if signal_date == date(2021, 4, 5):
+            items = ({
+                "symbol": symbol, "event_type": "BULL_FLIP_ENTRY", "market": "us",
+                "sleeve": "satellite", "eligible": True, "target_weight": 0.10,
+                "priority": 1.0, "reason": "frozen bull flip", "payload": {},
+            },)
+        return FrozenDecision(
+            run_type=run_type, market_data_date=signal_date, signal_date=signal_date,
+            universe_version="monthly_pit_v1", config_hash="config",
+            input_hash=payload_hash([symbol, signal_date.isoformat()]),
+            data_quality_status="OK", payload={"items": list(items)}, items=items,
+        )
+
+    monkeypatch.setattr("portfolio_strategies.service.calculate_bull_decision", fake_calculate)
+
+    def run(name: str, refresh_dates: list[date]) -> tuple:
+        service = PortfolioStrategyService(
+            data_dir=tmp_path, db_path=tmp_path / f"{name}.sqlite",
+        )
+        service._ensure_current_universe = lambda *_args: None
+        service._active_membership = lambda _date: {
+            "AAPL": {"effectiveDate": "2021-04-01", "liquidityRank": 1},
+        }
+        config = get_strategy("core90_ma200_bull10")
+        service.next_open_engine.activate(config, activation_date=date(2021, 3, 31))
+        for refresh_date in refresh_dates:
+            visible = {"AAPL": full_frame.loc[:pd.Timestamp(refresh_date)]}
+            account = service.ledger.get_account(config)
+            assert account is not None
+            state = service.next_open_engine.current_state(config)
+            assert state is not None
+            service._refresh_bull_symbols(
+                config, account, state, _pending(service, account["id"]), visible,
+                activation_date=date(2021, 3, 31),
+            )
+            service.next_open_engine.reconcile(
+                config, visible, through_date=refresh_date,
+            )
+            service.next_open_engine.value(config, visible, refresh_date)
+
+        conn = connect(service.db_path)
+        try:
+            decisions = tuple(tuple(row) for row in conn.execute(
+                "SELECT run_type, signal_date FROM decision_runs ORDER BY run_type, signal_date"
+            ))
+            orders = tuple(tuple(row) for row in conn.execute(
+                "SELECT symbol, signal_date, status, actual_execution_date FROM paper_orders"
+            ))
+            executions = tuple(tuple(row) for row in conn.execute(
+                "SELECT paper_orders.symbol, paper_executions.signal_date, "
+                "paper_executions.actual_execution_date, paper_executions.actual_open "
+                "FROM paper_orders JOIN paper_executions "
+                "ON paper_orders.id = paper_executions.order_id"
+            ))
+            positions = tuple(tuple(row) for row in conn.execute(
+                "SELECT sleeve, symbol, quantity FROM portfolio_positions_v2 "
+                "WHERE authoritative = 1 AND valuation_date = '2021-04-07'"
+            ))
+            nav = conn.execute(
+                "SELECT net_nav, cash, gross_exposure FROM portfolio_nav_v2 "
+                "WHERE authoritative = 1 AND valuation_date = '2021-04-07'"
+            ).fetchone()
+            assert nav is not None
+            return decisions, orders, executions, positions, tuple(nav)
+        finally:
+            conn.close()
+
+    continuous = run(
+        "continuous",
+        [date(2021, 4, 1), date(2021, 4, 5), date(2021, 4, 6), date(2021, 4, 7)],
+    )
+    recovered = run("recovered", [date(2021, 4, 7), date(2021, 4, 7)])
+
+    assert recovered == continuous

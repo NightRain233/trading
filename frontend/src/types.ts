@@ -270,6 +270,10 @@ export interface PortfolioAssetMeta {
   alias: string;
   sleeve: string;
   syntheticProxy: boolean;
+  quoteCurrency: string;
+  baseCurrency: string;
+  fxPair?: string | null;
+  investableInstrument?: string | null;
 }
 
 export interface PortfolioSnapshot {
@@ -322,6 +326,9 @@ export interface PortfolioSnapshot {
     dataQualityEventCount: number;
     benchmark: {
       strategyId: string;
+      comparisonStatus?: string | null;
+      strategyDate?: string | null;
+      benchmarkDate?: string | null;
       valuationDate?: string | null;
       benchmarkNav?: number | null;
       relativeNav?: number | null;

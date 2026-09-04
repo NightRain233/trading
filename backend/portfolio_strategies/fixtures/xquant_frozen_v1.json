@@ -15,6 +15,7 @@
   "policyVersion": "scan_v2_right_side_5",
   "universeId": "scan_v2_long_sample_candidates",
   "universeVersion": "rolling_monthly_pit_v1",
+  "universeScope": "limited_observable_universe",
   "universeRules": {
     "minHistorySessions": 252,
     "liquidityLookbackSessions": 63,

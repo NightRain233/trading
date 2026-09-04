@@ -15,7 +15,7 @@ def test_long_sample_convergence_exposes_one_primary_strategy():
     assert PRIMARY_STRATEGY_IDS == ("core90_ma200_bull10",)
 
 
-def test_registry_exposes_four_official_paper_strategies():
+def test_registry_exposes_five_official_paper_strategies():
     strategies = list_paper_strategies()
 
     assert [strategy.strategy_id for strategy in strategies] == [
@@ -23,6 +23,7 @@ def test_registry_exposes_four_official_paper_strategies():
         "core90_ma200_bull10",
         "theme_alpha",
         "btc_supertrend_satellite",
+        "core90_raw_bull10",
     ]
     assert all(strategy.mode is StrategyMode.PAPER for strategy in strategies)
 
@@ -50,6 +51,17 @@ def test_btc_official_registry_configuration():
         "BTC-USD",
     )
     assert config.asset("BTC-USD").synthetic_proxy is True
+    assert config.asset("BTC-USD").quote_currency == "USD"
+    assert config.asset("BTC-USD").fx_pair == "USDCNY=X"
+    assert config.asset("BTC-USD").investable_instrument is None
+
+
+def test_domestic_cross_border_etf_is_cny_investable_not_a_foreign_proxy():
+    asset = get_strategy("core90_ma200_bull10").asset("513100.SS")
+
+    assert asset.quote_currency == "CNY"
+    assert asset.synthetic_proxy is False
+    assert asset.investable_instrument == "513100.SS"
 
 
 def test_btc_comparison_caps_are_not_paper_accounts():
@@ -75,15 +87,18 @@ def test_frozen_next_open_registry_configuration():
     assert risk_parity.params["rebalance_sessions"] == 10
     assert risk_parity.params["schedule_anchor_signal_date"] == "2026-07-01"
     assert risk_parity.params["one_way_cost_bps"] == 10.0
+    assert bull.version == "2.0.0"
     assert bull.execution == "next_open"
     assert bull.params["core_allocation"] == 0.90
     assert bull.params["satellite_allocation"] == 0.10
     assert bull.params["supertrend_atr_window"] == 7
     assert bull.params["supertrend_multiplier"] == 3.0
     assert bull.params["ma_window"] == 200
-    assert raw.mode is StrategyMode.COMPARISON
-    with pytest.raises(ComparisonStrategyError):
-        require_paper_strategy("core90_raw_bull10")
+    assert bull.params["signal_contract_version"] == "bull_flip_ma200_v1"
+    assert "policy_version" not in bull.params
+    assert raw.mode is StrategyMode.PAPER
+    assert raw.params["signal_contract_version"] == "bull_flip_raw_v1"
+    assert require_paper_strategy("core90_raw_bull10") is raw
 
 
 def test_theme_alpha_registry_configuration():

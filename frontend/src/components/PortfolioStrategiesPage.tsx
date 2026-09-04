@@ -89,10 +89,10 @@ export default function PortfolioStrategiesPage() {
         .filter(item => item.isPrimary || PRIMARY_ORDER.includes(item.strategyId))
         .sort((a, b) => PRIMARY_ORDER.indexOf(a.strategyId) - PRIMARY_ORDER.indexOf(b.strategyId));
       setStrategies(list);
-      setSelectedId(current => orderedPrimary.some(item => item.strategyId === current)
+      setSelectedId(current => list.some(item => item.strategyId === current && item.paperEnabled)
         ? current
         : (orderedPrimary[0]?.strategyId || PRIMARY_ORDER[0]));
-      const entries = await Promise.all(orderedPrimary.filter(item => item.paperEnabled).map(async item => {
+      const entries = await Promise.all(list.filter(item => item.paperEnabled).map(async item => {
         try {
           return [item.strategyId, await fetchPortfolioSnapshot(item.strategyId)] as const;
         } catch {
@@ -244,7 +244,15 @@ export default function PortfolioStrategiesPage() {
                 <Metric label="NAV" value={fmtNum(snapshot.nav.netNav ?? latestNav?.netNav, 2)} />
                 <Metric label="累计收益" value={fmtPct(snapshot.nav.cumulativeReturn ?? latestNav?.cumulativeReturn)} tone={(snapshot.nav.cumulativeReturn ?? 0) >= 0 ? 'good' : 'bad'} />
                 <Metric label="回撤" value={fmtPct(snapshot.nav.drawdown ?? latestNav?.drawdown)} tone="bad" />
-                <Metric label="相对 RiskParity" value={fmtPct(operations.benchmark.relativeReturn)} tone={(operations.benchmark.relativeReturn ?? 0) >= 0 ? 'good' : 'bad'} />
+                <Metric
+                  label="相对 RiskParity"
+                  value={operations.benchmark.comparisonStatus === 'BENCHMARK_DATE_MISMATCH'
+                    ? '日期不一致'
+                    : fmtPct(operations.benchmark.relativeReturn)}
+                  tone={operations.benchmark.comparisonStatus === 'BENCHMARK_DATE_MISMATCH'
+                    ? 'warn'
+                    : (operations.benchmark.relativeReturn ?? 0) >= 0 ? 'good' : 'bad'}
+                />
               </div>
             </Card>
 
@@ -311,7 +319,41 @@ export default function PortfolioStrategiesPage() {
         <section className="mt-7 border-t border-zinc-800 pt-5">
           <Eyebrow>Comparison only</Eyebrow>
           <h2 className="mt-1 text-sm font-semibold text-zinc-300">影子对照</h2>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">{comparisons.map(item => <div key={item.strategyId} className="rounded-xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-3"><div className="flex items-center justify-between gap-3"><span className="text-xs font-medium text-zinc-400">{item.displayName}</span><span className="text-[10px] uppercase tracking-wider text-zinc-600">comparison</span></div><p className="mt-1 text-[10px] leading-4 text-zinc-600">{item.description}</p></div>)}</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {comparisons.map(item => {
+              const comparison = snapshots[item.strategyId];
+              const isSelected = selectedId === item.strategyId;
+              return (
+                <button
+                  key={item.strategyId}
+                  type="button"
+                  disabled={!comparison}
+                  onClick={() => {
+                    setSelectedId(item.strategyId);
+                    setShowAssets(false);
+                    setShowNav(false);
+                  }}
+                  className={clsx(
+                    'min-h-28 border p-4 text-left transition-colors',
+                    isSelected
+                      ? 'border-sky-500/50 bg-sky-500/[0.06]'
+                      : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-700',
+                    !comparison && 'cursor-not-allowed opacity-60',
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-xs font-medium text-zinc-300">{item.displayName}</span>
+                    <StateBadge state={comparison?.state || (item.paperEnabled ? 'EMPTY' : 'NOT_TRACKED')} />
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 font-mono text-[10px] text-zinc-500">
+                    <span>{fmtDate(comparison?.nav.valuationDate)}</span>
+                    <span className="text-right">NAV {fmtNum(comparison?.nav.netNav, 0)}</span>
+                    <span className="text-right text-red-400">DD {fmtPct(comparison?.nav.drawdown)}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </section>
       )}
 

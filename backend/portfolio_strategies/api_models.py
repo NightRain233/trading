@@ -121,6 +121,9 @@ class BullCandidateItem(BaseModel):
 
 class BenchmarkBlock(BaseModel):
     strategyId: str = "risk_parity_core_next_open"
+    comparisonStatus: Optional[str] = None
+    strategyDate: Optional[str] = None
+    benchmarkDate: Optional[str] = None
     valuationDate: Optional[str] = None
     benchmarkNav: Optional[float] = None
     relativeNav: Optional[float] = None
@@ -146,6 +149,10 @@ class AssetMeta(BaseModel):
     alias: str
     sleeve: str
     syntheticProxy: bool = False
+    quoteCurrency: str = "CNY"
+    baseCurrency: str = "CNY"
+    fxPair: Optional[str] = None
+    investableInstrument: Optional[str] = None
 
 
 class SnapshotResponse(BaseModel):

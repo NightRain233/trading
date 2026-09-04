@@ -38,7 +38,6 @@ from .next_open_data import _completed_through, load_next_open_frames
 from .next_open_engine import NextOpenPaperEngine
 from .next_open_strategies import (
     CORE_SYMBOLS,
-    bearish_signal_dates,
     calculate_bull_decision,
     calculate_risk_parity_decision,
     core_common_sessions,
@@ -91,7 +90,6 @@ class PortfolioStrategyService:
         db_path: Path | str = "backtest_results/portfolio_paper.sqlite",
         *,
         refresh_fn: Callable | None = None,
-        decision_provider: Callable[[Sequence[str]], Mapping[str, Any]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ):
         self.data_dir = Path(data_dir)
@@ -101,7 +99,6 @@ class PortfolioStrategyService:
         self.next_open_engine = NextOpenPaperEngine(self.ledger)
         self.events = EventPortfolioLedger(self.ledger)
         self._refresh_fn = refresh_fn
-        self._decision_provider = decision_provider
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def list_strategies(self) -> list[dict[str, Any]]:
@@ -181,18 +178,45 @@ class PortfolioStrategyService:
         try:
             benchmark = conn.execute(
                 """SELECT * FROM portfolio_nav_v2 WHERE account_id = ?
-                AND authoritative = 1 AND valuation_date <= ?
-                ORDER BY valuation_date DESC, id DESC LIMIT 1""",
+                AND authoritative = 1 AND valuation_date = ?
+                ORDER BY id DESC LIMIT 1""",
                 (benchmark_account["id"], valuation_date),
+            ).fetchone()
+            latest_benchmark = benchmark or conn.execute(
+                """SELECT * FROM portfolio_nav_v2 WHERE account_id = ?
+                AND authoritative = 1
+                ORDER BY valuation_date DESC, id DESC LIMIT 1""",
+                (benchmark_account["id"],),
             ).fetchone()
         finally:
             conn.close()
         if benchmark is None:
-            return result
+            return {
+                **result,
+                "comparisonStatus": "BENCHMARK_DATE_MISMATCH",
+                "strategyDate": valuation_date,
+                "benchmarkDate": (
+                    latest_benchmark["valuation_date"]
+                    if latest_benchmark is not None else None
+                ),
+                "valuationDate": (
+                    latest_benchmark["valuation_date"]
+                    if latest_benchmark is not None else None
+                ),
+                "benchmarkNav": (
+                    float(latest_benchmark["net_nav"])
+                    if latest_benchmark is not None else None
+                ),
+                "relativeNav": None,
+                "relativeReturn": None,
+            }
         strategy_ratio = net_nav / float(config.initial_nav)
         benchmark_ratio = float(benchmark["net_nav"]) / float(benchmark_account["initial_nav"])
         return {
             "strategyId": benchmark_config.strategy_id,
+            "comparisonStatus": "ALIGNED",
+            "strategyDate": valuation_date,
+            "benchmarkDate": benchmark["valuation_date"],
             "valuationDate": benchmark["valuation_date"],
             "benchmarkNav": float(benchmark["net_nav"]),
             "relativeNav": strategy_ratio / benchmark_ratio,
@@ -364,6 +388,10 @@ class PortfolioStrategyService:
                 "alias": asset.alias,
                 "sleeve": asset.sleeve,
                 "syntheticProxy": asset.synthetic_proxy,
+                "quoteCurrency": asset.quote_currency,
+                "baseCurrency": config.base_currency,
+                "fxPair": asset.fx_pair,
+                "investableInstrument": asset.investable_instrument,
             }
             for asset in config.assets
         ]
@@ -650,6 +678,10 @@ class PortfolioStrategyService:
             metadata={
                 "selectionMode": "monthly_point_in_time",
                 "frozenXquantSnapshot": frozen is not None,
+                "universeScope": universe.universe_scope,
+                "survivorshipBiasWarning": (
+                    universe.universe_scope == "limited_observable_universe"
+                ),
             },
             memberships=memberships,
         )
@@ -755,25 +787,12 @@ class PortfolioStrategyService:
             )
             self.next_open_engine.queue_decision(config, decision, frames)
 
-        if config.strategy_id == "core90_ma200_bull10":
+        if config.params.get("signal_contract_version"):
             self._ensure_current_universe(frames, market_data_date)
-            if self._decision_provider is not None:
-                scan = self._decision_provider(frozen_universe().symbols)
-                items = list(scan.get("items", ()))
-                for item_date_text in {
-                    str(item.get("decisionAsOf")) for item in items
-                    if item.get("decisionAsOf")
-                }:
-                    try:
-                        item_date = date.fromisoformat(item_date_text)
-                    except ValueError:
-                        continue
-                    if activation_date < item_date <= through_date:
-                        self._ensure_current_universe(frames, item_date)
-                self._refresh_bull_symbols(
-                    config, account, state, pending, frames, items,
-                    activation_date=activation_date,
-                )
+            self._refresh_bull_symbols(
+                config, account, state, pending, frames,
+                activation_date=activation_date,
+            )
 
         # Today-generated signals cannot execute on today's close; this pass
         # only catches independently-dated markets already due from prior days.
@@ -791,22 +810,28 @@ class PortfolioStrategyService:
         state: Any,
         pending: Sequence[Mapping[str, Any]],
         frames: Mapping[str, pd.DataFrame],
-        items: Sequence[Mapping[str, Any]],
         *,
         activation_date: date,
     ) -> None:
         """Advance every satellite symbol on its own completed daily calendar."""
         universe = frozen_universe()
-        by_symbol = {
-            str(item["symbol"]): item for item in items if item.get("symbol")
-        }
         held = state.held_symbols("satellite")
         pending_exit_symbols = {
             str(row["symbol"]) for row in pending
             if row["order_type"] == "ST_BEAR_EXIT"
             and row["status"] in ("PENDING", "WAITING_OPEN")
         }
-        symbols = sorted(held | set(by_symbol))
+        pending_entry_symbols = {
+            str(row["symbol"]) for row in pending
+            if row["order_type"] == "BULL_FLIP_ENTRY"
+            and row["status"] in ("PENDING", "WAITING_OPEN")
+        }
+        symbols = sorted(
+            held | {
+                symbol for symbol in universe.symbols
+                if symbol in frames
+            }
+        )
         conn = connect(self.db_path)
         try:
             cursors = {
@@ -831,61 +856,35 @@ class PortfolioStrategyService:
             latest_date = normalized.index[-1].date()
             cursor = max(activation_date, cursors.get(symbol, activation_date))
             run_type = f"BULL_DAILY:{symbol}"
-
-            if symbol in held:
-                if symbol in pending_exit_symbols:
-                    continue
-                candidate_dates = [
-                    timestamp.date() for timestamp in normalized.index
-                    if cursor < timestamp.date() <= latest_date
-                ]
-                if not candidate_dates:
-                    continue
-                bearish = set(bearish_signal_dates(
-                    frame,
-                    after_date=cursor,
-                    through_date=latest_date,
-                    atr_window=int(config.params["supertrend_atr_window"]),
-                    multiplier=float(config.params["supertrend_multiplier"]),
-                ))
-                for signal_date in candidate_dates:
-                    decision = calculate_bull_decision(
-                        config, (), frames, {}, signal_date=signal_date,
-                        held_symbols=(symbol,) if signal_date in bearish else (),
-                        pending_exit_symbols=pending_exit_symbols,
-                        run_type=run_type,
-                    )
-                    orders = self.next_open_engine.queue_decision(config, decision, frames)
-                    if orders:
+            if symbol in pending_exit_symbols or symbol in pending_entry_symbols:
+                continue
+            candidate_dates = [
+                timestamp.date() for timestamp in normalized.index
+                if cursor < timestamp.date() <= latest_date
+            ]
+            if not candidate_dates:
+                continue
+            for signal_date in candidate_dates:
+                self._ensure_current_universe(frames, signal_date)
+                membership = self._active_membership(signal_date)
+                own_membership = (
+                    {symbol: membership[symbol]} if symbol in membership else {}
+                )
+                decision = calculate_bull_decision(
+                    config, frames, own_membership,
+                    symbol=symbol,
+                    signal_date=signal_date,
+                    held_symbols=(symbol,) if symbol in held else (),
+                    pending_exit_symbols=pending_exit_symbols,
+                    run_type=run_type,
+                )
+                orders = self.next_open_engine.queue_decision(config, decision, frames)
+                if orders:
+                    if symbol in held:
                         pending_exit_symbols.add(symbol)
-                        break
-                continue
-
-            item = by_symbol.get(symbol)
-            item_date_text = item.get("decisionAsOf") if item else None
-            try:
-                item_date = date.fromisoformat(str(item_date_text))
-            except (TypeError, ValueError):
-                continue
-            # A production decision is usable only for this symbol's own latest
-            # completed bar.  Another market's newer as-of date is irrelevant.
-            if (
-                item_date != latest_date
-                or item_date <= activation_date
-                or item_date < cursors.get(symbol, activation_date)
-            ):
-                continue
-            membership = self._active_membership(item_date)
-            own_membership = (
-                {symbol: membership[symbol]} if symbol in membership else {}
-            )
-            decision = calculate_bull_decision(
-                config, (item,), frames, own_membership,
-                signal_date=item_date,
-                pending_exit_symbols=pending_exit_symbols,
-                run_type=run_type,
-            )
-            self.next_open_engine.queue_decision(config, decision, frames)
+                    else:
+                        pending_entry_symbols.add(symbol)
+                    break
 
     def _get_next_open_snapshot(
         self,
@@ -897,6 +896,10 @@ class PortfolioStrategyService:
         assets = [{
             "symbol": asset.symbol, "alias": asset.alias, "sleeve": asset.sleeve,
             "syntheticProxy": asset.synthetic_proxy,
+            "quoteCurrency": asset.quote_currency,
+            "baseCurrency": config.base_currency,
+            "fxPair": asset.fx_pair,
+            "investableInstrument": asset.investable_instrument,
         } for asset in config.assets]
         if account is None:
             return {
@@ -1089,7 +1092,8 @@ class PortfolioStrategyService:
             try:
                 run = conn.execute(
                     """SELECT id FROM decision_runs WHERE account_id = ?
-                    AND authoritative = 1 ORDER BY signal_date DESC, id DESC LIMIT 1""",
+                    AND authoritative = 1 AND run_type = 'CORE_REBALANCE'
+                    ORDER BY signal_date DESC, id DESC LIMIT 1""",
                     (account["id"],),
                 ).fetchone()
                 desired = [] if run is None else [dict(row) for row in conn.execute(

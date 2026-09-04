@@ -3,18 +3,15 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import exchange_calendars as xcals
-import pandas as pd
-
-from portfolio_strategies.frozen_xquant import normalize_daily
-from portfolio_strategies.next_open_data import _completed_through, load_next_open_frames
+from portfolio_strategies.market_freshness import assess_freshness
+from portfolio_strategies.next_open_data import load_next_open_frames
 from portfolio_strategies.operation_lock import portfolio_operation_lock
 from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.service import PortfolioStrategyService
@@ -26,24 +23,8 @@ TRACKED_STRATEGIES = (
     "core90_ma200_bull10",
     "theme_alpha",
     "btc_supertrend_satellite",
+    "core90_raw_bull10",
 )
-
-
-def _expected_session(symbol: str, cutoff: date) -> date:
-    if symbol.endswith("-USD"):
-        return cutoff
-    calendar_name = (
-        "XSHG" if symbol.endswith((".SS", ".SZ"))
-        else "XHKG" if symbol.endswith(".HK")
-        else "XNYS"
-    )
-    sessions = xcals.get_calendar(calendar_name).sessions_in_range(
-        pd.Timestamp(cutoff) - pd.Timedelta(days=10), pd.Timestamp(cutoff),
-    )
-    return (
-        pd.Timestamp(sessions[-1]).tz_localize(None).date()
-        if not sessions.empty else cutoff
-    )
 
 
 def assess_market_readiness(
@@ -56,14 +37,12 @@ def assess_market_readiness(
     for symbol in symbols:
         market = get_strategy("core90_ma200_bull10").asset(symbol).market
         frame = frames.get(symbol)
-        actual = normalize_daily(frame).index[-1].date() if frame is not None else None
-        expected = _expected_session(symbol, _completed_through(symbol, now))
+        freshness = assess_freshness(
+            symbol, frame, known_at=now, source_error=errors.get(symbol),
+        )
         rows[str(market)].append({
-            "symbol": symbol,
-            "expectedCompletedDate": expected.isoformat(),
-            "latestDataDate": actual.isoformat() if actual else None,
-            "ready": bool(actual is not None and actual >= expected),
-            "error": errors.get(symbol),
+            **freshness,
+            "ready": freshness["freshnessStatus"] in {"OK", "EXPECTED_CLOSED"},
         })
     return {
         market: {
@@ -141,7 +120,7 @@ def run_daily_job(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Refresh the four tracked paper portfolios")
+    parser = argparse.ArgumentParser(description="Refresh the tracked paper portfolios")
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--db", default="backtest_results/portfolio_paper.sqlite")
     parser.add_argument(
@@ -151,15 +130,9 @@ def main() -> int:
 
     # Importing here keeps the orchestration module testable without loading the API app.
     from analysis import batch_fetch_and_update
-    from main import supertrend_scan
-
     service = PortfolioStrategyService(
         data_dir=args.data_dir,
         db_path=args.db,
-        decision_provider=lambda symbols: supertrend_scan(
-            force=False, include_candles=False,
-            requested_symbols=",".join(symbols),
-        ),
     )
     with portfolio_operation_lock(Path(args.db), "daily-job"):
         result = run_daily_job(

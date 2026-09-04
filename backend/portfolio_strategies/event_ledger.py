@@ -228,6 +228,10 @@ class EventPortfolioLedger:
         config_hash: str,
         input_hash: str,
         data_quality_status: str,
+        signal_contract_version: str | None = None,
+        signal_code_commit_sha: str | None = None,
+        signal_code_hash: str | None = None,
+        price_snapshot_hash: str | None = None,
         payload: Mapping[str, Any],
         items: Sequence[Mapping[str, Any]],
         conn: sqlite3.Connection | None = None,
@@ -253,8 +257,10 @@ class EventPortfolioLedger:
                     account_id, strategy_id, strategy_version, run_type,
                     market_data_date, signal_date, universe_version,
                     config_hash, input_hash, data_quality_status,
+                    signal_contract_version, signal_code_commit_sha,
+                    signal_code_hash, price_snapshot_hash,
                     authoritative, payload_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (
                     strategy_id, strategy_version, run_type, signal_date,
                     input_hash
@@ -271,6 +277,10 @@ class EventPortfolioLedger:
                     config_hash,
                     input_hash,
                     data_quality_status,
+                    signal_contract_version,
+                    signal_code_commit_sha,
+                    signal_code_hash,
+                    price_snapshot_hash,
                     int(is_authoritative),
                     canonical_json(dict(payload)),
                     _utc_now(),
@@ -293,6 +303,19 @@ class EventPortfolioLedger:
             assert run is not None
 
             if authoritative is not None and authoritative["input_hash"] != input_hash:
+                revision_code = "DECISION_INPUT_REVISION"
+                revision_message = (
+                    "Decision input changed after the authoritative decision was recorded"
+                )
+                if authoritative["signal_contract_version"] != signal_contract_version:
+                    revision_code = "SIGNAL_CONTRACT_REVISION"
+                    revision_message = "Signal contract changed after the authoritative decision"
+                elif authoritative["signal_code_hash"] != signal_code_hash:
+                    revision_code = "SIGNAL_CODE_REVISION"
+                    revision_message = "Signal code changed after the authoritative decision"
+                elif authoritative["price_snapshot_hash"] != price_snapshot_hash:
+                    revision_code = "MARKET_DATA_REVISION"
+                    revision_message = "Market data changed after the authoritative decision"
                 event_key = deterministic_key(
                     config.strategy_id,
                     config.version,
@@ -308,11 +331,24 @@ class EventPortfolioLedger:
                     event_key=event_key,
                     observed_at=_utc_now(),
                     market_data_date=market_data_date,
-                    code="MARKET_DATA_REVISION",
-                    message="Decision input changed after the authoritative decision was recorded",
+                    code=revision_code,
+                    message=revision_message,
                     previous_input_hash=authoritative["input_hash"],
                     current_input_hash=input_hash,
-                    details={"runType": run_type, "signalDate": signal_date.isoformat()},
+                    details={
+                        "runType": run_type,
+                        "signalDate": signal_date.isoformat(),
+                        "previousSignalContractVersion": authoritative[
+                            "signal_contract_version"
+                        ],
+                        "currentSignalContractVersion": signal_contract_version,
+                        "previousSignalCodeHash": authoritative["signal_code_hash"],
+                        "currentSignalCodeHash": signal_code_hash,
+                        "previousPriceSnapshotHash": authoritative[
+                            "price_snapshot_hash"
+                        ],
+                        "currentPriceSnapshotHash": price_snapshot_hash,
+                    },
                     conn=active,
                 )
 

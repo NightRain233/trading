@@ -8,6 +8,7 @@ services:
       args:
         - HTTP_PROXY=http://127.0.0.1:7890
         - HTTPS_PROXY=http://127.0.0.1:7890
+        - TRADING_BUILD_SHA=${TRADING_BUILD_SHA:-unavailable}
     restart: always
     network_mode: "host"
     environment:

@@ -80,7 +80,7 @@ def test_next_open_simulation_ignores_future_symbol_at_signal_date(monkeypatch):
 def test_monthly_macd_filter_does_not_use_current_month_end_before_month_is_complete():
     market = pd.DataFrame(
         {
-            "Close": [100.0, 100.0, 100.0, 100.0],
+            "Close": [100.0, 110.0, 150.0, 200.0],
             "MACD_DIF": [-1.0, -1.0, 1.0, 1.0],
             "MACD_DEA": [0.0, 0.0, 0.0, 0.0],
         },

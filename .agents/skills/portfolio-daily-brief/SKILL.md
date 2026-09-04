@@ -39,7 +39,7 @@ Report in this order:
 
 1. Orders due today.
 2. Pending or delayed orders waiting for each symbol's next valid Open.
-3. Today's policy-eligible bull flips and MA200 allowed/blocked counts.
+3. Today's frozen-contract bull flips and MA200 allowed/blocked counts.
 4. Current holdings, cash, and gross exposure.
 5. NAV, drawdown, and the recorded difference versus RiskParity.
 6. Active diagnostics, calculation errors, and data-quality audit events.
@@ -50,6 +50,6 @@ Do not describe a pending order as filled. For next-open strategies, a missing O
 
 Theme Alpha and BTC 7.5% retain their existing accounts and next-close ledgers. Do not imply that they were re-bootstrapped or merged with the next-open accounts.
 
-Keep comparison strategies collapsed unless the user explicitly asks for comparisons. `core90_raw_bull10` is comparison-only and is not an official daily candidate.
+Keep comparison strategies collapsed unless the user explicitly asks for comparisons. `core90_raw_bull10` has its own forward paper ledger, but it remains a comparison and is not a primary daily candidate.
 
 Explain deterministic output only. Do not change signals, parameters, allocations, or give a trade recommendation outside the frozen rules.

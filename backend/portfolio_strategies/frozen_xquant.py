@@ -22,6 +22,7 @@ def load_frozen_spec() -> dict[str, Any]:
 class FrozenUniverse:
     universe_id: str
     universe_version: str
+    universe_scope: str
     source_hash: str
     market_by_symbol: Mapping[str, str]
     reference_symbol_by_market: Mapping[str, str]
@@ -45,6 +46,7 @@ def frozen_universe() -> FrozenUniverse:
     return FrozenUniverse(
         universe_id=spec["universeId"],
         universe_version=spec["universeVersion"],
+        universe_scope=str(spec.get("universeScope", "limited_observable_universe")),
         source_hash=spec["sourceHashes"][
             "outputs/scan-v2-all-bull-flip-long-sample/universe_membership_history.csv"
         ],
@@ -257,6 +259,7 @@ def evaluate_universe_snapshot(
         })
 
     result = pd.DataFrame(rows)
+    result["universeScope"] = universe.universe_scope
     result["liquidityRank"] = np.nan
     result["selected"] = False
     for market, group in result[result["qualified"]].groupby("market"):

@@ -219,6 +219,36 @@ def test_hong_kong_fallback_requires_two_usable_monthly_series():
     assert response["marketModes"]["hong_kong"]["mode"] == "insufficient"
 
 
+def test_hong_kong_fallback_tries_next_candidate_when_first_cannot_replay():
+    primary = {
+        **_item("^HSI"),
+        "completedDailyDates": ["2026-08-07"],
+    }
+    first_fallback = {
+        **_item("513010.SS"),
+        "decisionAsOf": "2026-08-10",
+        "latestDataDate": "2026-08-10",
+        "completedDailyDates": ["2026-08-10"],
+    }
+    second_fallback = {
+        **_item("510900.SS"),
+        "completedDailyDates": ["2026-08-07"],
+    }
+
+    response = build_scan_response(
+        _representatives() + [_item("513120.SS")],
+        requested_symbols=[item["symbol"] for item in _representatives()] + ["513120.SS"],
+        representative_items=[primary, first_fallback, second_fallback],
+    )
+
+    market = response["marketModes"]["hong_kong"]
+    assert market["mode"] == "seek"
+    assert market["effectiveRepresentatives"] == ["^HSI", "510900.SS"]
+    assert market["fallbackUsed"] == ["510900.SS"]
+    assert market["commonRepresentativeDate"] == "2026-08-07"
+    assert market["candidateSetsEvaluated"] >= 2
+
+
 def test_hong_kong_fallback_allows_fresh_cross_calendar_holiday_date_difference():
     items = _representatives() + [_item("513120.SS")]
     representative_items = [
@@ -248,7 +278,7 @@ def test_hong_kong_fallback_allows_fresh_cross_calendar_holiday_date_difference(
     assert hong_kong["representativeDateMismatchAccepted"] is True
     assert hong_kong["representativeDateAlignment"] == "cross_calendar"
     assert hong_kong["commonRepresentativeDate"] == "2026-09-30"
-    assert hong_kong["representativeLagSessions"] == {"^HSI": 0, "513010.SS": 1}
+    assert hong_kong["representativeLagSessions"] == {"^HSI": 0, "513010.SS": 0}
     assert hong_kong["effectiveRepresentativeDates"] == {
         "^HSI": "2026-10-02",
         "513010.SS": "2026-09-30",
@@ -501,6 +531,8 @@ def test_pullback_requires_prior_zone_bar_and_current_restrengthening_close():
     assert by_symbol["AAPL"]["decision"]["paperOnly"] is True
     assert by_symbol["AAPL"]["decision"]["technicalExecutionEligible"] is False
     assert by_symbol["AAPL"]["decision"]["maxAcceptablePrice"] is None
+    assert "pullback_buy" not in response["groups"]
+    assert "AAPL" not in response["attention"]["formalBuySignals"]
     assert by_symbol["MU"]["decision"]["label"] == "等确认·已进入回踩区，支撑暂未失守"
     assert by_symbol["NVDA"]["pullback"]["enteredZone"] is True
     assert by_symbol["NVDA"]["pullback"]["enteredAt"] == "2026-08-07"

@@ -14,6 +14,25 @@ from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.service import PortfolioStrategyService
 
 
+def _core_frames(end: str = "2026-07-01") -> dict[str, pd.DataFrame]:
+    sessions = pd.bdate_range(end=end, periods=45)
+    frames = {}
+    for offset, symbol in enumerate(("510300.SS", "513100.SS", "518880.SS")):
+        closes = [
+            100.0 + offset * 10.0 + index * (0.08 + offset * 0.01)
+            + (0.05 if index % 2 else -0.03)
+            for index in range(len(sessions))
+        ]
+        frames[symbol] = pd.DataFrame({
+            "Open": closes,
+            "High": [value + 1.0 for value in closes],
+            "Low": [value - 1.0 for value in closes],
+            "Close": closes,
+            "Volume": 1_000_000.0,
+        }, index=sessions)
+    return frames
+
+
 def test_strategy_listing_has_one_primary_and_keeps_existing_paper_comparisons(tmp_path: Path):
     service = PortfolioStrategyService(
         data_dir=tmp_path / "data", db_path=tmp_path / "paper.sqlite",
@@ -30,12 +49,43 @@ def test_strategy_listing_has_one_primary_and_keeps_existing_paper_comparisons(t
     assert by_id["btc_supertrend_satellite"]["paperEnabled"] is True
 
 
-def test_service_seeds_frozen_july_pit_snapshot_without_xquant_runtime(tmp_path: Path):
+def test_benchmark_comparison_rejects_a_previous_day_nav(tmp_path: Path):
     service = PortfolioStrategyService(
-        data_dir=Path(__file__).parents[1] / "data",
+        data_dir=tmp_path / "data", db_path=tmp_path / "paper.sqlite",
+    )
+    service.activate(
+        "risk_parity_core_next_open", activation_date=date(2026, 7, 1),
+    )
+
+    comparison = service._benchmark_block(
+        get_strategy("core90_ma200_bull10"),
+        valuation_date="2026-07-02",
+        net_nav=101_000.0,
+    )
+
+    assert comparison == {
+        "strategyId": "risk_parity_core_next_open",
+        "comparisonStatus": "BENCHMARK_DATE_MISMATCH",
+        "strategyDate": "2026-07-02",
+        "benchmarkDate": "2026-07-01",
+        "valuationDate": "2026-07-01",
+        "benchmarkNav": 100_000.0,
+        "relativeNav": None,
+        "relativeReturn": None,
+    }
+
+
+def test_service_seeds_frozen_july_pit_snapshot_without_xquant_runtime(
+    tmp_path: Path, monkeypatch,
+):
+    service = PortfolioStrategyService(
+        data_dir=tmp_path / "data",
         db_path=tmp_path / "paper.sqlite",
-        decision_provider=lambda _symbols: {"items": []},
         clock=lambda: datetime(2026, 7, 1, 22, 0),
+    )
+    frames = _core_frames()
+    monkeypatch.setattr(
+        service, "_next_open_frames", lambda *_args, **_kwargs: (frames, {}),
     )
     service.activate(
         "risk_parity_core_next_open", activation_date=date(2026, 6, 30),
@@ -74,11 +124,36 @@ def test_service_seeds_frozen_july_pit_snapshot_without_xquant_runtime(tmp_path:
         conn.close()
 
 
+def test_raw_bull_forward_account_runs_its_own_bull_contract(tmp_path: Path, monkeypatch):
+    service = PortfolioStrategyService(
+        data_dir=tmp_path / "data", db_path=tmp_path / "paper.sqlite",
+        clock=lambda: datetime(2026, 7, 1, 22, 0),
+    )
+    frames = _core_frames()
+    monkeypatch.setattr(
+        service, "_next_open_frames", lambda *_args, **_kwargs: (frames, {}),
+    )
+    monkeypatch.setattr(service, "_ensure_current_universe", lambda *_args: None)
+    calls = []
+    monkeypatch.setattr(
+        service,
+        "_refresh_bull_symbols",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    service.activate(
+        "core90_raw_bull10", activation_date=date(2026, 6, 30),
+        now=datetime(2026, 7, 1, 22, 0),
+    )
+
+    service.refresh("core90_raw_bull10", now=datetime(2026, 7, 1, 22, 0))
+
+    assert len(calls) == 1
+
+
 def test_refresh_does_not_implicitly_activate_an_account(tmp_path: Path):
     service = PortfolioStrategyService(
         data_dir=Path(__file__).parents[1] / "data",
         db_path=tmp_path / "paper.sqlite",
-        decision_provider=lambda _symbols: {"items": []},
         clock=lambda: datetime(2026, 7, 1, 22, 0),
     )
     assert service.refresh("risk_parity_core_next_open")["state"] == "EMPTY"
@@ -144,16 +219,11 @@ def test_legacy_refresh_does_not_value_before_activation_date(tmp_path: Path, mo
     assert valued == []
 
 
-def test_stale_core_does_not_block_fresh_us_satellite_signal(tmp_path: Path, monkeypatch):
+def test_fresh_us_signal_is_observed_but_fx_contract_blocks_the_order(
+    tmp_path: Path, monkeypatch,
+):
     service = PortfolioStrategyService(
         data_dir=tmp_path, db_path=tmp_path / "paper.sqlite",
-        decision_provider=lambda _symbols: {"items": [{
-            "symbol": "AAPL", "decisionAsOf": "2026-07-01",
-            "state": "bull_flip", "decision": {
-                "setup": "breakout", "permission": "watch", "readinessScore": 1,
-            },
-            "dataStale": False, "dataIntegrity": {"hasRecentGap": False},
-        }]},
         clock=lambda: datetime(2026, 7, 2, 22, 0),
     )
     service.activate(
@@ -181,14 +251,24 @@ def test_stale_core_does_not_block_fresh_us_satellite_signal(tmp_path: Path, mon
     monkeypatch.setattr(service, "_active_membership", lambda _date: {
         "AAPL": {"effectiveDate": "2026-07-01", "liquidityRank": 1},
     })
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda high, *_args, **_kwargs: pd.DataFrame(
+            {"direction": [False] * (len(high) - 1) + [True]}, index=high.index,
+        ),
+    )
 
     snapshot = service.refresh(
         "core90_ma200_bull10", now=datetime(2026, 7, 2, 22, 0),
     )
-    assert any(
-        order["symbol"] == "AAPL" and order["orderType"] == "BULL_FLIP_ENTRY"
-        for order in snapshot["operations"]["orders"]
+    assert not any(order["symbol"] == "AAPL" for order in snapshot["operations"]["orders"])
+    candidate = next(
+        item for item in snapshot["operations"]["bullCandidates"]
+        if item["symbol"] == "AAPL"
     )
+    assert candidate["eligible"] is False
+    assert candidate["reason"] == "fx_data_required"
+    assert snapshot["operations"]["dataQualityEventCount"] >= 1
     assert any(item["code"] == "MISSING_OPTIONAL_MARKET_DATA" for item in snapshot["diagnostics"])
 
 

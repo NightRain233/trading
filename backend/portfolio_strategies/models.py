@@ -25,7 +25,14 @@ class AssetConfig:
     sleeve: str
     market: str = "XSHG"
     synthetic_proxy: bool = False
+    quote_currency: str = "CNY"
+    fx_pair: str | None = None
+    investable_instrument: str | None = None
     note: str = ""
+
+    def __post_init__(self) -> None:
+        if self.investable_instrument is None and not self.synthetic_proxy:
+            object.__setattr__(self, "investable_instrument", self.symbol)
 
 
 @dataclass(frozen=True)

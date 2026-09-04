@@ -8,15 +8,16 @@ import pandas as pd
 import pytest
 
 from portfolio_strategies.indicators import supertrend
-from portfolio_strategies.frozen_xquant import frozen_membership_snapshot
+from portfolio_strategies.frozen_xquant import frozen_membership_snapshot, frozen_universe
 from portfolio_strategies.next_open_strategies import (
     calculate_core_open_rebalance,
+    calculate_bull_decision,
     calculate_risk_parity_decision,
     core_signal_due,
     market_ma_state,
-    policy_eligible_bull_flip,
 )
 from portfolio_strategies.registry import get_strategy
+from portfolio_strategies.signal_contracts import BULL_FLIP_SIGNAL_CONTRACT_VERSION
 
 
 FIXTURE = Path(__file__).parent / "fixtures/portfolio_strategies/xquant_next_open_golden_v1.json"
@@ -79,13 +80,199 @@ def test_supertrend_7_3_bull_flip_matches_xquant_date():
     assert flip.index[flip][-1].date().isoformat() == case["flipDate"]
 
 
-def test_policy_breakout_does_not_require_formal_permission():
-    assert policy_eligible_bull_flip({
-        "state": "bull_flip",
-        "decision": {"setup": "breakout", "permission": "watch"},
-        "dataStale": False,
-        "dataIntegrity": {"hasGap": False},
-    })
+def test_frozen_bull_flip_contract_is_computed_from_ohlc_not_scan_fields(monkeypatch):
+    signal_date = date(2026, 7, 1)
+    symbol = "513100.SS"
+    symbol_index = pd.to_datetime(["2026-06-30", "2026-07-01"])
+    reference_index = pd.date_range(end=signal_date, periods=200, freq="D")
+    prices = {
+        symbol: pd.DataFrame({
+            "Open": [100.0, 101.0], "High": [101.0, 102.0],
+            "Low": [99.0, 100.0], "Close": [100.0, 101.0],
+            "Volume": [1_000_000.0, 1_000_000.0],
+        }, index=symbol_index),
+        "SPY": pd.DataFrame({
+            "Open": [100.0] * 200, "High": [101.0] * 200,
+            "Low": [99.0] * 200, "Close": [100.0] * 199 + [120.0],
+            "Volume": [1_000_000.0] * 200,
+        }, index=reference_index),
+    }
+
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            {"direction": [False, True]}, index=symbol_index,
+        ),
+    )
+    monkeypatch.setenv("TRADING_BUILD_SHA", "abc123")
+
+    decision = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices,
+        {symbol: {"effectiveDate": "2026-07-01", "liquidityRank": 1}},
+        symbol=symbol, signal_date=signal_date,
+    )
+
+    assert len(decision.items) == 1
+    assert decision.items[0]["event_type"] == "BULL_FLIP_ENTRY"
+    assert decision.items[0]["eligible"] is True
+    assert decision.payload["signalContractVersion"] == BULL_FLIP_SIGNAL_CONTRACT_VERSION
+    assert decision.payload["signalCodeHash"]
+    assert decision.payload["signalCodeCommitSha"] == "abc123"
+    assert decision.payload["priceSnapshotHash"]
+    assert decision.signal_contract_version == BULL_FLIP_SIGNAL_CONTRACT_VERSION
+    assert decision.signal_code_commit_sha == "abc123"
+    assert decision.signal_code_hash == decision.payload["signalCodeHash"]
+    assert decision.price_snapshot_hash == decision.payload["priceSnapshotHash"]
+
+
+def test_ma200_blocked_flip_is_not_bought_later_when_market_recovers(monkeypatch):
+    symbol = "513100.SS"
+    symbol_index = pd.to_datetime(["2026-06-30", "2026-07-01", "2026-07-02"])
+    reference_index = pd.date_range(end="2026-07-02", periods=201, freq="D")
+    prices = {
+        symbol: pd.DataFrame({
+            "Open": [100.0, 101.0, 102.0], "High": [101.0, 102.0, 103.0],
+            "Low": [99.0, 100.0, 101.0], "Close": [100.0, 101.0, 102.0],
+            "Volume": [1_000_000.0] * 3,
+        }, index=symbol_index),
+        "SPY": pd.DataFrame({
+            "Open": [100.0] * 201, "High": [101.0] * 201,
+            "Low": [99.0] * 201,
+            "Close": [100.0] * 199 + [90.0, 120.0],
+            "Volume": [1_000_000.0] * 201,
+        }, index=reference_index),
+    }
+
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda high, *_args, **_kwargs: pd.DataFrame(
+            {"direction": [False, True] + ([True] if len(high) == 3 else [])},
+            index=high.index,
+        ),
+    )
+    membership = {symbol: {"effectiveDate": "2026-07-01", "liquidityRank": 1}}
+
+    blocked = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices, membership,
+        symbol=symbol, signal_date=date(2026, 7, 1),
+    )
+    recovered = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices, membership,
+        symbol=symbol, signal_date=date(2026, 7, 2),
+    )
+
+    assert blocked.items[0]["event_type"] == "BULL_FLIP_ENTRY"
+    assert blocked.items[0]["eligible"] is False
+    assert blocked.items[0]["reason"] == "market_at_or_below_ma"
+    assert recovered.items == ()
+
+
+def test_foreign_proxy_signal_is_blocked_without_cny_fx_conversion(monkeypatch):
+    signal_date = date(2026, 7, 1)
+    symbol_index = pd.to_datetime(["2026-06-30", "2026-07-01"])
+    reference_index = pd.date_range(end=signal_date, periods=200, freq="B")
+    prices = {
+        "AAPL": pd.DataFrame({
+            "Open": [100.0, 101.0], "High": [101.0, 102.0],
+            "Low": [99.0, 100.0], "Close": [100.0, 101.0],
+            "Volume": [1_000_000.0] * 2,
+        }, index=symbol_index),
+        "SPY": pd.DataFrame({
+            "Open": [100.0] * 200, "High": [101.0] * 200,
+            "Low": [99.0] * 200, "Close": [100.0] * 199 + [120.0],
+            "Volume": [1_000_000.0] * 200,
+        }, index=reference_index),
+    }
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            {"direction": [False, True]}, index=symbol_index,
+        ),
+    )
+
+    decision = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices,
+        {"AAPL": {"effectiveDate": "2026-07-01", "liquidityRank": 1}},
+        symbol="AAPL", signal_date=signal_date,
+    )
+
+    assert decision.items[0]["eligible"] is False
+    assert decision.items[0]["reason"] == "fx_data_required"
+    assert decision.items[0]["payload"]["quoteCurrency"] == "USD"
+    assert decision.items[0]["payload"]["baseCurrency"] == "CNY"
+    assert decision.items[0]["payload"]["fxPair"] == "USDCNY=X"
+    assert decision.data_quality_status == "FX_DATA_BLOCKED"
+
+
+def test_stale_ma_reference_does_not_emit_a_block_without_an_entry_signal(monkeypatch):
+    signal_date = date(2026, 7, 1)
+    symbol_index = pd.to_datetime(["2026-06-30", "2026-07-01"])
+    reference_index = pd.bdate_range(end="2026-06-29", periods=200)
+    prices = {
+        "513100.SS": pd.DataFrame({
+            "Open": [100.0, 101.0], "High": [101.0, 102.0],
+            "Low": [99.0, 100.0], "Close": [100.0, 101.0],
+            "Volume": [1_000_000.0] * 2,
+        }, index=symbol_index),
+        "SPY": pd.DataFrame({
+            "Open": 100.0, "High": 101.0, "Low": 99.0,
+            "Close": 100.0, "Volume": 1_000_000.0,
+        }, index=reference_index),
+    }
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            {"direction": [True, True]}, index=symbol_index,
+        ),
+    )
+
+    decision = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices, {},
+        symbol="513100.SS", signal_date=signal_date,
+    )
+
+    assert decision.items == ()
+    assert decision.data_quality_status == "OK"
+
+
+def test_stale_ma_reference_takes_precedence_over_missing_fx(monkeypatch):
+    signal_date = date(2026, 7, 1)
+    symbol_index = pd.to_datetime(["2026-06-30", "2026-07-01"])
+    reference_index = pd.bdate_range(end="2026-06-29", periods=200)
+    prices = {
+        "AAPL": pd.DataFrame({
+            "Open": [100.0, 101.0], "High": [101.0, 102.0],
+            "Low": [99.0, 100.0], "Close": [100.0, 101.0],
+            "Volume": [1_000_000.0] * 2,
+        }, index=symbol_index),
+        "SPY": pd.DataFrame({
+            "Open": 100.0, "High": 101.0, "Low": 99.0,
+            "Close": 100.0, "Volume": 1_000_000.0,
+        }, index=reference_index),
+    }
+    monkeypatch.setattr(
+        "portfolio_strategies.next_open_strategies.supertrend",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            {"direction": [False, True]}, index=symbol_index,
+        ),
+    )
+
+    decision = calculate_bull_decision(
+        get_strategy("core90_ma200_bull10"), prices,
+        {"AAPL": {"effectiveDate": "2026-07-01", "liquidityRank": 1}},
+        symbol="AAPL", signal_date=signal_date,
+    )
+
+    assert decision.items[0]["reason"] == "ma200_data_blocked"
+    assert decision.data_quality_status == "MA200_DATA_BLOCKED"
+
+
+def test_primary_strategy_uses_a_new_versioned_signal_contract():
+    config = get_strategy("core90_ma200_bull10")
+
+    assert config.version == "2.0.0"
+    assert config.params["signal_contract_version"] == BULL_FLIP_SIGNAL_CONTRACT_VERSION
+    assert "policy_version" not in config.params
 
 
 def test_frozen_monthly_pit_membership_matches_xquant_latest_snapshot():
@@ -95,6 +282,7 @@ def test_frozen_monthly_pit_membership_matches_xquant_latest_snapshot():
     assert len(snapshot["selectedSymbols"]) == 49
     assert "AAPL" in snapshot["selectedSymbols"]
     assert "513100.SS" not in snapshot["selectedSymbols"]
+    assert frozen_universe().universe_scope == "limited_observable_universe"
 
 
 @pytest.mark.parametrize("case_index", [0, 1])

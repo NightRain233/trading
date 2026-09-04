@@ -11,6 +11,12 @@ import pandas as pd
 from analysis import DATA_DIR
 from analysis import _evaluate_resonance_exit_no_position
 from analysis import _evaluate_resonance_strategy_v2
+from portfolio_strategies.execution_rules import (
+    market_fill_price,
+    next_valid_open,
+    preexisting_long_stop_fill,
+)
+from portfolio_strategies.period_bars import completed_bars
 from strategy_versions import DEFAULT_STRATEGY_VERSION_ID
 from strategy_versions import get_strategy_version
 
@@ -332,21 +338,48 @@ def run_supertrend_backtest(
     if entry_signal_mode != SUPER_TREND_BASELINE_ENTRY_SIGNAL_MODE:
         strategy_version = f"{strategy_version}_{entry_signal_mode}"
 
-    for signal_idx in range(1, len(daily) - 1):
+    for signal_idx in range(1, len(daily)):
         row = daily.iloc[signal_idx]
         prev = daily.iloc[signal_idx - 1]
         date = daily.index[signal_idx]
-        exec_idx = signal_idx + 1
-        exec_row = daily.iloc[exec_idx]
-        exec_date = daily.index[exec_idx]
 
         if in_position:
-            # Signal is confirmed after the signal bar closes; execution uses the next bar open.
-            cur_stop = float(row["_st_val"]) if pd.notna(row["_st_val"]) else stop_price
-            if float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1:
-                raw_exit = float(exec_row["Open"]) if pd.notna(exec_row.get("Open")) else float(exec_row["Close"])
-                if float(row["_st_dir"]) != -1:
-                    raw_exit = min(raw_exit, cur_stop)
+            if entry_idx is not None and signal_idx < entry_idx:
+                continue
+            # Today's intraday range can only use the stop frozen at yesterday's close.
+            if stop_price is not None and float(row["Low"]) <= stop_price:
+                raw_open = row.get("Open")
+                if pd.isna(raw_open):
+                    continue
+                exit_price = preexisting_long_stop_fill(
+                    open_price=float(raw_open),
+                    stop_price=stop_price,
+                    slippage_bps=slippage_bps,
+                )
+                gross = (exit_price - entry_price) / entry_price * 100
+                trades.append({
+                    "symbol": symbol.upper(),
+                    "assetClass": classify_asset(symbol),
+                    "entryDate": _date_str(daily.index[entry_idx]),
+                    "exitDate": _date_str(date),
+                    "entryPrice": entry_price,
+                    "exitPrice": exit_price,
+                    "stopPrice": stop_price,
+                    "returnPct": gross - fee_bps * 2 / 100,
+                    "holdingDays": signal_idx - entry_idx + 1,
+                    "exitReason": "stop",
+                    "strategyVersion": strategy_version,
+                    "poolType": "supertrend",
+                    "entryAdx": entry_adx,
+                    "entrySignalMode": entry_signal_mode,
+                })
+                in_position = False
+                continue
+
+            # A bearish direction is only known after this bar closes.
+            execution = _next_valid_open_after_index(daily, signal_idx)
+            if float(row["_st_dir"]) == -1 and execution is not None:
+                exec_idx, exec_date, raw_exit = execution
                 exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
                 gross = (exit_price - entry_price) / entry_price * 100
                 trades.append({
@@ -356,25 +389,32 @@ def run_supertrend_backtest(
                     "exitDate": _date_str(exec_date),
                     "entryPrice": entry_price,
                     "exitPrice": exit_price,
-                    "stopPrice": cur_stop,
+                    "stopPrice": stop_price,
                     "returnPct": gross - fee_bps * 2 / 100,
                     "holdingDays": exec_idx - entry_idx + 1,
-                    "exitReason": "st_flip" if float(row["_st_dir"]) == -1 else "stop",
+                    "exitReason": "st_flip",
                     "strategyVersion": strategy_version,
                     "poolType": "supertrend",
                     "entryAdx": entry_adx,
                     "entrySignalMode": entry_signal_mode,
                 })
                 in_position = False
+                continue
+
+            if pd.notna(row["_st_val"]):
+                stop_price = float(row["_st_val"])
         else:
             # 买入模式只筛选入场触发；出场逻辑在所有精简层中保持一致。
             if _entry_mode_allows(prev, row, date) and _adx_allows_entry(row):
+                execution = _next_valid_open_after_index(daily, signal_idx)
+                if execution is None:
+                    continue
+                exec_idx, exec_date, raw_entry = execution
                 entry_date = exec_date
                 if start_ts and entry_date < start_ts:
                     continue
                 if end_ts and entry_date > end_ts:
                     break
-                raw_entry = float(exec_row["Open"]) if pd.notna(exec_row.get("Open")) else float(exec_row["Close"])
                 entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
                 stop_price = float(row["_st_val"]) if pd.notna(row["_st_val"]) else raw_entry * 0.95
                 entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
@@ -571,30 +611,48 @@ def build_supertrend_history_review(
         entry_source = "flip"
         reclaim_until_idx: Optional[int] = None
 
-        for signal_idx in range(1, len(daily) - 1):
+        for signal_idx in range(1, len(daily)):
             row = daily.iloc[signal_idx]
             prev = daily.iloc[signal_idx - 1]
             date = daily.index[signal_idx]
-            exec_idx = signal_idx + 1
-            exec_row = daily.iloc[exec_idx]
-            exec_date = daily.index[exec_idx]
 
             if in_position and entry_idx is not None and entry_price is not None:
-                cur_stop = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else stop_price
+                if signal_idx < entry_idx:
+                    continue
                 exit_reason = None
-                raw_exit = None
+                exit_idx = None
+                exec_date = None
+                exit_price = None
                 if mode == "close_only":
                     if float(row["_st_dir"]) == -1:
+                        execution = _next_valid_open_after_index(daily, signal_idx)
+                        if execution is not None:
+                            exit_idx, exec_date, raw_exit = execution
+                            exit_reason = "st_flip"
+                            exit_price = _price_with_bps(
+                                raw_exit, slippage_bps, "sell",
+                            )
+                elif stop_price is not None and float(row["Low"]) <= stop_price:
+                    raw_open = row.get("Open")
+                    if pd.notna(raw_open):
+                        exit_idx = signal_idx
+                        exec_date = date
+                        exit_reason = "stop"
+                        exit_price = preexisting_long_stop_fill(
+                            open_price=float(raw_open),
+                            stop_price=stop_price,
+                            slippage_bps=slippage_bps,
+                        )
+                elif float(row["_st_dir"]) == -1:
+                    execution = _next_valid_open_after_index(daily, signal_idx)
+                    if execution is not None:
+                        exit_idx, exec_date, raw_exit = execution
                         exit_reason = "st_flip"
-                        raw_exit = _row_price(exec_row, "Open")
-                elif cur_stop is not None and (float(row["Low"]) <= cur_stop or float(row["_st_dir"]) == -1):
-                    exit_reason = "st_flip" if float(row["_st_dir"]) == -1 else "stop"
-                    raw_exit = _row_price(exec_row, "Open")
-                    if exit_reason == "stop":
-                        raw_exit = min(raw_exit, float(cur_stop))
+                        exit_price = _price_with_bps(
+                            raw_exit, slippage_bps, "sell",
+                        )
 
-                if exit_reason is not None and raw_exit is not None:
-                    exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
+                if exit_reason is not None and exit_price is not None and exit_idx is not None:
                     gross = (exit_price - entry_price) / entry_price * 100
                     trade_index = len(simulated_trades) + 1
                     reported_reason = (
@@ -610,9 +668,9 @@ def build_supertrend_history_review(
                         "exitDate": _date_str(exec_date),
                         "entryPrice": entry_price,
                         "exitPrice": exit_price,
-                        "stopPrice": cur_stop,
+                        "stopPrice": stop_price,
                         "returnPct": gross - fee_bps * 2 / 100,
-                        "holdingDays": exec_idx - entry_idx + 1,
+                        "holdingDays": exit_idx - entry_idx + 1,
                         "exitReason": reported_reason,
                         "entryAdx": entry_adx,
                     })
@@ -636,6 +694,8 @@ def build_supertrend_history_review(
                     stop_price = None
                     entry_adx = None
                     entry_source = "flip"
+                elif pd.notna(row.get("_st_val")):
+                    stop_price = float(row["_st_val"])
             else:
                 if reclaim_until_idx is not None and (signal_idx > reclaim_until_idx or float(row["_st_dir"]) == -1):
                     reclaim_until_idx = None
@@ -656,11 +716,14 @@ def build_supertrend_history_review(
                     and _adx_allows_entry(row)
                 )
                 if normal_entry or reclaim_entry:
+                    execution = _next_valid_open_after_index(daily, signal_idx)
+                    if execution is None:
+                        continue
+                    exec_idx, exec_date, raw_entry = execution
                     if start_ts is not None and exec_date < start_ts:
                         continue
                     if end_ts is not None and exec_date > end_ts:
                         break
-                    raw_entry = _row_price(exec_row, "Open")
                     entry_price = _price_with_bps(raw_entry, slippage_bps, "buy")
                     stop_price = float(row["_st_val"]) if pd.notna(row.get("_st_val")) else raw_entry * 0.95
                     entry_adx = float(row["ADX"]) if "ADX" in row and pd.notna(row.get("ADX")) else None
@@ -826,8 +889,23 @@ def _weekly_until(df_weekly: pd.DataFrame, as_of) -> pd.DataFrame:
 
 
 def _price_with_bps(price: float, bps: float, direction: str) -> float:
-    multiplier = 1 + (bps / 10_000) if direction == "buy" else 1 - (bps / 10_000)
-    return float(price) * multiplier
+    return market_fill_price(
+        price, side="BUY" if direction == "buy" else "SELL", slippage_bps=bps,
+    )
+
+
+def _next_valid_open_after_index(
+    frame: pd.DataFrame,
+    current_idx: int,
+) -> tuple[int, pd.Timestamp, float] | None:
+    result = next_valid_open(frame, after=frame.index[current_idx])
+    if result is None:
+        return None
+    execution_date, open_price = result
+    execution_idx = int(frame.index.get_indexer([execution_date])[0])
+    if execution_idx < 0:
+        return None
+    return execution_idx, execution_date, open_price
 
 
 def classify_asset(symbol: str) -> str:
@@ -864,7 +942,11 @@ def _market_regime_allows_entry(
         return True
 
     if market_filter == "monthly_macd":
-        monthly = market_window.resample("ME").last()
+        monthly = completed_bars(
+            market_regime_daily,
+            timeframe="1M",
+            known_at=pd.Timestamp(signal_date).normalize() + pd.Timedelta(days=1),
+        )
         if monthly.empty or "MACD_DIF" not in monthly.columns or "MACD_DEA" not in monthly.columns:
             return True
         return float(monthly.iloc[-1]["MACD_DIF"]) > float(monthly.iloc[-1]["MACD_DEA"])
@@ -946,9 +1028,16 @@ def _pick_exit(
         high = float(row["High"])
 
         if stop_price is not None and low <= float(stop_price):
+            raw_open = row.get("Open")
+            if pd.isna(raw_open):
+                continue
             return {
                 "exitIdx": idx,
-                "exitPrice": _price_with_bps(float(stop_price), slippage_bps, "sell"),
+                "exitPrice": preexisting_long_stop_fill(
+                    open_price=float(raw_open),
+                    stop_price=float(stop_price),
+                    slippage_bps=slippage_bps,
+                ),
                 "exitReason": "stop",
             }
 
@@ -962,24 +1051,33 @@ def _pick_exit(
         weekly_window = _weekly_until(df_weekly, df_daily.index[idx])
         if is_weekly_bb:
             bb_exit = evaluate_weekly_bb_exit(weekly_window)
-            if bb_exit.get("exitSignal"):
+            execution = _next_valid_open_after_index(df_daily, idx)
+            if bb_exit.get("exitSignal") and execution is not None:
+                execution_idx, _execution_date, raw_exit = execution
                 return {
-                    "exitIdx": idx,
-                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitIdx": execution_idx,
+                    "exitPrice": _price_with_bps(raw_exit, slippage_bps, "sell"),
                     "exitReason": bb_exit.get("exitReason", "bb_exit"),
                 }
         else:
             exit_signal = _evaluate_resonance_exit_no_position(df_daily.iloc[: idx + 1], weekly_window)
-            if exit_signal.get("exitLevel") == "hard":
+            execution = _next_valid_open_after_index(df_daily, idx)
+            if exit_signal.get("exitLevel") == "hard" and execution is not None:
+                execution_idx, _execution_date, raw_exit = execution
                 return {
-                    "exitIdx": idx,
-                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitIdx": execution_idx,
+                    "exitPrice": _price_with_bps(raw_exit, slippage_bps, "sell"),
                     "exitReason": "hard_exit",
                 }
-            if exit_mode == "warn_exit" and exit_signal.get("exitLevel") == "warn":
+            if (
+                exit_mode == "warn_exit"
+                and exit_signal.get("exitLevel") == "warn"
+                and execution is not None
+            ):
+                execution_idx, _execution_date, raw_exit = execution
                 return {
-                    "exitIdx": idx,
-                    "exitPrice": _price_with_bps(float(row["Close"]), slippage_bps, "sell"),
+                    "exitIdx": execution_idx,
+                    "exitPrice": _price_with_bps(raw_exit, slippage_bps, "sell"),
                     "exitReason": "warn_exit",
                 }
 
@@ -1055,18 +1153,25 @@ def run_backtest_for_symbol(
             signal_idx += 1
             continue
 
-        entry_idx = signal_idx + 1
-        entry_date = daily.index[entry_idx]
+        execution = _next_valid_open_after_index(daily, signal_idx)
+        if execution is None:
+            signal_idx += 1
+            continue
+        entry_idx, entry_date, raw_entry_price = execution
         if start_ts is not None and entry_date < start_ts:
             signal_idx += 1
             continue
         if end_ts is not None and entry_date > end_ts:
             break
-        if not _market_regime_allows_entry(market_regime_daily, entry_date, entry_market_filter):
+        if not _market_regime_allows_entry(market_regime_daily, signal_date, entry_market_filter):
             signal_idx += 1
             continue
-        market_entry_snapshot = _market_regime_snapshot(market_regime_daily, entry_date)
-        entry_close_vs_ema20 = market_entry_snapshot.get("marketCloseVsEma20Pct")
+        market_eligibility_snapshot = _market_regime_snapshot(
+            market_regime_daily, signal_date,
+        )
+        entry_close_vs_ema20 = market_eligibility_snapshot.get(
+            "marketCloseVsEma20Pct"
+        )
         if (
             entry_market_min_close_vs_ema20_pct > 0
             and (
@@ -1077,8 +1182,6 @@ def run_backtest_for_symbol(
             signal_idx += 1
             continue
 
-        entry_row = daily.iloc[entry_idx]
-        raw_entry_price = float(entry_row["Open"]) if "Open" in daily.columns else float(entry_row["Close"])
         entry_price = _price_with_bps(raw_entry_price, slippage_bps, "buy")
         exit_info = _pick_exit(
             daily,
@@ -1097,6 +1200,7 @@ def run_backtest_for_symbol(
         gross_return_pct = ((exit_price - entry_price) / entry_price) * 100
         net_return_pct = gross_return_pct - (fee_bps * 2 / 100)
         market_signal_snapshot = _market_regime_snapshot(market_regime_daily, signal_date)
+        market_entry_snapshot = _market_regime_snapshot(market_regime_daily, entry_date)
         market_exit_snapshot = _market_regime_snapshot(market_regime_daily, daily.index[exit_idx])
 
         trades.append(
@@ -1397,6 +1501,10 @@ def simulate_mark_to_market_portfolio(
     start_date = pd.Timestamp(curve_start) if curve_start else trade_start
     end_date = pd.Timestamp(curve_end) if curve_end else trade_end
     date_values = set(pd.date_range(start_date, end_date, freq="B"))
+    for frame in daily_frames_by_symbol.values():
+        if frame is None or frame.empty:
+            continue
+        date_values.update(pd.Timestamp(value) for value in frame.index)
     for trade in accepted_trades:
         date_values.add(pd.Timestamp(trade.get("entryDate")))
         date_values.add(pd.Timestamp(trade.get("exitDate") or trade.get("entryDate")))
@@ -1518,15 +1626,22 @@ def _rs_market_is_bullish(
     if mode == "monthly_macd":
         fid = id(fdf)
         if fid not in monthly_cache:
-            monthly_cache[fid] = fdf.resample("ME").last()
+            monthly_cache[fid] = completed_bars(
+                fdf, timeframe="1M", known_at=pd.Timestamp.max.normalize(),
+            )
         src = monthly_cache[fid]
-        w = src[src.index <= pd.Timestamp(as_of)]
+        as_of_close = pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1)
+        w = src[src["available_at"] < as_of_close]
         if w.empty or "MACD_DIF" not in w.columns or "MACD_DEA" not in w.columns:
             return True
         return float(w.iloc[-1]["MACD_DIF"]) > float(w.iloc[-1]["MACD_DEA"])
     if mode == "weekly_macd":
-        src = weekly_df if weekly_df is not None else fdf.resample("W").last()
-        w = src[src.index <= pd.Timestamp(as_of)]
+        source = weekly_df if weekly_df is not None else fdf
+        src = completed_bars(
+            source, timeframe="1W", known_at=pd.Timestamp.max.normalize(),
+        )
+        as_of_close = pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1)
+        w = src[src["available_at"] < as_of_close]
         if w.empty or "MACD_DIF" not in w.columns or "MACD_DEA" not in w.columns:
             return True
         return float(w.iloc[-1]["MACD_DIF"]) > float(w.iloc[-1]["MACD_DEA"])
@@ -1783,10 +1898,10 @@ def annotate_relative_strength(
     rankings_by_date: Dict[str, Dict[str, Dict[str, object]]] = {}
 
     for trade in trades:
-        entry_date = trade.get("entryDate")
-        if not entry_date:
+        decision_date = trade.get("signalDate") or trade.get("entryDate")
+        if not decision_date:
             continue
-        date_key = _date_str(entry_date)
+        date_key = _date_str(decision_date)
         if date_key in rankings_by_date:
             continue
 
@@ -1795,7 +1910,7 @@ def annotate_relative_strength(
             if df_daily is None or df_daily.empty or "Close" not in df_daily.columns:
                 continue
             window = df_daily.sort_index()
-            window = window[window.index <= pd.Timestamp(entry_date)].dropna(subset=["Close"])
+            window = window[window.index <= pd.Timestamp(decision_date)].dropna(subset=["Close"])
             if len(window) <= lookback_bars:
                 continue
             current_close = float(window.iloc[-1]["Close"])
@@ -1817,6 +1932,7 @@ def annotate_relative_strength(
                 "relativeStrengthRank": idx + 1,
                 "relativeStrengthUniverseSize": universe_size,
                 "relativeStrengthBucket": _relative_strength_bucket(idx + 1, universe_size),
+                "relativeStrengthAsOfDate": date_key,
             }
             for idx, row in enumerate(ranked_scores)
         }
@@ -1825,8 +1941,11 @@ def annotate_relative_strength(
     for trade in trades:
         next_trade = dict(trade)
         symbol = str(next_trade.get("symbol") or "").upper()
-        entry_date = next_trade.get("entryDate")
-        ranking = rankings_by_date.get(_date_str(entry_date), {}).get(symbol) if entry_date else None
+        decision_date = next_trade.get("signalDate") or next_trade.get("entryDate")
+        ranking = (
+            rankings_by_date.get(_date_str(decision_date), {}).get(symbol)
+            if decision_date else None
+        )
         if ranking:
             next_trade.update(ranking)
         else:
@@ -2034,6 +2153,10 @@ def summarize_backtest_report(
         relative_strength_bucket_filter=relative_strength_bucket_filter,
     )
 
+    closed_trade_diagnostics = simulate_closed_trade_portfolio(
+        filtered_trades,
+        max_positions=portfolio_max_positions,
+    )
     report = {
         "summary": summarize_trades(filtered_trades, strategy_version=strategy_version),
         "byPoolType": _summarize_grouped(filtered_trades, "poolType", strategy_version),
@@ -2051,10 +2174,7 @@ def summarize_backtest_report(
             "poolType": pool_type_filter,
             "relativeStrengthBucket": relative_strength_bucket_filter,
         },
-        "portfolio": simulate_closed_trade_portfolio(
-            filtered_trades,
-            max_positions=portfolio_max_positions,
-        ),
+        "closedTradeRealizationDiagnostics": closed_trade_diagnostics,
     }
     if benchmark_daily_frames is not None:
         report["benchmark"] = summarize_buy_and_hold_benchmark(
@@ -2064,13 +2184,15 @@ def summarize_backtest_report(
             fee_bps=fee_bps,
             slippage_bps=slippage_bps,
         )
-        report["markToMarketPortfolio"] = simulate_mark_to_market_portfolio(
+        mark_to_market = simulate_mark_to_market_portfolio(
             filtered_trades,
             benchmark_daily_frames,
             max_positions=portfolio_max_positions,
             curve_start=benchmark_start,
             curve_end=benchmark_end,
         )
+        report["markToMarketPortfolio"] = mark_to_market
+        report["portfolio"] = mark_to_market
         report["rsRotationPortfolio"] = simulate_rs_rotation_portfolio(
             benchmark_daily_frames,
             top_n=portfolio_max_positions,
@@ -2081,6 +2203,11 @@ def summarize_backtest_report(
             market_filter_symbol=rs_market_filter_symbol,
             market_filter_df=market_regime_daily,
         )
+    else:
+        report["portfolio"] = {
+            "mode": "unavailable",
+            "reason": "PRICE_FRAMES_REQUIRED_FOR_MARK_TO_MARKET_NAV",
+        }
     return report
 
 

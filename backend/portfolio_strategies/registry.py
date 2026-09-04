@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from .models import AssetConfig, CostConfig, StrategyConfig, StrategyMode
 from .frozen_xquant import frozen_universe, load_frozen_spec
+from .signal_contracts import (
+    BULL_FLIP_SIGNAL_CONTRACT_VERSION,
+    RAW_BULL_FLIP_SIGNAL_CONTRACT_VERSION,
+)
 
 
 class UnknownStrategyError(KeyError):
@@ -35,6 +39,8 @@ BTC_ASSET = AssetConfig(
     "satellite",
     market="CRYPTO_UTC",
     synthetic_proxy=True,
+    quote_currency="USD",
+    fx_pair="USDCNY=X",
     note="Synthetic return proxy; no CNY/USD conversion is modeled.",
 )
 
@@ -153,8 +159,18 @@ _BULL_ASSETS = tuple(
         symbol,
         "satellite",
         market=_FROZEN_UNIVERSE.market_by_symbol[symbol],
-        synthetic_proxy=_FROZEN_UNIVERSE.market_by_symbol[symbol]
-        in {"us", "crypto", "gold", "hong_kong"},
+        synthetic_proxy=not symbol.endswith((".SS", ".SZ")),
+        quote_currency=(
+            "CNY" if symbol.endswith((".SS", ".SZ"))
+            else "HKD" if symbol.endswith(".HK") else "USD"
+        ),
+        fx_pair=(
+            None if symbol.endswith((".SS", ".SZ"))
+            else "HKDCNY=X" if symbol.endswith(".HK") else "USDCNY=X"
+        ),
+        investable_instrument=(
+            symbol if symbol.endswith((".SS", ".SZ")) else None
+        ),
     )
     for symbol in _FROZEN_UNIVERSE.symbols
 )
@@ -192,9 +208,9 @@ def _core_bull_config(
     assets_by_symbol.update({asset.symbol: asset for asset in NEXT_OPEN_CORE_ASSETS})
     return StrategyConfig(
         strategy_id=strategy_id,
-        version="1.0.0",
+        version="2.0.0",
         display_name=display_name,
-        description="Core90 plus a frozen policy-eligible bull-flip 10% sleeve.",
+        description="Core90 plus a frozen bull-flip 10% sleeve.",
         mode=mode,
         execution="next_open",
         initial_nav=100_000.0,
@@ -210,7 +226,11 @@ def _core_bull_config(
             "sleeve_rebalance_cost_bps": 10.0,
             "supertrend_atr_window": 7,
             "supertrend_multiplier": 3.0,
-            "policy_version": _FROZEN_SPEC["policyVersion"],
+            "signal_contract_version": (
+                BULL_FLIP_SIGNAL_CONTRACT_VERSION
+                if ma200_filter else RAW_BULL_FLIP_SIGNAL_CONTRACT_VERSION
+            ),
+            "research_source_policy_version": _FROZEN_SPEC["policyVersion"],
             "universe_version": _FROZEN_UNIVERSE.universe_version,
             "ma200_entry_filter": ma200_filter,
             "ma_window": 200,
@@ -236,7 +256,7 @@ CORE90_RAW_BULL10 = _core_bull_config(
     "core90_raw_bull10",
     "Core90 + Raw Bull10",
     ma200_filter=False,
-    mode=StrategyMode.COMPARISON,
+    mode=StrategyMode.PAPER,
 )
 
 _STRATEGIES = (

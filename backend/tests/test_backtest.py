@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+import backtest as backtest_module
 from backtest import load_universe_symbols
 from backtest import annotate_relative_strength
 from backtest import evaluate_weekly_bb_pullback
@@ -230,9 +231,47 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["entryDate"], str(daily.index[3].date()))
         self.assertEqual(trades[0]["entryPrice"], 111.0)
+        self.assertEqual(trades[0]["exitDate"], str(daily.index[4].date()))
+        self.assertEqual(trades[0]["exitPrice"], 99.0)
+        self.assertEqual(trades[0]["holdingDays"], 2)
+        self.assertEqual(trades[0]["exitReason"], "stop")
+
+    def test_supertrend_does_not_use_current_close_stop_for_current_intraday_low(self):
+        daily = _build_supertrend_next_open_daily_df()
+        st = _build_supertrend_next_open_indicator(daily.index)
+        st.loc[daily.index[3], "SUPERT_7_3.0"] = 111.0
+        daily.loc[daily.index[4], ["Open", "High", "Low", "Close"]] = [
+            113.0, 115.0, 112.0, 114.0,
+        ]
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            trades = run_supertrend_backtest(
+                "TEST", daily, fee_bps=0, slippage_bps=0,
+                entry_signal_mode="daily_bull_flip",
+            )
+
+        self.assertEqual(trades[0]["exitReason"], "st_flip")
         self.assertEqual(trades[0]["exitDate"], str(daily.index[5].date()))
         self.assertEqual(trades[0]["exitPrice"], 88.0)
-        self.assertEqual(trades[0]["holdingDays"], 3)
+
+    def test_supertrend_entry_waits_for_next_valid_open_without_using_close(self):
+        daily = _build_supertrend_next_open_daily_df()
+        daily.loc[daily.index[3], "Open"] = None
+        daily.loc[daily.index[4], ["Open", "High", "Low", "Close"]] = [
+            105.0, 107.0, 103.0, 106.0,
+        ]
+        st = _build_supertrend_next_open_indicator(daily.index)
+        st.loc[daily.index[4], "SUPERTd_7_3.0"] = 1
+        st.loc[daily.index[4], "SUPERT_7_3.0"] = 99.0
+
+        with patch("backtest.ta.supertrend", return_value=st):
+            trades = run_supertrend_backtest(
+                "TEST", daily, fee_bps=0, slippage_bps=0,
+                entry_signal_mode="daily_bull_flip",
+            )
+
+        self.assertEqual(trades[0]["entryDate"], str(daily.index[4].date()))
+        self.assertEqual(trades[0]["entryPrice"], 105.0)
 
     def test_supertrend_adx_filter_skips_low_adx_flip(self):
         daily = _build_supertrend_daily_df(adx_at_entry=18.0)
@@ -496,7 +535,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(comparisons["baseline"]["tradeCount"], 1)
         self.assertEqual(comparisons["baseline"]["exitReasonCounts"], {"stop": 1})
         self.assertEqual(comparisons["reclaim"]["tradeCount"], 2)
-        self.assertEqual(comparisons["reclaim"]["exitReasonCounts"], {"stop": 1, "reclaim_st_flip": 1})
+        self.assertEqual(comparisons["reclaim"]["exitReasonCounts"], {"stop": 1, "reclaim_stop": 1})
         self.assertEqual(comparisons["close_only"]["tradeCount"], 1)
         self.assertEqual(comparisons["close_only"]["exitReasonCounts"], {"st_flip": 1})
         self.assertLess(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
@@ -814,16 +853,103 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(portfolio["equityCurve"][1]["equity"], 1.1)
         self.assertAlmostEqual(portfolio["totalReturnPct"], 20.0)
 
-    def test_relative_strength_annotation_ranks_trades_at_entry_date(self):
+    def test_mark_to_market_portfolio_includes_crypto_weekend_drawdown(self):
+        daily = pd.DataFrame(
+            {"Close": [100.0, 50.0, 100.0]},
+            index=pd.to_datetime(["2025-01-03", "2025-01-04", "2025-01-05"]),
+        )
+        portfolio = simulate_mark_to_market_portfolio(
+            [{
+                "symbol": "BTC-USD",
+                "entryDate": "2025-01-03",
+                "exitDate": "2025-01-05",
+                "entryPrice": 100.0,
+                "returnPct": 0.0,
+            }],
+            {"BTC-USD": daily},
+            max_positions=1,
+        )
+
+        self.assertEqual(
+            [point["date"] for point in portfolio["equityCurve"]],
+            ["2025-01-03", "2025-01-04", "2025-01-05"],
+        )
+        self.assertAlmostEqual(portfolio["maxDrawdownPct"], 50.0)
+
+    def test_report_uses_mark_to_market_nav_as_authoritative_portfolio(self):
+        daily = pd.DataFrame(
+            {"Close": [100.0, 50.0, 100.0]},
+            index=pd.to_datetime(["2025-01-01", "2025-01-02", "2025-01-03"]),
+        )
+        trades = [{
+            "symbol": "AAA", "signalDate": "2024-12-31",
+            "entryDate": "2025-01-01", "exitDate": "2025-01-03",
+            "entryPrice": 100.0, "returnPct": 0.0, "holdingDays": 3,
+            "exitReason": "end_of_data",
+        }]
+
+        report = summarize_backtest_report(
+            trades, benchmark_daily_frames={"AAA": daily},
+        )
+
+        self.assertEqual(report["portfolio"]["mode"], "daily_mark_to_market_equal_slot")
+        self.assertEqual(report["portfolio"], report["markToMarketPortfolio"])
+        self.assertAlmostEqual(report["portfolio"]["maxDrawdownPct"], 10.0)
+        self.assertEqual(
+            report["closedTradeRealizationDiagnostics"]["mode"],
+            "closed_trade_equal_slot",
+        )
+
+    def test_stop_gap_fills_at_open_not_unreachable_stop_price(self):
+        daily = pd.DataFrame(
+            {
+                "Open": [90.0, 92.0], "High": [93.0, 94.0],
+                "Low": [89.0, 91.0], "Close": [92.0, 93.0],
+            },
+            index=pd.to_datetime(["2025-01-02", "2025-01-03"]),
+        )
+
+        result = backtest_module._pick_exit(
+            daily, pd.DataFrame(), entry_idx=0, stop_price=95.0,
+            target_price=None, max_hold_days=2, slippage_bps=0,
+        )
+
+        self.assertEqual(result["exitIdx"], 0)
+        self.assertEqual(result["exitPrice"], 90.0)
+
+    def test_close_confirmed_exit_fills_at_next_open(self):
+        daily = pd.DataFrame(
+            {
+                "Open": [100.0, 90.0], "High": [101.0, 91.0],
+                "Low": [99.0, 89.0], "Close": [98.0, 90.0],
+            },
+            index=pd.to_datetime(["2025-01-02", "2025-01-03"]),
+        )
+
+        with patch(
+            "backtest.evaluate_weekly_bb_exit",
+            return_value={"exitSignal": True, "exitReason": "bb_exit"},
+        ):
+            result = backtest_module._pick_exit(
+                daily, pd.DataFrame(), entry_idx=0, stop_price=None,
+                target_price=None, max_hold_days=2, slippage_bps=0,
+                is_weekly_bb=True,
+            )
+
+        self.assertEqual(result["exitIdx"], 1)
+        self.assertEqual(result["exitPrice"], 90.0)
+
+    def test_relative_strength_annotation_freezes_rank_at_signal_date(self):
         dates = pd.date_range("2025-01-01", periods=4, freq="B")
         frames = {
-            "AAA": pd.DataFrame({"Close": [100.0, 105.0, 110.0, 120.0]}, index=dates),
-            "BBB": pd.DataFrame({"Close": [100.0, 101.0, 103.0, 105.0]}, index=dates),
+            "AAA": pd.DataFrame({"Close": [100.0, 105.0, 110.0, 80.0]}, index=dates),
+            "BBB": pd.DataFrame({"Close": [100.0, 101.0, 103.0, 150.0]}, index=dates),
             "CCC": pd.DataFrame({"Close": [100.0, 98.0, 97.0, 95.0]}, index=dates),
         }
         trades = [
             {
                 "symbol": "BBB",
+                "signalDate": str(dates[-2].date()),
                 "entryDate": str(dates[-1].date()),
                 "returnPct": 2.0,
             },
@@ -835,6 +961,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(annotated[0]["relativeStrengthUniverseSize"], 3)
         self.assertGreater(annotated[0]["relativeStrengthPct"], 0)
         self.assertEqual(annotated[0]["relativeStrengthBucket"], "middle")
+        self.assertEqual(annotated[0]["relativeStrengthAsOfDate"], str(dates[-2].date()))
 
     def test_backtest_report_can_apply_asset_and_pool_filters(self):
         trades = [
@@ -1055,7 +1182,7 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(len(trades), 1)
 
-    def test_entry_market_filter_blocks_pullback_on_entry_date(self):
+    def test_entry_market_filter_does_not_read_entry_date_close(self):
         daily = _build_backtest_daily_df()
         weekly = _build_backtest_weekly_df()
         market = _build_market_regime_df(bullish=True)
@@ -1083,14 +1210,29 @@ class BacktestTests(unittest.TestCase):
         )
 
         self.assertEqual(len(loose_trades), 1)
-        self.assertEqual(strict_trades, [])
+        self.assertEqual(len(strict_trades), 1)
+
+    def test_entry_market_filter_uses_signal_date_snapshot(self):
+        daily = _build_backtest_daily_df()
+        weekly = _build_backtest_weekly_df()
+        market = _build_market_regime_df(bullish=False)
+        entry_date = daily.index[25]
+        market.loc[entry_date:, ["Close", "EMA20", "EMA50"]] = [110.0, 105.0, 100.0]
+
+        trades = run_backtest_for_symbol(
+            "TEST", daily, weekly, market_regime_daily=market,
+            entry_market_filter="bullish_ema", fee_bps=0, slippage_bps=0,
+            end=str(entry_date.date()),
+        )
+
+        self.assertEqual(trades, [])
 
     def test_entry_market_buffer_blocks_thin_bullish_context(self):
         daily = _build_backtest_daily_df()
         weekly = _build_backtest_weekly_df()
         market = _build_market_regime_df(bullish=True)
-        entry_date = daily.index[25]
-        market.loc[entry_date:, "Close"] = 105.5
+        signal_date = daily.index[24]
+        market.loc[signal_date, "Close"] = 105.5
 
         strict_trades = run_backtest_for_symbol(
             "TEST",
@@ -1112,6 +1254,7 @@ class BacktestTests(unittest.TestCase):
             entry_market_min_close_vs_ema20_pct=1.0,
             fee_bps=0,
             slippage_bps=0,
+            end=str(daily.index[25].date()),
         )
 
         self.assertEqual(len(strict_trades), 1)

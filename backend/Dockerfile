@@ -3,6 +3,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.3@sha256:2d890623d310b57771ce840f0da5eed5f
 
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
+ARG TRADING_BUILD_SHA=unavailable
 # Proxy only used during build (ARG), NOT baked into runtime ENV
 # to avoid SSL issues with data fetching (curl-cffi + proxy = TLS errors)
 
@@ -10,6 +11,7 @@ WORKDIR /app
 
 # Use Tsinghua PyPI mirror (for servers without direct PyPI access)
 ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV TRADING_BUILD_SHA=${TRADING_BUILD_SHA}
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1

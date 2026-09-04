@@ -36,6 +36,10 @@ def _bull_decision(items: tuple[dict, ...]) -> FrozenDecision:
         config_hash="config",
         input_hash=payload_hash(payload),
         data_quality_status="OK",
+        signal_contract_version="bull_flip_ma200_v1",
+        signal_code_commit_sha="commit-a",
+        signal_code_hash="code-a",
+        price_snapshot_hash="prices-a",
         payload=payload,
         items=items,
     )
@@ -97,6 +101,14 @@ def test_multi_market_orders_execute_on_independent_dates_and_refresh_is_idempot
     conn = connect(ledger.db_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM decision_runs").fetchone()[0] == 1
+        provenance = conn.execute(
+            """SELECT signal_contract_version, signal_code_commit_sha,
+                      signal_code_hash, price_snapshot_hash
+               FROM decision_runs"""
+        ).fetchone()
+        assert tuple(provenance) == (
+            "bull_flip_ma200_v1", "commit-a", "code-a", "prices-a",
+        )
         assert conn.execute("SELECT COUNT(*) FROM paper_orders").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM paper_executions").fetchone()[0] == 2
         assert conn.execute(
@@ -114,6 +126,66 @@ def test_multi_market_orders_execute_on_independent_dates_and_refresh_is_idempot
         assert dates == ["2021-04-02", "2021-04-05"]
     finally:
         conn.close()
+
+
+def test_code_revision_is_not_reported_as_market_data_revision(tmp_path: Path):
+    ledger = PortfolioLedger(tmp_path / "paper.sqlite")
+    engine = NextOpenPaperEngine(ledger)
+    config = get_strategy("core90_ma200_bull10")
+    engine.activate(config, activation_date=date(2021, 4, 1))
+    prices = {"AAPL": _frame([
+        ("2021-04-01", 120.0, 120.0), ("2021-04-05", 121.0, 121.0),
+    ])}
+    first = _bull_decision((_entry("AAPL", "us"),))
+    second = FrozenDecision(
+        **{
+            **first.__dict__,
+            "input_hash": "different-input",
+            "signal_code_commit_sha": "commit-b",
+            "signal_code_hash": "code-b",
+        }
+    )
+
+    engine.queue_decision(config, first, prices)
+    assert engine.queue_decision(config, second, prices) == ()
+
+    with connect(ledger.db_path) as conn:
+        event = conn.execute(
+            "SELECT code FROM data_quality_events_v2 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert event["code"] == "SIGNAL_CODE_REVISION"
+
+
+def test_blocked_ma200_data_is_written_as_structured_quality_event(tmp_path: Path):
+    ledger = PortfolioLedger(tmp_path / "paper.sqlite")
+    engine = NextOpenPaperEngine(ledger)
+    config = get_strategy("core90_ma200_bull10")
+    engine.activate(config, activation_date=date(2021, 4, 1))
+    decision = _bull_decision(())
+    blocked = FrozenDecision(
+        **{
+            **decision.__dict__,
+            "data_quality_status": "MA200_DATA_BLOCKED",
+            "payload": {
+                **decision.payload,
+                "symbol": "AAPL",
+                "marketGate": {
+                    "freshnessStatus": "EXPECTED_OPEN_MISSING",
+                    "missingExpectedSessions": ["2021-04-01"],
+                },
+            },
+        }
+    )
+
+    engine.queue_decision(config, blocked, {})
+
+    with connect(ledger.db_path) as conn:
+        event = conn.execute(
+            "SELECT code, symbol, details_json FROM data_quality_events_v2"
+        ).fetchone()
+    assert event["code"] == "MA200_DATA_BLOCKED"
+    assert event["symbol"] == "AAPL"
+    assert "EXPECTED_OPEN_MISSING" in event["details_json"]
 
 
 def test_catch_up_reconciles_crossed_actual_dates_in_chronological_order(tmp_path: Path):
