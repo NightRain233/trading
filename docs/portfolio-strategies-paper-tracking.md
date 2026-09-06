@@ -1,5 +1,8 @@
 # Portfolio Strategies Paper Tracking
 
+跨仓库交接、研究包与日报入口见
+[`docs/trading-ledger-handoff-2026-09-06.md`](/Users/zz/Desktop/Code/zsd/trading/docs/trading-ledger-handoff-2026-09-06.md)。
+
 ## Quick Start
 
 ```bash
