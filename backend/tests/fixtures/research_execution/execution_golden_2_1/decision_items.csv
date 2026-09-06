@@ -1,0 +1,3 @@
+id,decision_run_id,symbol,event_type,market,sleeve,eligible,target_weight,priority,reason,payload_json
+1,1,002119.SZ,BULL_FLIP_ENTRY,a_share,satellite,1,0.1,1.0,synthetic execution fixture,{}
+2,2,002119.SZ,ST_BEAR_EXIT,a_share,satellite,1,0.0,1.0,synthetic execution fixture,{}

@@ -1,0 +1,3 @@
+id,account_id,decision_run_id,decision_item_id,order_key,strategy_id,strategy_version,sleeve,symbol,market,order_type,side,status,signal_date,expected_execution_date,next_attempt_date,actual_execution_date,target_weight,requested_weight_delta,requested_quantity,priority,delay_reason,rejection_reason
+1,1,1,1,ceb4a107c1efe7d614dbbaaaf4230ad0813abe2c165eca44a332a380fb3bc59f,core90_ma200_bull10,2.0.0,satellite,002119.SZ,a_share,BULL_FLIP_ENTRY,BUY,EXECUTED,2021-04-01,2021-04-02,2021-04-06,2021-04-06,0.1,0.010000000000000002,,1.0,,
+2,1,2,2,4ec9a2e422e517d75b177c6a015519a3757aa7fc0700c7c9b843727e111ecb1f,core90_ma200_bull10,2.0.0,satellite,002119.SZ,a_share,ST_BEAR_EXIT,SELL,EXECUTED,2021-04-06,2021-04-07,2021-04-08,2021-04-08,0.0,-0.010819016195615342,,1.0,,

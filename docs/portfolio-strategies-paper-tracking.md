@@ -49,6 +49,17 @@ candidates. This convergence is based on the frozen 2015-01-01 through
 historical maximum drawdown to about 13.49%, shortened maximum recovery to 283
 days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
 
+Those figures describe the original xquant study. The repaired primary 2.1.0
+contract has a separate recomputed baseline in the sibling xquant research package
+(`/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/core90_current_contract_2026_09_05/README.md`):
+14.98% CAGR, 1.30 Sharpe and -12.66% maximum drawdown over the same sample window,
+subject to a limited observable universe and documented execution assumptions.
+Version 2.1.0 records satellite budget resizing as actual next-open orders/fills,
+waits for all held basket opening quotes, and shares chronological catch-up with
+research. D-date decisions freeze after the following 00:00 UTC reference-close
+cutoff. This is a new account version; existing 2.0.0 history is not rewritten.
+The local repair and research run do not constitute deployment or activation.
+
 - RiskParity core: 510300.SS / 513100.SS / 518880.SS, 20 common-session returns, inverse volatility, every 10 common sessions, 10 bps one-way cost.
 - Core signals are generated after the common Close and execute at the next common valid Open. Between rebalances, quantities remain unchanged and weights drift naturally.
 - Bull sleeve: fixed 10% total budget, 10% maximum per satellite position, 10 positions maximum, ST 7/3, 5 bps commission plus 5 bps slippage each side.

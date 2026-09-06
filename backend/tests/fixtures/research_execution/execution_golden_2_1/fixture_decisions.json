@@ -1,0 +1,84 @@
+[
+  {
+    "run_type": "BULL_DAILY:002119.SZ",
+    "market_data_date": "2021-04-01",
+    "signal_date": "2021-04-01",
+    "universe_version": "synthetic_fixture",
+    "config_hash": "d295b30158030d53855c3e3564f2f09e138d9709c46479ea44097347c6314dc7",
+    "input_hash": "06579f25920723b051862f67c3a65ef5df57ddd74c201dbd5e6e7bfc9a8b672d",
+    "data_quality_status": "OK",
+    "payload": {
+      "items": [
+        {
+          "symbol": "002119.SZ",
+          "market": "a_share",
+          "sleeve": "satellite",
+          "event_type": "BULL_FLIP_ENTRY",
+          "eligible": true,
+          "target_weight": 0.1,
+          "priority": 1.0,
+          "reason": "synthetic execution fixture",
+          "payload": {}
+        }
+      ]
+    },
+    "items": [
+      {
+        "symbol": "002119.SZ",
+        "market": "a_share",
+        "sleeve": "satellite",
+        "event_type": "BULL_FLIP_ENTRY",
+        "eligible": true,
+        "target_weight": 0.1,
+        "priority": 1.0,
+        "reason": "synthetic execution fixture",
+        "payload": {}
+      }
+    ],
+    "signal_contract_version": "bull_flip_ma200_v1",
+    "signal_code_commit_sha": null,
+    "signal_code_hash": null,
+    "price_snapshot_hash": null
+  },
+  {
+    "run_type": "BULL_DAILY:002119.SZ",
+    "market_data_date": "2021-04-06",
+    "signal_date": "2021-04-06",
+    "universe_version": "synthetic_fixture",
+    "config_hash": "d295b30158030d53855c3e3564f2f09e138d9709c46479ea44097347c6314dc7",
+    "input_hash": "b295a06a5b07e3b8784c32a43c6a8d5e5aefc22c5180584cdb0268fb17604a76",
+    "data_quality_status": "OK",
+    "payload": {
+      "items": [
+        {
+          "symbol": "002119.SZ",
+          "market": "a_share",
+          "sleeve": "satellite",
+          "event_type": "ST_BEAR_EXIT",
+          "eligible": true,
+          "target_weight": 0.0,
+          "priority": 1.0,
+          "reason": "synthetic execution fixture",
+          "payload": {}
+        }
+      ]
+    },
+    "items": [
+      {
+        "symbol": "002119.SZ",
+        "market": "a_share",
+        "sleeve": "satellite",
+        "event_type": "ST_BEAR_EXIT",
+        "eligible": true,
+        "target_weight": 0.0,
+        "priority": 1.0,
+        "reason": "synthetic execution fixture",
+        "payload": {}
+      }
+    ],
+    "signal_contract_version": "bull_flip_ma200_v1",
+    "signal_code_commit_sha": null,
+    "signal_code_hash": null,
+    "price_snapshot_hash": null
+  }
+]
