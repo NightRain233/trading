@@ -99,7 +99,7 @@ def test_service_seeds_frozen_july_pit_snapshot_without_xquant_runtime(
         "risk_parity_core_next_open", now=datetime(2026, 7, 1, 22, 0),
     )
     snapshot = service.refresh(
-        "core90_ma200_bull10", now=datetime(2026, 7, 1, 22, 0),
+        "core90_ma200_bull10", now=datetime(2026, 7, 2, 8, 0),
     )
     assert snapshot["state"] == "PENDING_EXECUTION"
     assert snapshot["operations"]["pendingOrderCount"] == 3

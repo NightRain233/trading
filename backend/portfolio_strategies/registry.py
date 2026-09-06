@@ -208,7 +208,7 @@ def _core_bull_config(
     assets_by_symbol.update({asset.symbol: asset for asset in NEXT_OPEN_CORE_ASSETS})
     return StrategyConfig(
         strategy_id=strategy_id,
-        version="2.0.0",
+        version="2.1.0" if ma200_filter else "2.0.0",
         display_name=display_name,
         description="Core90 plus a frozen bull-flip 10% sleeve.",
         mode=mode,
@@ -224,6 +224,8 @@ def _core_bull_config(
             "schedule_anchor_signal_date": "2026-07-01",
             "core_one_way_cost_bps": 10.0,
             "sleeve_rebalance_cost_bps": 10.0,
+            **({"sleeve_execution_contract": "proportional_next_open_v1",
+               "decision_clock": "next_utc_midnight"} if ma200_filter else {}),
             "supertrend_atr_window": 7,
             "supertrend_multiplier": 3.0,
             "signal_contract_version": (

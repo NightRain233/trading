@@ -726,7 +726,8 @@ class PortfolioStrategyService:
                 f"stale:{market_data_date.isoformat()}<expected:{expected_core_date.isoformat()}"
             )
             if account is not None:
-                self.next_open_engine.reconcile(config, frames, through_date=through_date)
+                if config.params.get("sleeve_execution_contract") != "proportional_next_open_v1":
+                    self.next_open_engine.reconcile(config, frames, through_date=through_date)
                 self.events.record_data_quality(
                     account_id=account["id"], strategy_id=config.strategy_id,
                     strategy_version=config.version,
@@ -741,6 +742,24 @@ class PortfolioStrategyService:
                     details={"expectedDate": expected_core_date.isoformat()},
                 )
         if account is None:
+            return self._get_next_open_snapshot(config, load_errors=errors)
+
+        if config.params.get("sleeve_execution_contract") == "proportional_next_open_v1":
+            # Research and paper now share the complete chronological loop,
+            # not just fill-price helpers. Missing runs are replayed in order.
+            from .core_bull_research import advance_current_contract
+            activation = self.events.activation(account["id"])
+            if market_data_date < date.fromisoformat(activation["activation_date"]):
+                return self._get_next_open_snapshot(config, load_errors=errors)
+            # Reference-market closes for D are all available by D+1 00:00 UTC,
+            # before CNY's next opening session. Do not freeze an evening
+            # rejection just because the same-date US reference is still open.
+            utc_now = pd.Timestamp(effective_now)
+            utc_now = utc_now.tz_localize("Asia/Shanghai") if utc_now.tzinfo is None else utc_now
+            decision_cutoff = (utc_now.tz_convert("UTC").normalize() - pd.Timedelta(days=1)).date()
+            advance_current_contract(self, config, frames, through_date=min(market_data_date, decision_cutoff))
+            self.next_open_engine.reconcile(config, frames, through_date=market_data_date)
+            self.next_open_engine.value(config, frames, market_data_date)
             return self._get_next_open_snapshot(config, load_errors=errors)
 
         # First settle prior signals using each symbol's own valid Open.

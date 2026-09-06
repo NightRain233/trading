@@ -40,57 +40,49 @@ def supertrend(
     midpoint = (high + low) / 2.0
     basic_upper = midpoint + multiplier * atr
     basic_lower = midpoint - multiplier * atr
-    final_upper = pd.Series(index=close.index, dtype=float)
-    final_lower = pd.Series(index=close.index, dtype=float)
-    line = pd.Series(index=close.index, dtype=float)
-    direction = pd.Series(False, index=close.index, dtype=bool)
-
-    for position in range(len(close)):
-        if pd.isna(atr.iloc[position]):
+    # The recurrence is causal. Arrays avoid repeated pandas scalar indexing
+    # during historical replay without changing the SMA-ATR contract.
+    size = len(close)
+    final_upper = np.full(size, np.nan)
+    final_lower = np.full(size, np.nan)
+    line = np.full(size, np.nan)
+    direction = np.zeros(size, dtype=bool)
+    atr_values = atr.to_numpy(dtype=float)
+    closes = close.to_numpy(dtype=float)
+    upper = basic_upper.to_numpy(dtype=float)
+    lower = basic_lower.to_numpy(dtype=float)
+    for position in range(size):
+        if np.isnan(atr_values[position]):
             continue
-        if position == 0 or pd.isna(final_upper.iloc[position - 1]):
-            final_upper.iloc[position] = basic_upper.iloc[position]
-            final_lower.iloc[position] = basic_lower.iloc[position]
-            line.iloc[position] = final_upper.iloc[position]
+        if position == 0 or np.isnan(final_upper[position - 1]):
+            final_upper[position] = upper[position]
+            final_lower[position] = lower[position]
+            line[position] = final_upper[position]
             continue
-
-        previous_close = close.iloc[position - 1]
-        previous_upper = final_upper.iloc[position - 1]
-        previous_lower = final_lower.iloc[position - 1]
-        final_upper.iloc[position] = (
-            basic_upper.iloc[position]
-            if basic_upper.iloc[position] < previous_upper
-            or previous_close > previous_upper
-            else previous_upper
+        previous_close = closes[position - 1]
+        previous_upper = final_upper[position - 1]
+        previous_lower = final_lower[position - 1]
+        final_upper[position] = (
+            upper[position] if upper[position] < previous_upper
+            or previous_close > previous_upper else previous_upper
         )
-        final_lower.iloc[position] = (
-            basic_lower.iloc[position]
-            if basic_lower.iloc[position] > previous_lower
-            or previous_close < previous_lower
-            else previous_lower
+        final_lower[position] = (
+            lower[position] if lower[position] > previous_lower
+            or previous_close < previous_lower else previous_lower
         )
-
-        if line.iloc[position - 1] == previous_upper:
-            line.iloc[position] = (
-                final_lower.iloc[position]
-                if close.iloc[position] > final_upper.iloc[position]
-                else final_upper.iloc[position]
+        if line[position - 1] == previous_upper:
+            line[position] = (
+                final_lower[position] if closes[position] > final_upper[position]
+                else final_upper[position]
             )
         else:
-            line.iloc[position] = (
-                final_upper.iloc[position]
-                if close.iloc[position] < final_lower.iloc[position]
-                else final_lower.iloc[position]
+            line[position] = (
+                final_upper[position] if closes[position] < final_lower[position]
+                else final_lower[position]
             )
-        direction.iloc[position] = close.iloc[position] > line.iloc[position]
-
+        direction[position] = closes[position] > line[position]
     return pd.DataFrame(
-        {
-            "line": line,
-            "direction": direction.fillna(False),
-            "upper": final_upper,
-            "lower": final_lower,
-        },
+        {"line": line, "direction": direction, "upper": final_upper, "lower": final_lower},
         index=close.index,
     )
 

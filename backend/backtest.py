@@ -377,7 +377,7 @@ def run_supertrend_backtest(
                 continue
 
             # A bearish direction is only known after this bar closes.
-            execution = _next_valid_open_after_index(daily, signal_idx)
+            execution = _next_valid_open_after_index(daily, signal_idx, side="SELL")
             if float(row["_st_dir"]) == -1 and execution is not None:
                 exec_idx, exec_date, raw_exit = execution
                 exit_price = _price_with_bps(raw_exit, slippage_bps, "sell")
@@ -625,7 +625,7 @@ def build_supertrend_history_review(
                 exit_price = None
                 if mode == "close_only":
                     if float(row["_st_dir"]) == -1:
-                        execution = _next_valid_open_after_index(daily, signal_idx)
+                        execution = _next_valid_open_after_index(daily, signal_idx, side="SELL")
                         if execution is not None:
                             exit_idx, exec_date, raw_exit = execution
                             exit_reason = "st_flip"
@@ -644,7 +644,7 @@ def build_supertrend_history_review(
                             slippage_bps=slippage_bps,
                         )
                 elif float(row["_st_dir"]) == -1:
-                    execution = _next_valid_open_after_index(daily, signal_idx)
+                    execution = _next_valid_open_after_index(daily, signal_idx, side="SELL")
                     if execution is not None:
                         exit_idx, exec_date, raw_exit = execution
                         exit_reason = "st_flip"
@@ -897,8 +897,10 @@ def _price_with_bps(price: float, bps: float, direction: str) -> float:
 def _next_valid_open_after_index(
     frame: pd.DataFrame,
     current_idx: int,
+    *,
+    side: str = "BUY",
 ) -> tuple[int, pd.Timestamp, float] | None:
-    result = next_valid_open(frame, after=frame.index[current_idx])
+    result = next_valid_open(frame, after=frame.index[current_idx], side=side)
     if result is None:
         return None
     execution_date, open_price = result
@@ -1051,7 +1053,7 @@ def _pick_exit(
         weekly_window = _weekly_until(df_weekly, df_daily.index[idx])
         if is_weekly_bb:
             bb_exit = evaluate_weekly_bb_exit(weekly_window)
-            execution = _next_valid_open_after_index(df_daily, idx)
+            execution = _next_valid_open_after_index(df_daily, idx, side="SELL")
             if bb_exit.get("exitSignal") and execution is not None:
                 execution_idx, _execution_date, raw_exit = execution
                 return {
@@ -1061,7 +1063,7 @@ def _pick_exit(
                 }
         else:
             exit_signal = _evaluate_resonance_exit_no_position(df_daily.iloc[: idx + 1], weekly_window)
-            execution = _next_valid_open_after_index(df_daily, idx)
+            execution = _next_valid_open_after_index(df_daily, idx, side="SELL")
             if exit_signal.get("exitLevel") == "hard" and execution is not None:
                 execution_idx, _execution_date, raw_exit = execution
                 return {

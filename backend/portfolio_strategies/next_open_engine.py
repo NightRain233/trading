@@ -17,13 +17,14 @@ from .event_ledger import (
     deterministic_key,
     payload_hash,
 )
-from .execution_rules import market_fill_price
+from .execution_rules import market_fill_price, opening_block_reason, opening_allowed
 from .frozen_xquant import normalize_daily
 from .ledger import PortfolioLedger, _utc_now
 from .models import StrategyConfig
 from .next_open_strategies import (
     CASH_SYMBOL,
     CORE_SYMBOLS,
+    core_common_sessions,
     FrozenDecision,
     calculate_core_open_rebalance,
     next_core_valid_open_date,
@@ -527,7 +528,7 @@ class NextOpenPaperEngine:
             other = [row for row in pending if row["order_type"] != "CORE_REBALANCE"]
             work: list[tuple[date, int, float, str, int, object]] = []
             if core_orders:
-                actual = self._candidate_core_execution_date(conn, prices, core_orders)
+                actual = self._candidate_core_execution_date(conn, prices, core_orders, config=config, state=state)
                 work.append((
                     actual or date.max, 0, 0.0, "core",
                     min(int(row["id"]) for row in core_orders), core_orders,
@@ -537,7 +538,7 @@ class NextOpenPaperEngine:
                     order["next_attempt_date"] or order["expected_execution_date"]
                 )
                 if due <= through_date:
-                    actual = self._candidate_single_execution_date(conn, prices, order)
+                    actual = self._candidate_single_execution_date(conn, prices, order, config)
                     work.append((
                         actual or date.max,
                         1 if order["side"] == "SELL" else 2,
@@ -555,6 +556,7 @@ class NextOpenPaperEngine:
                     results.extend(self._reconcile_core_batch(
                         conn, account, config, state, prices,
                         payload, through_date,
+                        not_before=min(_actual, through_date),
                     ))
                     continue
                 result = self._reconcile_single_order(
@@ -574,6 +576,7 @@ class NextOpenPaperEngine:
         conn: sqlite3.Connection,
         prices: Mapping[str, pd.DataFrame],
         orders: list[sqlite3.Row],
+        *, config: StrategyConfig, state: AccountState,
     ) -> date | None:
         signal_date = date.fromisoformat(orders[0]["signal_date"])
         last_attempt = conn.execute(
@@ -584,13 +587,20 @@ class NextOpenPaperEngine:
             tuple(row["id"] for row in orders),
         ).fetchone()[0]
         search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
-        return next_core_valid_open_date(prices, search_after)
+        actual = NextOpenPaperEngine._next_rebalance_open(config, state, prices, search_after)
+        if last_attempt is None:
+            for _ in range(int(config.params.get("execution_delay_sessions", 0))):
+                if actual is None:
+                    break
+                actual = NextOpenPaperEngine._next_rebalance_open(config, state, prices, actual)
+        return actual
 
     @staticmethod
     def _candidate_single_execution_date(
         conn: sqlite3.Connection,
         prices: Mapping[str, pd.DataFrame],
         order: sqlite3.Row,
+        config: StrategyConfig | None = None,
     ) -> date | None:
         frame = prices.get(order["symbol"])
         if frame is None:
@@ -601,7 +611,13 @@ class NextOpenPaperEngine:
         ).fetchone()[0]
         signal_date = date.fromisoformat(order["signal_date"])
         search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
-        return next_valid_open_date(frame, search_after)
+        actual = next_valid_open_date(frame, search_after, side=order["side"])
+        if last_attempt is None:
+            for _ in range(int((config.params if config else {}).get("execution_delay_sessions", 0))):
+                if actual is None:
+                    break
+                actual = next_valid_open_date(frame, actual, side=order["side"])
+        return actual
 
     def _reconcile_core_batch(
         self,
@@ -612,6 +628,7 @@ class NextOpenPaperEngine:
         prices: Mapping[str, pd.DataFrame],
         orders: list[sqlite3.Row],
         through_date: date,
+        *, not_before: date | None = None,
     ) -> list[dict[str, Any]]:
         signal_date = date.fromisoformat(orders[0]["signal_date"])
         expected = date.fromisoformat(orders[0]["expected_execution_date"])
@@ -628,7 +645,12 @@ class NextOpenPaperEngine:
             tuple(row["id"] for row in orders),
         ).fetchone()[0]
         search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
-        actual = next_core_valid_open_date(prices, search_after)
+        actual = self._next_rebalance_open(config, state, prices, search_after, not_before=not_before)
+        if last_attempt is None:
+            for _ in range(int(config.params.get("execution_delay_sessions", 0))):
+                if actual is None:
+                    break
+                actual = self._next_rebalance_open(config, state, prices, actual, not_before=not_before)
         latest_loaded = min(
             normalize_daily(prices[symbol]).index.max().date() for symbol in CORE_SYMBOLS
         )
@@ -653,7 +675,13 @@ class NextOpenPaperEngine:
                     conn=conn,
                 )
 
-        self._rebalance_sleeves(conn, account, config, state, prices, actual, signal_date)
+        if config.params.get("sleeve_execution_contract") == "proportional_next_open_v1":
+            resize_results = self._rebalance_sleeves_at_open(
+                conn, account, config, state, prices, actual, signal_date, orders[0],
+            )
+        else:
+            self._rebalance_sleeves(conn, account, config, state, prices, actual, signal_date)
+            resize_results = []
         opens = {symbol: _price_on_or_before(prices[symbol], actual, "Open")[1] for symbol in CORE_SYMBOLS}
         target_raw = {row["symbol"]: float(row["target_weight"]) for row in orders}
         rebalance = calculate_core_open_rebalance(
@@ -667,6 +695,9 @@ class NextOpenPaperEngine:
         account_open_nav = rebalance.gross_nav + state.cash.get("satellite", 0.0)
         for (sleeve, satellite_symbol), quantity in state.quantities.items():
             if sleeve != "satellite":
+                continue
+            if config.params.get("sleeve_execution_contract") == "proportional_next_open_v1":
+                account_open_nav += quantity * _price_on_or_before(prices[satellite_symbol], actual, "Open")[1]
                 continue
             frame = normalize_daily(prices[satellite_symbol])
             prior = frame.index[frame.index < pd.Timestamp(actual)]
@@ -684,7 +715,7 @@ class NextOpenPaperEngine:
             abs_notional = abs(quantity_delta * opens[symbol])
             deltas[symbol] = (quantity_delta, abs_notional)
             total_abs += abs_notional
-        results = []
+        results = list(resize_results)
         for order in orders:
             symbol = order["symbol"]
             quantity_delta, gross_notional = deltas[symbol]
@@ -713,6 +744,108 @@ class NextOpenPaperEngine:
             conn, account, config, actual, state, prices,
             snapshot_reason="core_next_open_rebalance",
         )
+        return results
+
+    @staticmethod
+    def _next_rebalance_open(config, state, prices, after, *, not_before=None):
+        if config.params.get("sleeve_execution_contract") != "proportional_next_open_v1":
+            return next_core_valid_open_date(prices, after)
+        sessions = core_common_sessions(prices, require_valid_open=True)
+        sessions = sessions[sessions > pd.Timestamp(after)]
+        if not_before is not None:
+            sessions = sessions[sessions >= pd.Timestamp(not_before)]
+        # Atomic budget reset: every held satellite must have an executable
+        # opening quote too. Never resize a halted asset at an earlier Close.
+        for symbol in state.held_symbols("satellite"):
+            if symbol not in prices:
+                return None
+            frame = normalize_daily(prices[symbol])
+            sessions = sessions.intersection(frame.index[opening_allowed(frame)])
+        return sessions[0].date() if len(sessions) else None
+
+    def _rebalance_sleeves_at_open(
+        self, conn, account, config, state, prices, execution_date, signal_date, parent_order,
+    ):
+        """Execute the frozen proportional allocation intent using opening facts.
+
+        Quantity changes are children of the core allocation decision. Cash
+        transfers carry no trading cost; explicit resize fills carry the frozen
+        10 bps all-in resize cost. Core rebalance costs are charged afterwards.
+        """
+        opening_values = {}
+        opens = {}
+        for key, quantity in state.quantities.items():
+            symbol = key[1]
+            price_date, price = _price_on_or_before(prices[symbol], execution_date, "Open")
+            if price_date != execution_date:
+                raise ValueError(f"Missing exact resize Open for {symbol}")
+            opens[symbol] = price
+            opening_values[key] = quantity * price
+        total = sum(state.cash.values()) + sum(opening_values.values())
+        satellite_gross = sum(v for (sleeve, _), v in opening_values.items() if sleeve == "satellite")
+        satellite_value = satellite_gross + state.cash.get("satellite", 0.0)
+        weight = float(config.params["satellite_allocation"])
+        cost_rate = float(config.params["sleeve_rebalance_cost_bps"]) / 10_000.0
+        ratio = weight * total / satellite_value if satellite_value > 0 else 0.0
+        # Fixed point: restore 90/10 after the resize fills' costs, without
+        # creating capital. This does not include subsequent core turnover cost.
+        for _ in range(100):
+            cost = abs(ratio - 1.0) * satellite_gross * cost_rate
+            updated = weight * (total - cost) / satellite_value if satellite_value > 0 else 0.0
+            if abs(updated - ratio) <= 1e-14:
+                ratio = updated
+                break
+            ratio = updated
+        else:
+            raise ValueError("Sleeve resize cost solver did not converge")
+        desired_cash = state.cash.get("satellite", 0.0) * ratio if satellite_value > 0 else weight * total
+        results = []
+        for key, quantity in sorted(list(state.quantities.items())):
+            sleeve, symbol = key
+            if sleeve != "satellite":
+                continue
+            delta = quantity * (ratio - 1.0)
+            if abs(delta) <= 1e-12:
+                continue
+            opening = opens[symbol]
+            notional = abs(delta * opening)
+            commission = notional * cost_rate
+            side = "BUY" if delta > 0 else "SELL"
+            order = self.events.create_order(
+                account["id"], config, decision_run_id=parent_order["decision_run_id"],
+                decision_item_id=None,
+                order_key=deterministic_key(config.strategy_id, config.version,
+                    parent_order["decision_run_id"], "SLEEVE_RESIZE", symbol),
+                sleeve="satellite", symbol=symbol, market=config.asset(symbol).market,
+                order_type="SLEEVE_RESIZE", side=side, signal_date=signal_date,
+                expected_execution_date=date.fromisoformat(parent_order["expected_execution_date"]),
+                target_weight=None, requested_weight_delta=None, requested_quantity=None,
+                conn=conn,
+            )
+            execution = self.events.record_execution(
+                order["id"], signal_date=signal_date,
+                expected_execution_date=date.fromisoformat(parent_order["expected_execution_date"]),
+                actual_execution_date=execution_date, actual_open=opening, execution_price=opening,
+                side=side, quantity_delta=delta, weight_delta=delta * opening / total,
+                gross_notional=notional, commission=commission, slippage=0.0, conn=conn,
+            )
+            state.quantities[key] = quantity + delta
+            state.cash["satellite"] = state.cash.get("satellite", 0.0) - delta * opening - commission
+            results.append(dict(execution))
+        transfer = desired_cash - state.cash.get("satellite", 0.0)
+        state.cash["satellite"] = desired_cash
+        state.cash["core"] = state.cash.get("core", 0.0) - transfer
+        if abs(transfer) > 1e-10:
+            from_sleeve, to_sleeve = ("core", "satellite") if transfer > 0 else ("satellite", "core")
+            conn.execute(
+                """INSERT INTO sleeve_transfer_events (
+                    account_id, signal_date, execution_date, from_sleeve, to_sleeve,
+                    gross_notional, cost, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ON CONFLICT (account_id, signal_date, from_sleeve, to_sleeve) DO NOTHING""",
+                (account["id"], signal_date.isoformat(), execution_date.isoformat(),
+                 from_sleeve, to_sleeve, abs(transfer), "Cash transfer; resize costs booked in fills", _utc_now()),
+            )
         return results
 
     def _rebalance_sleeves(
@@ -810,14 +943,22 @@ class NextOpenPaperEngine:
             (order["id"],),
         ).fetchone()[0]
         search_after = date.fromisoformat(last_attempt) if last_attempt else signal_date
-        actual = next_valid_open_date(frame, search_after) if frame is not None else None
+        actual = next_valid_open_date(frame, search_after, side=order["side"]) if frame is not None else None
         if frame is None or normalize_daily(frame).index.max().date() < due:
             return {"orderId": order["id"], "status": "PENDING"}
+        normalized = normalize_daily(frame)
+        due_row = normalized.loc[pd.Timestamp(due)] if pd.Timestamp(due) in normalized.index else None
+        blocked_reason = (
+            opening_block_reason(due_row, side=order["side"])
+            if due_row is not None else None
+        )
+        if blocked_reason == "INVALID_OPEN":
+            blocked_reason = None  # Preserve the existing missing-Open reason codes.
         if actual is None or actual > through_date:
             next_attempt = expected_next_market_date(symbol, through_date)
             self.events.record_order_delay(
                 order["id"], attempted_date=due,
-                reason="VALID_OPEN_NOT_AVAILABLE", observed_open=None,
+                reason=blocked_reason or "VALID_OPEN_NOT_AVAILABLE", observed_open=None,
                 next_expected_execution_date=next_attempt, conn=conn,
             )
             return {"orderId": order["id"], "status": "WAITING_OPEN"}
@@ -825,7 +966,7 @@ class NextOpenPaperEngine:
         if actual > due:
             self.events.record_order_delay(
                 order["id"], attempted_date=due,
-                reason="MISSING_OR_INVALID_OPEN", observed_open=None,
+                reason=blocked_reason or "MISSING_OR_INVALID_OPEN", observed_open=None,
                 next_expected_execution_date=actual, conn=conn,
             )
         sleeve = order["sleeve"]

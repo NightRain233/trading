@@ -270,7 +270,7 @@ def test_stale_ma_reference_takes_precedence_over_missing_fx(monkeypatch):
 def test_primary_strategy_uses_a_new_versioned_signal_contract():
     config = get_strategy("core90_ma200_bull10")
 
-    assert config.version == "2.0.0"
+    assert config.version == "2.1.0"
     assert config.params["signal_contract_version"] == BULL_FLIP_SIGNAL_CONTRACT_VERSION
     assert "policy_version" not in config.params
 

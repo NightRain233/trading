@@ -87,7 +87,8 @@ def test_frozen_next_open_registry_configuration():
     assert risk_parity.params["rebalance_sessions"] == 10
     assert risk_parity.params["schedule_anchor_signal_date"] == "2026-07-01"
     assert risk_parity.params["one_way_cost_bps"] == 10.0
-    assert bull.version == "2.0.0"
+    assert bull.version == "2.1.0"
+    assert bull.params["sleeve_execution_contract"] == "proportional_next_open_v1"
     assert bull.execution == "next_open"
     assert bull.params["core_allocation"] == 0.90
     assert bull.params["satellite_allocation"] == 0.10

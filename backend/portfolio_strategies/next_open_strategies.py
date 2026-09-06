@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from .event_ledger import payload_hash
+from .execution_rules import next_valid_open, opening_allowed, Side
 from .frozen_xquant import FrozenUniverse, frozen_universe, normalize_daily
 from .indicators import inverse_volatility_weights, supertrend
 from .market_freshness import assess_freshness
@@ -130,22 +131,19 @@ def core_common_sessions(
         close = pd.to_numeric(frame.reindex(common)["Close"], errors="coerce")
         valid &= close.notna() & np.isfinite(close) & close.gt(0)
         if require_valid_open:
-            open_ = pd.to_numeric(frame.reindex(common)["Open"], errors="coerce")
-            valid &= open_.notna() & np.isfinite(open_) & open_.gt(0)
+            valid &= opening_allowed(frame.reindex(common))
     return common[valid.to_numpy()]
 
 
 def next_valid_open_date(
     frame: pd.DataFrame,
     after: date | pd.Timestamp,
+    *,
+    side: Side | None = None,
 ) -> date | None:
     normalized = normalize_daily(frame)
-    later = normalized.index[normalized.index > pd.Timestamp(after).normalize()]
-    if later.empty or "Open" not in normalized:
-        return None
-    opens = pd.to_numeric(normalized.loc[later, "Open"], errors="coerce")
-    valid = opens.notna() & np.isfinite(opens) & opens.gt(0)
-    return opens.index[valid][0].date() if valid.any() else None
+    result = next_valid_open(normalized, after=pd.Timestamp(after).normalize(), side=side)
+    return result[0].date() if result else None
 
 
 def next_core_valid_open_date(

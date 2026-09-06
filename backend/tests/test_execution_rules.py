@@ -29,3 +29,17 @@ def test_market_and_stop_fills_apply_one_shared_adverse_price_rule():
     assert preexisting_long_stop_fill(
         open_price=100.0, stop_price=95.0, slippage_bps=10,
     ) == 94.905
+
+
+def test_opening_constraints_are_side_specific_and_never_use_day_close():
+    frame = pd.DataFrame({
+        'Open': [float('inf'), 100., 101., 102., 103.],
+        'OpenSuspended': [False, True, False, False, False],
+        'BuyOpenAllowed': [True, True, False, None, True],
+        'SellOpenAllowed': [True] * 5,
+        'Close': [1., 1., 1., 1., 1.], 'Volume': [0.] * 5,
+    }, index=pd.date_range('2025-01-01', periods=5))
+    assert next_valid_open(frame, after='2024-12-31', side='BUY') == (pd.Timestamp('2025-01-05'), 103.)
+    assert next_valid_open(frame, after='2024-12-31', side='SELL') == (pd.Timestamp('2025-01-03'), 101.)
+    frame['Close'] = 1_000_000.
+    assert next_valid_open(frame, after='2024-12-31', side='BUY') == (pd.Timestamp('2025-01-05'), 103.)
