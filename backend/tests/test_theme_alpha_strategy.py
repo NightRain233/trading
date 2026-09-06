@@ -143,6 +143,47 @@ def test_theme_alpha_is_ready_on_shifted_bimonthly_signal_date():
     }
 
 
+def test_theme_alpha_signal_is_causal_when_future_closes_change():
+    market = _theme_market()
+    formal_date = pd.Timestamp("2026-06-25")
+
+    baseline = calculate_theme_alpha(
+        get_strategy("theme_alpha"),
+        market,
+        formal_date.date(),
+    )
+
+    future_date = pd.Timestamp("2026-06-26")
+    future_close = market.close.loc[future_date].copy()
+    future_close.loc[:] = future_close * 100.0
+    extended_close = pd.concat(
+        [market.close.loc[:formal_date], future_close.to_frame().T],
+    )
+    extended = PortfolioMarketData(
+        open=extended_close.copy(),
+        high=extended_close.copy(),
+        low=extended_close.copy(),
+        close=extended_close,
+        sessions=extended_close.index,
+        market_data_date=future_date.date(),
+        diagnostics=(),
+    )
+
+    with_future = calculate_theme_alpha(
+        get_strategy("theme_alpha"),
+        extended,
+        formal_date.date(),
+    )
+
+    assert with_future.signal_date == baseline.signal_date == formal_date.date()
+    assert with_future.observation.values["selected_lvt"] == baseline.observation.values[
+        "selected_lvt"
+    ]
+    assert _weights(with_future.target_weights) == pytest.approx(
+        _weights(baseline.target_weights),
+    )
+
+
 def test_core_defense_moves_each_failed_equity_weight_to_cash_independently():
     core = {
         "510300.SS": 0.45,

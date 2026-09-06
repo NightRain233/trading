@@ -215,6 +215,110 @@ def test_pending_signal_executes_once_at_next_complete_close_with_costs(ledger):
     assert ledger.count_rows("nav_snapshots") == 2
 
 
+def test_theme_alpha_next_close_does_not_fill_on_signal_close(ledger):
+    config = get_strategy("theme_alpha")
+    engine = PortfolioPaperEngine(ledger)
+    valuation_date = date(2026, 6, 25)
+    _bootstrap(
+        engine,
+        config,
+        valuation_date=valuation_date,
+        weights={"510300.SS": 0.4, "CASH": 0.6},
+        prices={"510300.SS": 4.0},
+    )
+    signal = _calculation(
+        config,
+        signal_date=valuation_date,
+        market_data_date=valuation_date,
+        weights={"510300.SS": 0.55, "CASH": 0.45},
+    )
+    engine.queue_signal(config, signal)
+
+    still_pending = engine.reconcile(
+        config,
+        _market(
+            config,
+            {valuation_date: {"510300.SS": 4.0}},
+        ),
+    )
+    executed = engine.reconcile(
+        config,
+        _market(
+            config,
+            {
+                valuation_date: {"510300.SS": 4.0},
+                date(2026, 6, 26): {"510300.SS": 4.2},
+            },
+        ),
+    )
+    trade = _rows(ledger, "SELECT * FROM paper_trades")[0]
+    positions = _rows(
+        ledger,
+        """
+        SELECT symbol, quantity, price, value
+        FROM position_snapshots
+        WHERE valuation_date = '2026-06-26'
+        ORDER BY symbol
+        """,
+    )
+    nav = _rows(
+        ledger,
+        "SELECT * FROM nav_snapshots WHERE valuation_date = '2026-06-26'",
+    )[0]
+    initial_quantity = 10_000.0
+    held = next(row for row in positions if row["symbol"] == "510300.SS")
+    cash = next(row for row in positions if row["symbol"] == "CASH")
+
+    assert still_pending["status"] == "pending"
+    assert executed["status"] == "executed"
+    assert executed["execution_date"] == "2026-06-26"
+    assert trade["price"] == pytest.approx(4.2)
+    assert held["quantity"] == pytest.approx(initial_quantity + trade["quantity_delta"])
+    assert sum(row["value"] for row in positions) == pytest.approx(nav["net_nav"])
+    assert cash["quantity"] == pytest.approx(
+        60_000.0
+        - trade["gross_notional"]
+        - trade["fees"]
+        - trade["slippage"],
+    )
+
+
+def test_missing_execution_price_keeps_theme_alpha_pending_without_fill(ledger):
+    config = get_strategy("theme_alpha")
+    engine = PortfolioPaperEngine(ledger)
+    valuation_date = date(2026, 6, 25)
+    _bootstrap(
+        engine,
+        config,
+        valuation_date=valuation_date,
+        weights={"510300.SS": 0.4, "CASH": 0.6},
+        prices={"510300.SS": 4.0},
+    )
+    signal = _calculation(
+        config,
+        signal_date=valuation_date,
+        market_data_date=valuation_date,
+        weights={"510300.SS": 0.55, "CASH": 0.45},
+    )
+    engine.queue_signal(config, signal)
+    market = _market(
+        config,
+        {
+            valuation_date: {"510300.SS": 4.0},
+            date(2026, 6, 26): {"510300.SS": 4.2},
+        },
+    )
+    market.close.loc[pd.Timestamp("2026-06-26"), "510300.SS"] = float("nan")
+
+    with pytest.raises(ValueError, match="Invalid close"):
+        engine.reconcile(config, market)
+
+    pending = _rows(ledger, "SELECT * FROM rebalance_events")[0]
+    assert pending["status"] == "pending"
+    assert ledger.count_rows("paper_trades") == 0
+    assert ledger.count_rows("nav_snapshots") == 1
+
+
 def test_btc_threshold_skips_small_change_but_switch_is_always_recorded(ledger):
     config = get_strategy("btc_supertrend_satellite")
     engine = PortfolioPaperEngine(ledger)
