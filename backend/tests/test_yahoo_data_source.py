@@ -7,7 +7,37 @@ import pytest
 import analysis
 import analysis_cache
 import analysis_data
-from data_source_guard import ProviderDisabledError
+from data_source_guard import (
+    ProviderConfig, ProviderDisabledError, ProviderGuard, ProviderRequestError,
+)
+
+
+@pytest.mark.parametrize("downloaded", [None, pd.DataFrame(), pd.DataFrame({"Close": [float("nan")]})])
+def test_empty_yahoo_history_is_failure_not_success(tmp_path, downloaded):
+    guard = ProviderGuard("yahoo", ProviderConfig(max_retries=0), state_dir=tmp_path)
+    with patch.object(analysis_data, "yahoo_guard", guard), patch.object(analysis_data.yf, "Ticker") as ticker:
+        ticker.return_value.history.return_value = downloaded
+        with pytest.raises(ProviderRequestError):
+            analysis_data._fetch_new_data("SPY", None, datetime(2026, 9, 10))
+    assert guard.status()["lastSuccessAt"] is None
+    assert guard.status()["consecutiveFailures"] == 1
+    # A failed request must not suppress the next attempt as a recent success.
+    with patch.object(analysis_data, "yahoo_guard", guard), patch.object(analysis_data.yf, "Ticker") as ticker:
+        ticker.return_value.history.return_value = _ohlcv(["2026-09-09"], [100])
+        assert not analysis_data._fetch_new_data("SPY", None, datetime(2026, 9, 10)).empty
+    assert guard.status()["lastSuccessAt"] is not None
+    assert guard.status()["consecutiveFailures"] == 0
+
+
+@pytest.mark.parametrize("downloaded", [None, pd.DataFrame(), pd.DataFrame({"Close": [float("nan")]})])
+def test_empty_yahoo_batch_does_not_record_success(tmp_path, downloaded):
+    guard = ProviderGuard("yahoo", ProviderConfig(max_retries=0), state_dir=tmp_path / "guard")
+    with analysis._memory_cache_lock:
+        analysis._memory_cache.pop("SPY", None)
+    with patch.object(analysis, "DATA_DIR", str(tmp_path)), patch.object(analysis, "yahoo_guard", guard), patch.object(analysis.yf, "download", return_value=downloaded):
+        analysis.batch_fetch_and_update(["SPY"])
+    assert guard.status()["lastSuccessAt"] is None
+    assert guard.status()["consecutiveFailures"] == 1
 
 
 def _ohlcv(index, close):

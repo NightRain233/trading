@@ -608,6 +608,14 @@ def _fetch_a_share_refresh(
     )
 
 
+def _require_yahoo_rows(frame: pd.DataFrame | None) -> pd.DataFrame:
+    # yfinance can swallow transport errors and return an empty/all-NaN frame.
+    # Validate inside ProviderGuard before it records a successful request.
+    if frame is None or frame.empty or frame.dropna(how="all").empty:
+        raise MarketDataUnavailableError("Yahoo returned no usable rows", provider="yahoo")
+    return frame
+
+
 def _fetch_new_data(
     symbol: str,
     last_update: Optional[datetime],
@@ -629,17 +637,17 @@ def _fetch_new_data(
         with global_download_lock:
             ticker = yf.Ticker(symbol)
             if last_update is not None:
-                return ticker.history(
+                return _require_yahoo_rows(ticker.history(
                     start=last_update,
                     end=now,
                     interval="1d",
-                )
+                ))
             fetch_start = now - timedelta(days=DATA_RETENTION_DAYS)
-            return ticker.history(
+            return _require_yahoo_rows(ticker.history(
                 start=fetch_start,
                 end=now,
                 interval="1d",
-            )
+            ))
 
     new_df = yahoo_guard.call(symbol, download_yahoo_history)
 

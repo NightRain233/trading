@@ -41,7 +41,7 @@ from analysis_data import (  # noqa: F401
     _a_share_needs_initial_full_refresh, _read_data_source_metadata,
     _has_current_data_source, _write_data_source_metadata,
     AShareRefreshResult, A_SHARE_DATA_SOURCE_VERSION, yahoo_guard,
-    get_data_source_status,
+    get_data_source_status, _require_yahoo_rows,
     _calculate_daily_indicators, _calculate_weekly_indicators, fetch_stock_data,
 )
 from analysis_strategy import (  # noqa: F401
@@ -365,14 +365,14 @@ def batch_fetch_and_update(symbols: list) -> dict:
         try:
             def download_yahoo_batch():
                 with global_download_lock:
-                    return yf.download(
+                    return _require_yahoo_rows(yf.download(
                         yahoo_symbols,
                         start=fetch_start,
                         end=fetch_end,
                         interval="1d",
                         group_by="ticker",
                         threads=True,
-                    )
+                    ))
 
             start_time = time.time()
             logger.info(f"开始 Yahoo 下载 {len(yahoo_symbols)} 只股票: {yahoo_symbols}")
