@@ -11,8 +11,8 @@ from portfolio_strategies.registry import (
 )
 
 
-def test_long_sample_convergence_exposes_one_primary_strategy():
-    assert PRIMARY_STRATEGY_IDS == ("core90_ma200_bull10",)
+def test_btc_satellite_is_the_one_primary_strategy():
+    assert PRIMARY_STRATEGY_IDS == ("btc_supertrend_satellite",)
 
 
 def test_registry_exposes_six_official_paper_strategies():

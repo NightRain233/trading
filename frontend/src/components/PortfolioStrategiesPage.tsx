@@ -18,7 +18,7 @@ import {
 import { buildAssetRows, fmtDate, fmtNum, fmtPct, stateTone } from '../portfolioStrategies.js';
 
 const PRIMARY_ORDER = [
-  'core90_ma200_bull10',
+  'btc_supertrend_satellite',
 ];
 
 const EMPTY_OPERATIONS: PortfolioSnapshot['operations'] = {
@@ -66,6 +66,35 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
         tone === 'warn' && 'text-amber-300',
       )}>{value}</div>
     </div>
+  );
+}
+
+function BtcSupertrendCard({ snapshot }: { snapshot: PortfolioSnapshot }) {
+  const values = snapshot.observation?.values || {};
+  const latestOn = Boolean(values.supertrend_on);
+  const formalOn = Boolean(values.formal_supertrend_on);
+  const close = Number(values.btc_close);
+  const line = Number(values.supertrend_line);
+  const distance = close ? (close - line) / close : null;
+  return (
+    <Card className="p-5">
+      <Eyebrow>BTC satellite switch</Eyebrow>
+      <h3 className="mt-1 text-sm font-semibold text-zinc-200">BTC 日线 SuperTrend</h3>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Metric label="日线 ST" value={latestOn ? '向上' : '向下'} tone={latestOn ? 'good' : 'bad'} />
+        <Metric label="距 ST 线" value={fmtPct(distance, 1)} tone={latestOn ? 'good' : 'bad'} />
+      </div>
+      <dl className="mt-4 space-y-2 text-xs">
+        <div className="flex justify-between gap-4"><dt className="text-zinc-600">BTC 收盘 / ST 线</dt><dd className="font-mono text-zinc-300">{fmtNum(close, 0)} / {fmtNum(line, 0)}</dd></div>
+        <div className="flex justify-between gap-4"><dt className="text-zinc-600">正式开关（{fmtDate(snapshot.dates.signalDate)}）</dt><dd className={clsx('font-mono', formalOn ? 'text-emerald-400' : 'text-zinc-300')}>{formalOn ? '持有 BTC' : '现金'}</dd></div>
+      </dl>
+      {latestOn !== formalOn && (
+        <div className="mt-4 flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-300">
+          <AlertTriangle size={14} strokeWidth={1.5} className="mt-0.5 shrink-0" />
+          <span>日线 ST 已转{latestOn ? '向上' : '向下'}，将在 {fmtDate(snapshot.dates.nextCheck)} 检查时执行。</span>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -279,7 +308,7 @@ export default function PortfolioStrategiesPage() {
           </div>
 
           <aside className="space-y-4">
-            <Card className="p-5">
+            {'supertrend_on' in (snapshot.observation?.values || {}) ? <BtcSupertrendCard snapshot={snapshot} /> : <Card className="p-5">
               <Eyebrow>Bull flip gate</Eyebrow>
               <h3 className="mt-1 text-sm font-semibold text-zinc-200">今日候选与 MA200</h3>
               <div className="mt-4 grid grid-cols-3 gap-3"><Metric label="候选" value={String(operations.bullCandidates.length)} /><Metric label="允许" value={String(operations.ma200AllowedCount)} tone="good" /><Metric label="拦截" value={String(operations.ma200BlockedCount)} tone={operations.ma200BlockedCount ? 'warn' : undefined} /></div>
@@ -292,7 +321,7 @@ export default function PortfolioStrategiesPage() {
                 ))}
                 {!operations.bullCandidates.length && <div className="py-3 text-xs text-zinc-600">今日没有 bull flip 候选</div>}
               </div>
-            </Card>
+            </Card>}
 
             <Card className="p-5">
               <Eyebrow>Audit status</Eyebrow>

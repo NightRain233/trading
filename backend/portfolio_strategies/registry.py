@@ -16,9 +16,10 @@ class ComparisonStrategyError(ValueError):
     pass
 
 
-# Long-sample convergence decision: this is the sole user-facing primary.
-# Other paper accounts continue accumulating forward comparison records.
-PRIMARY_STRATEGY_IDS = ("core90_ma200_bull10",)
+# 2026-10-18 decision: the three-asset core with the BTC 7.5% SuperTrend
+# satellite is the sole user-facing primary. Core90 + MA200 Bull10 and the
+# other paper accounts keep accumulating forward comparison records.
+PRIMARY_STRATEGY_IDS = ("btc_supertrend_satellite",)
 
 
 CORE_ASSETS = (

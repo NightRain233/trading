@@ -2,7 +2,7 @@
 """Fetch SuperTrend alerts and portfolio strategy snapshots for OpenClaw daily briefs.
 
 Usage:
-  # Full daily brief (SuperTrend + portfolio strategies)
+  # Full daily brief (primary portfolio first, then SuperTrend study scan)
   python scripts/openclaw_supertrend_alerts.py --mode daily-brief
 
   # SuperTrend only, flat list
@@ -89,7 +89,7 @@ def _priority_allowed(item: dict[str, Any], min_priority: str) -> bool:
 # ---------------------------------------------------------------------------
 
 PRIMARY_PORTFOLIO_ORDER = [
-    "core90_ma200_bull10",
+    "btc_supertrend_satellite",
 ]
 
 
@@ -423,6 +423,36 @@ def _append_section(lines: list[str], title: str, items: list[dict[str, Any]], *
 # ---------------------------------------------------------------------------
 
 
+def _render_btc_supertrend(snapshot: dict[str, Any]) -> list[str]:
+    """Render the BTC daily SuperTrend switch; empty for non-BTC strategies."""
+    values = (snapshot.get("observation") or {}).get("values") or {}
+    if "supertrend_on" not in values:
+        return []
+
+    latest_on = bool(values.get("supertrend_on"))
+    close = values.get("btc_close")
+    line = values.get("supertrend_line")
+    try:
+        distance = (float(close) - float(line)) / float(close)
+    except (TypeError, ValueError, ZeroDivisionError):
+        distance = None
+    direction = "向上" if latest_on else "向下"
+    detail = f"收盘 {_fmt_number(close, 0)}，ST 线 {_fmt_number(line, 0)}"
+    if distance is not None:
+        detail += f"，距 ST 线 {_fmt_pct(distance, 1)}"
+    lines = [f"- BTC 日线 ST: {direction}（{detail}）"]
+
+    if "formal_supertrend_on" in values:
+        formal_on = bool(values.get("formal_supertrend_on"))
+        signal_date = (snapshot.get("dates") or {}).get("signalDate") or "?"
+        position = "持有 BTC" if formal_on else "BTC 仓位为现金"
+        lines.append(f"- BTC 正式开关（{signal_date} 检查）: {position}")
+        if formal_on != latest_on:
+            next_check = (snapshot.get("dates") or {}).get("nextCheck") or "下次检查"
+            lines.append(f"- ⚠️ 日线 ST 已转{direction}，将在 {next_check} 检查时执行")
+    return lines
+
+
 def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
     """Render a single portfolio strategy as a compact Markdown block."""
     name = snapshot.get("_displayName", snapshot.get("strategyId", "Unknown"))
@@ -489,6 +519,8 @@ def _render_portfolio_strategy(snapshot: dict[str, Any]) -> list[str]:
                 )
                 lines.append(f"- 目标权重: {pos_str}")
 
+    lines.extend(_render_btc_supertrend(snapshot))
+
     # Observation / signal reason
     obs = snapshot.get("observation", {})
     if obs and obs.get("reason"):
@@ -537,7 +569,7 @@ def render_portfolio_summary_markdown(strategies: list[dict[str, Any]]) -> str:
     if not strategies:
         return ""
 
-    lines = ["", "## 组合策略纸面执行"]
+    lines = ["", "## 主策略纸面执行"]
 
     active_orders = []
     waiting_orders = []
@@ -600,12 +632,6 @@ def render_daily_brief_markdown(
         f"# {title}",
         "",
         f"**{now} Asia/Shanghai** | 数据: {freshness['status']} | 扫描: {freshness['total']} 个标的",
-        "",
-        f"| 正式可执行 | 刚翻多观察 | 预备观察 | 持仓风控 | 趋势延续 |",
-        f"|---------|---------|---------|---------|---------|",
-        f"| **{len(brief['new_entries'])}** | {len(brief['bull_flip_watch'])} | {len(brief['prepare_watch'])} | {len(brief['position_management'])} | {len(brief['background_trends'])} |",
-        "",
-        "> 使用原则：只有正式 decision=buy 且当前 executionStatus=executable 才是可执行；bull_flip 未通过正式门槛时只作观察。",
     ]
 
     # Data freshness warning
@@ -635,6 +661,23 @@ def render_daily_brief_markdown(
             lines.append("> 🔴 组合刷新失败: " + " / ".join(failures))
         if stale_markets:
             lines.append("> ⏳ 尚未确认完成日线的市场: " + " / ".join(stale_markets))
+
+    # The primary portfolio comes first; the scan below is study material.
+    if portfolio_strategies is not None:
+        lines.append(render_portfolio_summary_markdown(portfolio_strategies))
+
+    lines.extend([
+        "",
+        "## 学习观察：SuperTrend 扫描",
+        "",
+        "> 只用于学习账户和看盘，不影响主策略。",
+        "",
+        f"| 正式可执行 | 刚翻多观察 | 预备观察 | 持仓风控 | 趋势延续 |",
+        f"|---------|---------|---------|---------|---------|",
+        f"| **{len(brief['new_entries'])}** | {len(brief['bull_flip_watch'])} | {len(brief['prepare_watch'])} | {len(brief['position_management'])} | {len(brief['background_trends'])} |",
+        "",
+        "> 使用原则：只有正式 decision=buy 且当前 executionStatus=executable 才是可执行；bull_flip 未通过正式门槛时只作观察。",
+    ])
 
     # SuperTrend sections
     _append_section(
@@ -678,10 +721,6 @@ def render_daily_brief_markdown(
         brief["other_alerts"],
         empty="暂无其他可操作提醒。",
     )
-
-    # Portfolio strategies
-    if portfolio_strategies is not None:
-        lines.append(render_portfolio_summary_markdown(portfolio_strategies))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -766,7 +805,7 @@ def main() -> int:
         default=True,
         help="Include portfolio strategy snapshots in the daily brief.",
     )
-    parser.add_argument("--title", default="SuperTrend 每日扫描", help="Markdown report title.")
+    parser.add_argument("--title", default="每日组合与看盘", help="Markdown report title.")
     args = parser.parse_args()
 
     # Fetch SuperTrend

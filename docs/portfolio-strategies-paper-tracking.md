@@ -43,11 +43,28 @@ Click "刷新当前策略" to reconcile new market data and pending paper orders
 - LVT: MA60 + 63-session momentum eligible → lowest-vol Top3
 - Threshold: 2% turnover; 15% max per-asset change
 
+### Primary Strategy Change (2026-10-18)
+
+The primary paper strategy is now `btc_supertrend_satellite`: the three-asset
+inverse-volatility core with a BTC 7.5% daily SuperTrend satellite. Daily
+surfaces (push brief, skill, frontend) expand only this account.
+
+`core90_ma200_bull10` stays active as a forward comparison. Its MA200 gate only
+pauses new bull-sleeve entries, so roughly 90% of the account is the same
+three-asset core with no exit. Its long-sample result (about 14.7% CAGR,
+-12.7% drawdown) was close to the pure core, while the bull sleeve rotates up to
+ten ~1% positions across 81 instruments. The BTC satellite keeps a comparable
+core and a single, explicit on/off switch, which is much simpler to execute.
+
+The BTC account keeps its existing next-close ledger and forward-adjusted core
+pricing; it was not re-bootstrapped. See the xquant strategy health check and
+clock-correction review for the current evidence and limits of the BTC result.
+
 ### Frozen xquant Next-Open Strategies
 
-The primary paper strategy is `core90_ma200_bull10`. The other paper accounts
+Until 2026-10-18 the primary paper strategy was `core90_ma200_bull10`. The other paper accounts
 remain active as forward comparisons, but they are not co-equal production
-candidates. This convergence is based on the frozen 2015-01-01 through
+candidates. That convergence was based on the frozen 2015-01-01 through
 2026-07-10 research window: the Core90 + MA200 Bull10 structure reduced the
 historical maximum drawdown to about 13.49%, shortened maximum recovery to 283
 days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
@@ -98,7 +115,7 @@ Errors: 404 (unknown ID), 409 (research-only comparison operation), 400 (invalid
 - `benchmark`: normalized NAV and return difference against `risk_parity_core_next_open`, calculated only when both accounts have the exact same valuation date. Otherwise `comparisonStatus=BENCHMARK_DATE_MISMATCH` and relative values are null.
 - `dataQualityEventCount`: append-only correction/data-quality audit count.
 
-The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only `core90_ma200_bull10` as the primary strategy; the other paper accounts remain in the comparison area and continue accumulating forward records.
+The strategy list also exposes `presentationGroup`, `isPrimary`, `benchmarkStrategyId`, `activationDate`, and `accountOrigin`. Daily surfaces expand only `btc_supertrend_satellite` as the primary strategy; the other paper accounts remain in the comparison area and continue accumulating forward records.
 
 ### Explicit activation
 
@@ -147,7 +164,7 @@ WAL mode, foreign keys, busy timeout 5s. `BEGIN IMMEDIATE` for writes. Idempoten
 
 ## Daily Refresh
 
-The maintained runner updates data, refreshes all four tracked paper accounts independently, then renders the read-only OpenClaw report with only `core90_ma200_bull10` expanded as primary:
+The maintained runner updates data, refreshes all four tracked paper accounts independently, then renders the read-only daily report with only `btc_supertrend_satellite` expanded as primary:
 
 ```bash
 scripts/run_portfolio_daily.sh

@@ -42,7 +42,9 @@ def test_strategy_listing_has_one_primary_and_keeps_existing_paper_comparisons(t
     primary = [item["strategyId"] for item in strategies if item["isPrimary"]]
     by_id = {item["strategyId"]: item for item in strategies}
 
-    assert primary == ["core90_ma200_bull10"]
+    assert primary == ["btc_supertrend_satellite"]
+    assert by_id["core90_ma200_bull10"]["paperEnabled"] is True
+    assert by_id["core90_ma200_bull10"]["presentationGroup"] == "comparison"
     assert by_id["risk_parity_core_next_open"]["paperEnabled"] is True
     assert by_id["risk_parity_core_next_open"]["presentationGroup"] == "comparison"
     assert by_id["theme_alpha"]["paperEnabled"] is True

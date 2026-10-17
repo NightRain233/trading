@@ -171,12 +171,13 @@ def test_daily_brief_markdown_explains_prepare_watch_is_not_a_buy_signal():
     assert "## 👀 预备观察：周多日空，等待日线翻多" in markdown
 
 
-def test_fetch_portfolio_strategies_keeps_only_converged_primary(monkeypatch):
+def test_fetch_portfolio_strategies_keeps_only_btc_satellite_primary(monkeypatch):
     strategies = [
         {"strategyId": "theme_alpha", "displayName": "Theme", "paperEnabled": True, "isPrimary": True},
         {"strategyId": "core90_raw_bull10", "displayName": "Raw", "paperEnabled": True, "isPrimary": False},
         {"strategyId": "risk_parity_core_next_open", "displayName": "RP", "paperEnabled": True, "isPrimary": True},
-        {"strategyId": "core90_ma200_bull10", "displayName": "Core90", "paperEnabled": True, "isPrimary": True},
+        {"strategyId": "core90_ma200_bull10", "displayName": "Core90", "paperEnabled": True, "isPrimary": False},
+        {"strategyId": "btc_supertrend_satellite", "displayName": "BTC", "paperEnabled": True, "isPrimary": True},
     ]
 
     def fake_get(_base, path, _timeout):
@@ -188,7 +189,7 @@ def test_fetch_portfolio_strategies_keeps_only_converged_primary(monkeypatch):
 
     result = openclaw_supertrend_alerts.fetch_portfolio_strategies("http://example.test/api", 1.0)
 
-    assert [item["strategyId"] for item in result] == ["core90_ma200_bull10"]
+    assert [item["strategyId"] for item in result] == ["btc_supertrend_satellite"]
 
 
 def test_portfolio_markdown_prioritizes_orders_and_reports_policy_audit():
@@ -225,6 +226,62 @@ def test_portfolio_markdown_prioritizes_orders_and_reports_policy_audit():
     assert "总敞口 96.0%" in markdown
     assert "相对 RiskParity: +0.20%" in markdown
     assert "异常: 策略诊断 1 / 数据质量事件 1" in markdown
+
+
+def _btc_snapshot(*, latest_on, formal_on):
+    return {
+        "strategyId": "btc_supertrend_satellite",
+        "_displayName": "BTC SuperTrend Satellite 7.5%",
+        "state": "NOT_DUE",
+        "dates": {"signalDate": "2026-10-14", "nextCheck": "2026-10-28"},
+        "observation": {
+            "values": {
+                "btc_close": 100000.0,
+                "supertrend_line": 95000.0 if latest_on else 104000.0,
+                "supertrend_on": latest_on,
+                "formal_supertrend_on": formal_on,
+            },
+        },
+    }
+
+
+def test_btc_satellite_reports_daily_supertrend_and_formal_switch():
+    lines = openclaw_supertrend_alerts._render_portfolio_strategy(
+        _btc_snapshot(latest_on=True, formal_on=True)
+    )
+    markdown = "\n".join(lines)
+
+    assert "BTC 日线 ST: 向上（收盘 100000，ST 线 95000，距 ST 线 +5.0%）" in markdown
+    assert "BTC 正式开关（2026-10-14 检查）: 持有 BTC" in markdown
+    assert "将在" not in markdown
+
+
+def test_btc_satellite_flags_a_flip_waiting_for_the_next_check():
+    lines = openclaw_supertrend_alerts._render_portfolio_strategy(
+        _btc_snapshot(latest_on=False, formal_on=True)
+    )
+    markdown = "\n".join(lines)
+
+    assert "BTC 日线 ST: 向下（收盘 100000，ST 线 104000，距 ST 线 -4.0%）" in markdown
+    assert "BTC 正式开关（2026-10-14 检查）: 持有 BTC" in markdown
+    assert "日线 ST 已转向下，将在 2026-10-28 检查时执行" in markdown
+
+
+def test_non_btc_strategy_has_no_btc_supertrend_lines():
+    lines = openclaw_supertrend_alerts._render_portfolio_strategy(
+        {"strategyId": "core90_ma200_bull10", "state": "READY", "observation": {"values": {}}}
+    )
+    assert not any("BTC" in line for line in lines)
+
+
+def test_daily_brief_puts_primary_portfolio_before_study_scan():
+    markdown = openclaw_supertrend_alerts.render_daily_brief_markdown(
+        [], title="Daily",
+        portfolio_strategies=[_btc_snapshot(latest_on=True, formal_on=True)],
+    )
+
+    assert markdown.index("## 主策略纸面执行") < markdown.index("## 学习观察：SuperTrend 扫描")
+    assert markdown.index("## 学习观察：SuperTrend 扫描") < markdown.index("## 🔥 今日可开新仓")
 
 
 def test_daily_brief_reports_independent_strategy_failure_and_stale_market():
