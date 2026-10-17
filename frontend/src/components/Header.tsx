@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
+import { Plus, FolderPlus, Search, RefreshCw, LineChart, SlidersHorizontal, BarChart2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { SymbolResolveCandidate, Timeframe } from '../types';
 
@@ -27,8 +27,6 @@ interface HeaderProps {
   loading: boolean;
   handleRefresh: () => void;
   onShowBacktest: () => void;
-  activeTab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio';
-  onTabChange: (tab: 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,27 +53,8 @@ export const Header: React.FC<HeaderProps> = ({
   loading,
   handleRefresh,
   onShowBacktest,
-  activeTab,
-  onTabChange,
 }) => {
-  const isWatchlist = activeTab === 'watchlist';
   const showSymbolDropdown = symbolDropdownOpen && (symbolResolving || symbolCandidates.length > 0);
-  const tabClass = (tab: HeaderProps['activeTab']) => clsx(
-    "shrink-0 px-2.5 py-1.5 text-[10px] sm:text-xs rounded-lg border font-semibold transition-all duration-200 active:scale-[0.98]",
-    activeTab === tab
-      ? tab === 'st'
-        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-        : tab === 'rs'
-          ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
-          : tab === 'wbb'
-            ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-300"
-            : tab === 'history'
-              ? "bg-sky-500/10 border-sky-500/40 text-sky-300"
-              : tab === 'portfolio'
-                ? "bg-violet-500/10 border-violet-500/40 text-violet-300"
-                : "bg-zinc-700/60 border-zinc-600 text-zinc-100"
-      : "btn-glass text-zinc-400 hover:text-zinc-200"
-  );
 
   return (
     <header className="header-gradient border-b border-zinc-800/50 sticky top-0 z-20">
@@ -83,44 +62,12 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="h-[1px] bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
 
       <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:min-h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <div className="relative">
-            <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 p-1.5 sm:p-2 rounded-xl border border-emerald-500/20 shadow-[0_0_20px_-5px_rgba(16,185,129,0.2)]">
-              <TrendingUp className="text-emerald-400" size={18} />
-            </div>
-            <div className="absolute -inset-1 bg-emerald-500/5 rounded-xl blur-md -z-10" />
-          </div>
-          <h1 className="text-lg sm:text-2xl font-black tracking-tight bg-gradient-to-br from-white via-zinc-200 to-zinc-500 bg-clip-text text-transparent select-none">
-            TrendMaster
-          </h1>
-        </div>
+        <h1 className="text-lg font-semibold text-zinc-100">看盘</h1>
 
         {/* Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-1 justify-end sm:flex-none min-w-0">
-          <nav className="order-2 sm:order-none basis-full sm:basis-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1 sm:pt-0">
-            <button onClick={() => onTabChange('watchlist')} className={tabClass('watchlist')} title="自选">
-              自选
-            </button>
-            <button onClick={() => onTabChange('st')} className={tabClass('st')} title="SuperTrend">
-              ST
-            </button>
-            <button onClick={() => onTabChange('rs')} className={tabClass('rs')} title="RS 轮动">
-              RS轮动
-            </button>
-            <button onClick={() => onTabChange('wbb')} className={tabClass('wbb')} title="周线BB突破">
-              周线BB
-            </button>
-            <button onClick={() => onTabChange('history')} className={tabClass('history')} title="历史买卖点复盘">
-              复盘
-            </button>
-            <button onClick={() => onTabChange('portfolio')} className={tabClass('portfolio')} title="组合策略">
-              组合
-            </button>
-          </nav>
-
           {/* Add Symbol Form */}
-          {isWatchlist && (
+          {(
           <form onSubmit={handleAddStock} className="relative flex items-center gap-1.5">
             <div className="relative">
               <input
@@ -178,7 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
           </form>
           )}
 
-          {isWatchlist && (
+          {(
           <button
             onClick={() => setShowNewGroupInput(true)}
             className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-emerald-400"
@@ -188,10 +135,10 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           )}
 
-          {isWatchlist && <div className="w-px h-5 bg-zinc-800/50 mx-0.5 hidden sm:block" />}
+          {<div className="w-px h-5 bg-zinc-800/50 mx-0.5 hidden sm:block" />}
 
           {/* Search (Desktop) */}
-          {isWatchlist && (
+          {(
           <div className="relative hidden md:block">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
             <input
@@ -205,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Filter toggle */}
-          {isWatchlist && (
+          {(
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={clsx(
@@ -221,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* EMA Toggle */}
-          {isWatchlist && (
+          {(
           <button
             onClick={() => setEmaMode(prev => prev === 'long' ? 'short' : prev === 'short' ? 'boll' : 'long')}
             className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
@@ -232,7 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Timeframe Toggle */}
-          {isWatchlist && (
+          {(
           <button
             onClick={() => setChartTimeframe(chartTimeframe === '1D' ? '1W' : '1D')}
             className="btn-glass px-2.5 py-1.5 text-[10px] sm:text-xs rounded-xl text-zinc-400 hover:text-white font-mono font-semibold tracking-tight"
@@ -243,7 +190,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Chart Toggle */}
-          {isWatchlist && (
+          {(
           <button
             onClick={() => setShowCharts(!showCharts)}
             className={clsx(
@@ -260,7 +207,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* Backtest */}
-          {isWatchlist && (
+          {(
           <button
             onClick={onShowBacktest}
             className="btn-glass p-2 rounded-xl text-zinc-400 hover:text-amber-400"

@@ -11,6 +11,7 @@ const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').th
 const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
+import { AppShell, type AppTab } from './components/AppShell';
 import { FilterBar } from './components/FilterBar';
 import { NewGroupModal, AliasEditModal } from './components/Modals';
 import { ColumnHeaders } from './components/ColumnHeaders';
@@ -36,12 +37,19 @@ const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '�
 const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
 const resonanceFilterOptions = ['共振买点', '离场预警', '共振离场'];
 const trendOrder = ['强势多头', '回调多头', '震荡', '潜在转空', '反弹空头', '强势空头', '潜在转多'];
-type AppTab = 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio';
+const TAB_PATHS: Record<AppTab, string> = {
+  portfolio: '/',
+  watchlist: '/watchlist',
+  wbb: '/weekly-scan',
+  history: '/history-trades',
+  st: '/supertrend',
+  rs: '/rs-rotation',
+};
 
 const pathToTab = (pathname: string): AppTab => {
-  if (pathname === '/history-trades') return 'history';
   if (pathname === '/portfolio-strategies') return 'portfolio';
-  return 'st';
+  const match = (Object.keys(TAB_PATHS) as AppTab[]).find(tab => TAB_PATHS[tab] === pathname);
+  return match ?? 'portfolio';
 };
 
 const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
@@ -236,15 +244,7 @@ function App() {
 
   const handleTabChange = useCallback((tab: AppTab) => {
     setActiveTab(tab);
-    const pathMap: Record<AppTab, string> = {
-      watchlist: '/',
-      rs: '/',
-      wbb: '/',
-      st: '/',
-      history: '/history-trades',
-      portfolio: '/portfolio-strategies',
-    };
-    const nextPath = pathMap[tab];
+    const nextPath = TAB_PATHS[tab];
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, '', nextPath);
     }
@@ -616,8 +616,9 @@ function App() {
   }, []);
 
   return (
+    <AppShell activeTab={activeTab} onTabChange={handleTabChange}>
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
-      <Header
+      {activeTab === 'watchlist' && <Header
         newTicker={newTicker}
         setNewTicker={handleNewTickerChange}
         handleAddStock={handleAddStock}
@@ -641,9 +642,7 @@ function App() {
         loading={loading}
         handleRefresh={handleManualRefresh}
         onShowBacktest={() => setShowBacktest(true)}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-      />
+      />}
 
       {showNewGroupInput && (
         <NewGroupModal
@@ -766,6 +765,7 @@ function App() {
         </Suspense>
       )}
     </div>
+    </AppShell>
   );
 }
 
