@@ -113,6 +113,8 @@ uv run python refresh_a_share_data.py --force
 
 ## 回测示例
 
+三组合新增独立的修订研究纸面版本，支持分红现金账本、自定义初始金额和逐笔入金。账户用法、原始数据更新要求和复核命令见 [三组合指南](docs/three-asset-core-guide.md)；目前采用分数份额研究假设，未部署本次改动。
+
 ```bash
 cd backend
 uv run python backtest.py --symbols 510300.SS 510050.SS --strategy-version resonance_v2_atr_1_5 --start 2023-01-01

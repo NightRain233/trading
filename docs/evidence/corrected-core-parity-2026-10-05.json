@@ -1,0 +1,95 @@
+{
+  "strategyId": "risk_parity_core_cash_next_open",
+  "version": "2.0.0",
+  "accounts": {
+    "lump": {
+      "status": "pass",
+      "daily_points": 4287,
+      "fills": 858,
+      "first_date": "2015-01-05",
+      "last_date": "2026-09-30",
+      "daily_max_absolute_differences": {
+        "wealth": 1.979060471057892e-09,
+        "liquidation_wealth": 1.979060471057892e-09,
+        "principal": 0.0,
+        "contribution": 0.0,
+        "cost": 9.414691248821327e-14,
+        "cumulative_cost": 2.1600499167107046e-12,
+        "unit_nav": 3.9968028886505635e-14,
+        "unit_drawdown": 1.5230872119076366e-15,
+        "profit": 1.979060471057892e-09,
+        "market_pnl": 8.549250196665525e-11,
+        "cash": 1.77351466845721e-11,
+        "receivable": 1.77351466845721e-11,
+        "dividend_income": 1.77351466845721e-11,
+        "quantity_510300.SS": 2.4010660126805305e-10,
+        "quantity_513100.SS": 4.147295840084553e-10,
+        "quantity_518880.SS": 1.127773430198431e-10
+      },
+      "fill_max_absolute_differences": {
+        "quantity_delta": 1.2369127944111824e-10,
+        "price": 0.0,
+        "notional": 4.802132025361061e-10,
+        "commission": 4.796163466380676e-14
+      },
+      "final_liquidation_wealth": 268125.5216592238,
+      "repeat_refresh_unchanged": true,
+      "signal_precedes_rebalance_fills": true
+    },
+    "dca": {
+      "status": "pass",
+      "daily_points": 4287,
+      "fills": 1251,
+      "first_date": "2015-01-05",
+      "last_date": "2026-09-30",
+      "daily_max_absolute_differences": {
+        "wealth": 1.862645149230957e-08,
+        "liquidation_wealth": 1.862645149230957e-08,
+        "principal": 0.0,
+        "contribution": 0.0,
+        "cost": 8.526512829121202e-13,
+        "cumulative_cost": 2.1827872842550278e-11,
+        "unit_nav": 5.1514348342607263e-14,
+        "unit_drawdown": 2.2681509448396753e-15,
+        "profit": 1.862645149230957e-08,
+        "market_pnl": 8.149072527885437e-10,
+        "cash": 1.673470251262188e-10,
+        "receivable": 1.673470251262188e-10,
+        "dividend_income": 1.673470251262188e-10,
+        "quantity_510300.SS": 2.153683453798294e-09,
+        "quantity_513100.SS": 4.0745362639427185e-09,
+        "quantity_518880.SS": 1.1059455573558807e-09
+      },
+      "fill_max_absolute_differences": {
+        "quantity_delta": 1.1350493878126144e-09,
+        "price": 0.0,
+        "notional": 4.423782229423523e-09,
+        "commission": 4.547473508864641e-13
+      },
+      "final_liquidation_wealth": 4044415.343543373,
+      "repeat_refresh_unchanged": true,
+      "signal_precedes_rebalance_fills": true
+    }
+  },
+  "research_csv_sha256": {
+    "account_corrected_Three_lump.csv": "6ca0e9e35e746b1089f761ab366bab711984ca0a5777738a354aed9f1958e77b",
+    "fills_corrected_Three_lump.csv": "6ed63bded7d092ba4b0c4dabfc1d6f303fd7cf4fed287eba693228b804609be0",
+    "account_corrected_Three_dca.csv": "85d1f6053d630d59c1b71a42ef593b48b026b17799cdf0c9667b15701a729972",
+    "fills_corrected_Three_dca.csv": "7ab1367cf0ea6f882dd2573d9649d4dd2e88a8e4422b0bfb62f3c5dc435d8382"
+  },
+  "boundary": "temporary paper accounts, fractional shares, literal 1bp commissions, no premium filter; frozen research event coverage",
+  "implementation_sha256": {
+    "portfolio_strategies/corrected_core.py": "e555be997d4a1dc21d9d89620c37ca855b27446f553244db70f5cd552b25c513",
+    "portfolio_strategies/corrected_core_account.py": "9578f3aa2dbdc9b062a011f16b0cdc0f4e73bda8681a30c787685dfaf100db94",
+    "portfolio_strategies/core_raw_data.py": "d741970e8820764ab1e49521e4a800af50d3cffa773863be5fe7fd8dd0391377",
+    "portfolio_strategies/core_corporate_actions.json": "441b3e2dab4fbae1835f8feff6ecc875e4c5d89105c47eb0af9de895b6bacb9b",
+    "portfolio_strategies/registry.py": "2331008ec72ca9ddbc7f50d01b9e600004d1fa73d35cfe9c15e1b3371f86955c",
+    "portfolio_strategies/service.py": "966027a25146b80898314ed510d9c50abf718885ca9c6a6c27c3b0083c0473a1",
+    "scripts/check_corrected_core_parity.py": "c663d78e0db6146864b1a577bb01502a7f0fe94e73eafba684b0862f2fd53241",
+    "scripts/import_core_raw_snapshot.py": "e840f235fd70801c0ee68e53bdec1576e1492d950f74e5c74523171b23965d4b"
+  },
+  "raw_manifest_sha256": "b77dcd6b8c8cb8f6882953354f2a00acaa4d84ad759e1bd6ef23c8e2be614596",
+  "status": "pass",
+  "bundle_only_inputs": true,
+  "research_bundle_sha256": "966914d8a5f0bfb0cc54ec94a2f658307aa7e163889cfa8bda98866609699e1c"
+}

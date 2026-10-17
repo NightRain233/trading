@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date
 from typing import Any, Optional
 
@@ -27,6 +27,13 @@ class StrategyListItem(BaseModel):
 
 class ActivateRequest(BaseModel):
     activationDate: date
+    initialCash: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class DepositRequest(BaseModel):
+    contributionDate: date
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    idempotencyKey: str = Field(min_length=1, max_length=128)
 
 
 class DiagnosticItem(BaseModel):
@@ -74,6 +81,16 @@ class NavBlock(BaseModel):
     dailyReturn: Optional[float] = None
     cumulativeReturn: Optional[float] = None
     drawdown: Optional[float] = None
+    receivable: Optional[float] = None
+    principal: Optional[float] = None
+    unitNav: Optional[float] = None
+    cumulativeFees: Optional[float] = None
+    contribution: Optional[float] = None
+    dividendIncome: Optional[float] = None
+    marketPnl: Optional[float] = None
+    liquidationWealth: Optional[float] = None
+    profit: Optional[float] = None
+    accountResidual: Optional[float] = None
 
 
 class LedgerBlock(BaseModel):
@@ -199,6 +216,7 @@ class LedgerEventItem(BaseModel):
     state: Optional[str] = None
     reason: Optional[str] = None
     createdAt: Optional[str] = None
+    details: dict[str, Any] = {}
 
 
 class LedgerEventsResponse(BaseModel):
@@ -215,6 +233,16 @@ class NavPoint(BaseModel):
     dailyReturn: float
     cumulativeReturn: float
     drawdown: float
+    receivable: Optional[float] = None
+    principal: Optional[float] = None
+    unitNav: Optional[float] = None
+    cumulativeFees: Optional[float] = None
+    contribution: Optional[float] = None
+    dividendIncome: Optional[float] = None
+    marketPnl: Optional[float] = None
+    liquidationWealth: Optional[float] = None
+    profit: Optional[float] = None
+    accountResidual: Optional[float] = None
 
 
 class NavSeriesResponse(BaseModel):

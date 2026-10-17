@@ -24,6 +24,7 @@ TRACKED_STRATEGIES = (
     "theme_alpha",
     "btc_supertrend_satellite",
     "core90_raw_bull10",
+    "risk_parity_core_cash_next_open",
 )
 
 
@@ -98,7 +99,7 @@ def run_daily_job(
             try:
                 snapshot = service.refresh(strategy_id, now=started)
                 status["strategies"][strategy_id] = {
-                    "ok": True,
+                    "ok": snapshot.get("state") != "BLOCKED",
                     "state": snapshot.get("state"),
                     "notActivated": snapshot.get("state") == "EMPTY",
                     "diagnostics": snapshot.get("diagnostics", []),

@@ -15,7 +15,7 @@ def test_long_sample_convergence_exposes_one_primary_strategy():
     assert PRIMARY_STRATEGY_IDS == ("core90_ma200_bull10",)
 
 
-def test_registry_exposes_five_official_paper_strategies():
+def test_registry_exposes_six_official_paper_strategies():
     strategies = list_paper_strategies()
 
     assert [strategy.strategy_id for strategy in strategies] == [
@@ -24,6 +24,7 @@ def test_registry_exposes_five_official_paper_strategies():
         "theme_alpha",
         "btc_supertrend_satellite",
         "core90_raw_bull10",
+        "risk_parity_core_cash_next_open",
     ]
     assert all(strategy.mode is StrategyMode.PAPER for strategy in strategies)
 

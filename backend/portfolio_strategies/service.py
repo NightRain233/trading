@@ -54,6 +54,8 @@ from .registry import (
     require_paper_strategy,
 )
 from .theme_alpha import calculate_theme_alpha
+from .corrected_core import CORRECTED_CORE_ID
+from .corrected_core_account import CorrectedCoreAccount
 
 
 def _calculate(config: StrategyConfig, market_data: PortfolioMarketData, as_of: date) -> StrategyCalculation:
@@ -98,6 +100,7 @@ class PortfolioStrategyService:
         self.engine = PortfolioPaperEngine(self.ledger)
         self.next_open_engine = NextOpenPaperEngine(self.ledger)
         self.events = EventPortfolioLedger(self.ledger)
+        self.corrected_core = CorrectedCoreAccount(self.ledger, self.data_dir)
         self._refresh_fn = refresh_fn
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -118,7 +121,7 @@ class PortfolioStrategyService:
                 "presentationGroup": "primary" if config.strategy_id in primary_ids else "comparison",
                 "isPrimary": config.strategy_id in primary_ids,
                 "benchmarkStrategyId": (
-                    None if config.strategy_id == "risk_parity_core_next_open"
+                    None if config.strategy_id in ("risk_parity_core_next_open", CORRECTED_CORE_ID)
                     else "risk_parity_core_next_open"
                 ),
             }
@@ -144,6 +147,7 @@ class PortfolioStrategyService:
                 else "not_activated"
             )
             if account is not None:
+                entry["initialNav"] = float(account["initial_nav"])
                 entry["bootstrapSignalDate"] = account["bootstrap_signal_date"]
                 entry["bootstrapValuationDate"] = account["bootstrap_valuation_date"]
             result.append(entry)
@@ -277,6 +281,8 @@ class PortfolioStrategyService:
 
     def get_snapshot(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if strategy_id == CORRECTED_CORE_ID:
+            return self.corrected_core.snapshot(config)
         if config.execution == "next_open":
             return self._get_next_open_snapshot(config)
         market_data = self._load_market_data(config)
@@ -430,6 +436,7 @@ class PortfolioStrategyService:
         strategy_id: str,
         *,
         activation_date: date,
+        initial_cash: float | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)
@@ -437,7 +444,12 @@ class PortfolioStrategyService:
         local_today = self._shanghai_date(effective_now)
         if activation_date > local_today:
             raise ValueError("activationDate cannot be in the future")
+        if strategy_id != CORRECTED_CORE_ID and initial_cash is not None:
+            raise ValueError("initialCash is supported only by the corrected three-asset account")
         with portfolio_operation_lock(self.db_path, f"strategy-{strategy_id}"):
+            if strategy_id == CORRECTED_CORE_ID:
+                self.corrected_core.activate(config, activation_date, initial_cash)
+                return self.get_snapshot(strategy_id)
             account = self.ledger.get_account(config)
             if account is not None:
                 existing = self.events.activation(account["id"])
@@ -470,12 +482,30 @@ class PortfolioStrategyService:
         with portfolio_operation_lock(self.db_path, f"strategy-{strategy_id}"):
             return self._refresh_locked(config, now=now)
 
+    def deposit(self, strategy_id: str, *, contribution_date: date, amount: float,
+                idempotency_key: str, now: datetime | None = None) -> dict[str, Any]:
+        config = require_paper_strategy(strategy_id)
+        if strategy_id != CORRECTED_CORE_ID:
+            raise ValueError("Deposits are supported only by the corrected three-asset paper account")
+        effective_now = now or self._clock()
+        with portfolio_operation_lock(self.db_path, f"strategy-{strategy_id}"):
+            return self.corrected_core.contribute(config, day=contribution_date, amount=amount,
+                                                 key=idempotency_key, now=effective_now)
+
+    def deposits(self, strategy_id: str) -> dict[str, Any]:
+        config = require_paper_strategy(strategy_id)
+        if strategy_id != CORRECTED_CORE_ID:
+            raise ValueError("Deposits are supported only by the corrected three-asset paper account")
+        return self.corrected_core.flow_records(config)
+
     def _refresh_locked(
         self,
         config: StrategyConfig,
         *,
         now: datetime | None,
     ) -> dict[str, Any]:
+        if config.strategy_id == CORRECTED_CORE_ID:
+            return self.corrected_core.refresh(config, now or self._clock())
         if config.execution == "next_open":
             return self._refresh_next_open(config, now=now)
         effective_now = now or self._clock()
@@ -1103,6 +1133,9 @@ class PortfolioStrategyService:
 
     def target_weights(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if strategy_id == CORRECTED_CORE_ID:
+            snapshot = self.get_snapshot(strategy_id)
+            return {"strategyId": strategy_id, "desired": snapshot["desiredWeights"], "executable": []}
         if config.execution == "next_open":
             account = self.ledger.get_account(config)
             if account is None:
@@ -1148,6 +1181,13 @@ class PortfolioStrategyService:
 
     def rebalance_diff(self, strategy_id: str) -> dict[str, Any]:
         config = get_strategy(strategy_id)
+        if strategy_id == CORRECTED_CORE_ID:
+            snapshot = self.get_snapshot(strategy_id)
+            current = {p["symbol"]: p["weight"] for p in snapshot["currentWeights"]}
+            desired = {w["symbol"]: w["weight"] for w in snapshot["desiredWeights"]}
+            return {"strategyId": strategy_id, "rows": [
+                {"symbol": s, "currentWeight": current.get(s, 0.), "desiredWeight": desired.get(s, 0.),
+                 "delta": desired.get(s, 0.)-current.get(s, 0.)} for s in sorted(current.keys() | desired.keys())]}
         if config.execution == "next_open":
             account = self.ledger.get_account(config)
             if account is None:
@@ -1204,6 +1244,8 @@ class PortfolioStrategyService:
 
     def ledger_events(self, strategy_id: str, limit: int = 50, cursor: int | None = None) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)
+        if strategy_id == CORRECTED_CORE_ID:
+            return self.corrected_core.ledger_events(config, limit, cursor)
         account = self.ledger.get_account(config)
         if account is None:
             return {"strategyId": strategy_id, "events": [], "nextCursor": None}
@@ -1291,6 +1333,8 @@ class PortfolioStrategyService:
 
     def nav_series(self, strategy_id: str, start: str | None = None, end: str | None = None) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)
+        if strategy_id == CORRECTED_CORE_ID:
+            return self.corrected_core.nav_series(config, start, end)
         account = self.ledger.get_account(config)
         if account is None:
             return {"strategyId": strategy_id, "points": []}

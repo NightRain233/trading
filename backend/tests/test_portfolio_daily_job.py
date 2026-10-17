@@ -82,3 +82,12 @@ def test_market_readiness_reuses_structured_freshness_statuses(tmp_path: Path, m
     assert result["a_share"]["ready"] is True
     assert result["us"]["symbols"][0]["freshnessStatus"] == "SOURCE_STALE"
     assert result["us"]["ready"] is False
+
+
+def test_blocked_corrected_account_is_reported_as_unsuccessful(tmp_path, monkeypatch):
+    service = FakeService(tmp_path)
+    service.refresh = lambda strategy_id, now: {"state": "BLOCKED", "diagnostics": [{"code": "RAW_SNAPSHOT_STALE"}]}
+    monkeypatch.setattr(portfolio_daily_job, "assess_market_readiness", lambda *_args: {})
+    result = portfolio_daily_job.run_daily_job(service=service, data_updater=lambda _: None,
+        status_path=tmp_path/"status.json", now=datetime(2026, 10, 5, 22))
+    assert result["strategies"]["risk_parity_core_cash_next_open"]["ok"] is False

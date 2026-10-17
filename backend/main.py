@@ -3070,6 +3070,32 @@ def api_portfolio_activate(strategy_id: str, request: pm.ActivateRequest):
     try:
         return _get_portfolio_service().activate(
             strategy_id, activation_date=request.activationDate,
+            initial_cash=request.initialCash,
+        )
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (ComparisonStrategyError, PortfolioOperationLockedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/deposits")
+def api_portfolio_deposits(strategy_id: str):
+    try:
+        return _get_portfolio_service().deposits(strategy_id)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (ComparisonStrategyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/portfolio-strategies/{strategy_id}/deposits")
+def api_portfolio_deposit(strategy_id: str, request: pm.DepositRequest):
+    try:
+        return _get_portfolio_service().deposit(
+            strategy_id, contribution_date=request.contributionDate,
+            amount=request.amount, idempotency_key=request.idempotencyKey,
         )
     except UnknownStrategyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

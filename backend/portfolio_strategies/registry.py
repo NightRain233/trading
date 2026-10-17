@@ -197,6 +197,30 @@ RISK_PARITY_CORE_NEXT_OPEN = StrategyConfig(
 )
 
 
+RISK_PARITY_CORE_CASH_NEXT_OPEN = StrategyConfig(
+    strategy_id="risk_parity_core_cash_next_open",
+    version="2.0.0",
+    display_name="三组合 IV20（分红现金账本）",
+    description="Domestic raw ETF prices, causal distributions, literal trade costs and explicit cash flows; fractional-share paper research.",
+    mode=StrategyMode.PAPER,
+    execution="next_open",
+    initial_nav=100_000.0,
+    base_currency="CNY",
+    assets=NEXT_OPEN_CORE_ASSETS,
+    params={
+        "risk_parity_window": 20,
+        "rebalance_sessions": 10,
+        "schedule_anchor_signal_date": "2015-01-05",
+        "accounting_contract": "raw_cash_dividend_v1",
+        "commission_bps_per_traded_notional": 1.0,
+        "activation_mode": "cash_then_next_open",
+        "fractional_shares": True,
+        "premium_filter_enabled": False,
+    },
+    costs=CostConfig(base_bps=1.0),
+)
+
+
 def _core_bull_config(
     strategy_id: str,
     display_name: str,
@@ -269,6 +293,7 @@ _STRATEGIES = (
     CORE90_RAW_BULL10,
     BTC_COMPARISON_5,
     BTC_COMPARISON_10,
+    RISK_PARITY_CORE_CASH_NEXT_OPEN,
 )
 _BY_ID = {strategy.strategy_id: strategy for strategy in _STRATEGIES}
 
