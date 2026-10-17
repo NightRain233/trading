@@ -20,6 +20,7 @@ import pandas as pd
 import yfinance as yf
 
 # re-exports — 保持所有现有 import 不变
+from analysis_weinstein import add_view_columns, weinstein_summary
 from analysis_constants import (  # noqa: F401
     DATA_DIR, CACHE_DURATION_SECONDS, ALLOW_STALE_SECONDS, DATA_RETENTION_DAYS,
     REFRESH_MIN_INTERVAL_SECONDS, TICKFLOW_INCREMENTAL_OVERLAP_DAYS,
@@ -148,6 +149,7 @@ def _build_summary_dict(symbol: str, df: pd.DataFrame, df_weekly: pd.DataFrame) 
         "resonanceExitLevel": resonance_exit["exitLevel"],
         "resonanceExitReason": resonance_exit["exitReason"],
         "macdDivergence": macd_divergence,
+        "weinstein": weinstein_summary(symbol, df_weekly),
         "_rsi_period": rsi_period,
         **weekly_status,
     })
@@ -165,7 +167,7 @@ def analyze_stock(symbol: str) -> Optional[dict]:
 
     rsi_period = result.pop("_rsi_period", 14)
     result["candles"] = _build_candles(df, rsi_period)
-    result["weekly_candles"] = _build_candles(df_weekly, rsi_period=14)
+    result["weekly_candles"] = _build_candles(add_view_columns(symbol, df_weekly), rsi_period=14)
     return result
 
 

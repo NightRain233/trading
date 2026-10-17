@@ -87,3 +87,12 @@ test('drawdownLabel anchors on the backtest range', () => {
   assert.equal(drawdownLabel(-0.12), '回测里出现过，按规则持有');
   assert.equal(drawdownLabel(-0.2), '比回测更深，按规则持有');
 });
+
+test('a fresh all-cash account waits for its first build', () => {
+  const verdict = buildDailyVerdict(btcSnapshot({
+    currentWeights: [{ symbol: 'CASH', weight: 1, sleeve: 'cash' }],
+    desiredWeights: [{ symbol: '510300.SS', weight: 0.36, sleeve: 'core', reason: '' }],
+  }));
+  assert.equal(verdict.kind, 'awaitingBuild');
+  assert.match(verdict.sub, /2026-10-28 检查时建仓/);
+});

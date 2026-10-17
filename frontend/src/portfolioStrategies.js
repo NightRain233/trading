@@ -227,6 +227,19 @@ export function buildDailyVerdict(snapshot, diffRows = []) {
       todo,
     };
   }
+  const cashWeight = (snapshot.currentWeights || [])
+    .filter(position => position.symbol === 'CASH')
+    .reduce((sum, position) => sum + position.weight, 0);
+  const wantsAssets = (snapshot.desiredWeights || []).some(item => item.symbol !== 'CASH' && item.weight > 0);
+  if (cashWeight > 0.95 && wantsAssets) {
+    return {
+      kind: 'awaitingBuild',
+      verdict: '还没有建仓',
+      sub: `纸面账户刚启用，目前全是现金。按规则${nextCheck ? `在 ${nextCheck} 检查时` : '在下一个检查日'}建仓，现在不用操作。`,
+      chips: [{ tone: /** @type {const} */ ('ok'), text: '等待首次建仓' }, ...problemChip, ...dateChip],
+      todo,
+    };
+  }
   if (btc?.flipPending) {
     const action = btc.latestOn ? '买回 BTC' : '卖出 BTC，换成现金';
     return {

@@ -9,6 +9,7 @@ const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
 const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
 const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
+const MarketPage = lazy(() => import('./components/MarketPage').then(m => ({ default: m.MarketPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
 import { AppShell, type AppTab } from './components/AppShell';
@@ -126,6 +127,7 @@ function App() {
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [showBacktest, setShowBacktest] = useState(false);
   const [activeTab, setActiveTab] = useState<AppTab>(() => pathToTab(window.location.pathname));
+  const [watchView, setWatchView] = useState<'market' | 'manage'>('market');
   const [searchTerm, setSearchTerm] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [symbolCandidates, setSymbolCandidates] = useState<SymbolResolveCandidate[]>([]);
@@ -618,7 +620,8 @@ function App() {
   return (
     <AppShell activeTab={activeTab} onTabChange={handleTabChange}>
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
-      {activeTab === 'watchlist' && <Header
+      {activeTab === 'watchlist' && watchView === 'manage' && <Header
+        onBack={() => setWatchView('market')}
         newTicker={newTicker}
         setNewTicker={handleNewTickerChange}
         handleAddStock={handleAddStock}
@@ -683,6 +686,10 @@ function App() {
       ) : activeTab === 'portfolio' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
           <PortfolioStrategiesPage />
+        </Suspense>
+      ) : watchView === 'market' ? (
+        <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
+          <MarketPage groups={groups} updatedAt={formattedUpdatedAt} onManage={() => setWatchView('manage')} />
         </Suspense>
       ) : (
       <main className="max-w-6xl mx-auto px-4 py-6 sm:py-8">

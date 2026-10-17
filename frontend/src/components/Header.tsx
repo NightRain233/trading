@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import type { SymbolResolveCandidate, Timeframe } from '../types';
 
 interface HeaderProps {
+  onBack: () => void;
   newTicker: string;
   setNewTicker: (val: string) => void;
   handleAddStock: (e: React.FormEvent) => void;
@@ -30,6 +31,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
+  onBack,
   newTicker,
   setNewTicker,
   handleAddStock,
@@ -62,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="h-[1px] bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
 
       <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:min-h-16 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
-        <h1 className="text-lg font-semibold text-zinc-100">看盘</h1>
+        <button type="button" onClick={onBack} className="text-sm font-semibold text-zinc-300 hover:text-white">‹ 返回看盘<span className="ml-2 text-xs font-normal text-zinc-500">管理自选</span></button>
 
         {/* Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-1 justify-end sm:flex-none min-w-0">

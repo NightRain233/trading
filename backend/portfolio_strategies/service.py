@@ -44,6 +44,7 @@ from .next_open_strategies import (
     core_signal_due,
 )
 from .operation_lock import portfolio_operation_lock
+from .schedules import schedule_status
 from .registry import (
     ComparisonStrategyError,
     PRIMARY_STRATEGY_IDS,
@@ -307,10 +308,13 @@ class PortfolioStrategyService:
 
         if calculation is not None:
             dates["signalDate"] = calculation.signal_date.isoformat() if calculation.signal_date else None
-            if calculation.signal_date and calculation.market_data_date:
-                next_sessions = pd.DatetimeIndex(market_data.sessions)
-                future = next_sessions[next_sessions > pd.Timestamp(calculation.market_data_date)]
-                dates["nextCheck"] = future[0].date().isoformat() if not future.empty else None
+            if calculation.market_data_date:
+                # The next formal check on the strategy's own calendar, not the next session.
+                status = schedule_status(config, calculation.market_data_date, market_data.sessions)
+                next_signal = status.next_signal_date
+                dates["nextCheck"] = (
+                    pd.Timestamp(next_signal).date().isoformat() if next_signal is not None else None
+                )
 
         # Ledger state
         current_weights: list[dict[str, Any]] = []

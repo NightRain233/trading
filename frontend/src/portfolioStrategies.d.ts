@@ -54,7 +54,7 @@ export interface BtcSwitch {
 export declare function btcSwitch(snapshot: PortfolioSnapshot | null | undefined): BtcSwitch | null;
 
 export interface DailyVerdict {
-  kind: 'empty' | 'blocked' | 'rebalance' | 'btcFlip' | 'calm';
+  kind: 'empty' | 'blocked' | 'rebalance' | 'awaitingBuild' | 'btcFlip' | 'calm';
   verdict: string;
   sub: string;
   chips: Array<{ tone: 'ok' | 'warn' | 'bad'; text: string }>;

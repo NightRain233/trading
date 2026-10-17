@@ -23,6 +23,22 @@ export interface Candle {
   atr?: number;
   st_val?: number;
   st_dir?: number;
+  stage?: number | null;
+  rs26?: number | null;
+}
+
+export interface WeinsteinView {
+  stage: 1 | 2 | 3 | 4;
+  stageLabel: string;
+  weeksInStage: number;
+  ma30: number | null;
+  ma30Distance: number | null;
+  ma30Slope: number | null;
+  rs26: number | null;
+  rsBenchmark: string | null;
+  bbState: 'none' | 'squeeze' | 'squeeze_breakout' | 'above_upper';
+  volumeRatio: number | null;
+  weekLabel: string;
 }
 
 export interface MacdDivergenceSignal {
@@ -73,6 +89,7 @@ export interface StockData {
   changePercent: number;
   candles: Candle[]; // Daily candles
   weekly_candles?: Candle[]; // Weekly candles
+  weinstein?: WeinsteinView | null;
   ema20: number;
   ema50: number;
   adx: number;

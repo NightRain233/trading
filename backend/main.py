@@ -351,6 +351,7 @@ class StockResponse(BaseModel):
     resonanceExitLevel: Optional[str] = None
     resonanceExitReason: Optional[str] = None
     macdDivergence: Optional[dict] = None
+    weinstein: Optional[dict] = None
     # Unified SuperTrend contract returned by this existing quote URL.
     schemaVersion: Optional[int] = None
     policyVersion: Optional[str] = None

@@ -142,3 +142,52 @@ details.ui-details[open] > summary::after { content: "收起"; }
   .ui-page { animation: ui-rise 0.35s ease-out both; }
   @keyframes ui-rise { from { transform: translateY(6px); } to { transform: none; } }
 }
+
+/* ---------- market (watchlist) page ---------- */
+.ui-chip.s1 { color: var(--ui-flat); background: var(--ui-sunken); }
+.ui-chip.s2 { color: var(--ui-rise); background: color-mix(in srgb, var(--ui-rise) 13%, transparent); }
+.ui-chip.s3 { color: var(--ui-warn); background: var(--ui-warn-soft); }
+.ui-chip.s4 { color: var(--ui-fall); background: color-mix(in srgb, var(--ui-fall) 13%, transparent); }
+.ui-mkt { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ui-mkt .ui-panel { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ui-mkt h3 { font-size: 15px; font-weight: 600; margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.ui-mkt p { margin: 0; font-size: 13px; color: var(--ui-ink-2); }
+.ui-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.ui-seg { display: inline-flex; background: var(--ui-sunken); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; max-width: 100%; }
+.ui-seg button { border: 0; background: none; padding: 5px 12px; border-radius: 999px; font-size: 13px; cursor: pointer; color: var(--ui-ink-2); white-space: nowrap; }
+.ui-seg button[aria-pressed="true"] { background: var(--ui-surface); color: var(--ui-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.ui-split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1280px) and (min-width: 921px) { .ui-watch .hide-md { display: none; } }
+.ui-tbl-wrap { overflow-x: auto; }
+.ui-watch { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ui-watch th { text-align: left; font-size: 12px; color: var(--ui-ink-3); font-weight: 500; padding: 0 10px 10px; border-bottom: 1px solid var(--ui-line); white-space: nowrap; }
+.ui-watch td { padding: 11px 10px; border-bottom: 1px solid var(--ui-line); white-space: nowrap; }
+.ui-watch th:first-child, .ui-watch td:first-child { padding-left: 0; }
+.ui-watch .r { text-align: right; }
+.ui-watch tbody tr { cursor: pointer; }
+.ui-watch tbody tr:hover td { background: var(--ui-sunken); }
+.ui-watch tbody tr[aria-selected="true"] td { background: var(--ui-accent-soft); }
+.ui-watch .nm b { display: block; font-weight: 600; max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
+.ui-watch .nm small { color: var(--ui-ink-3); font-size: 12px; }
+.ui-rsbar { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: var(--ui-sunken); position: relative; vertical-align: middle; margin-right: 6px; }
+.ui-rsbar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.ui-detail { position: sticky; top: 24px; }
+.ui-back { display: none; border: 0; background: none; color: var(--ui-accent); font-size: 15px; padding: 0; cursor: pointer; text-align: left; }
+.ui-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+.ui-toggles button { border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-3); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
+.ui-toggles button[aria-pressed="true"] { border-color: var(--ui-accent); color: var(--ui-accent); background: var(--ui-accent-soft); font-weight: 600; }
+.ui-readout-bar { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; min-height: 44px; align-content: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--ui-sunken); }
+.ui-readout-bar > span { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.ui-readout-bar em { font-style: normal; color: var(--ui-ink-3); }
+
+@media (max-width: 920px) {
+  .ui-split { grid-template-columns: minmax(0, 1fr); }
+  .ui-detail { position: static; }
+}
+@media (max-width: 760px) {
+  .ui-mkt { grid-template-columns: minmax(0, 1fr); }
+  .ui-watch .hide-sm { display: none; }
+  .ui-detail:not(.sheet-open) { display: none; }
+  .ui-detail.sheet-open { position: fixed; inset: 0; z-index: 50; border-radius: 0; border: 0; overflow-y: auto; padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .ui-back { display: inline-block; }
+}

@@ -1,0 +1,85 @@
+import numpy as np
+import pandas as pd
+
+import analysis_weinstein as aw
+
+
+def _weekly(closes, volume=None):
+    index = pd.date_range("2024-01-07", periods=len(closes), freq="W-SUN")
+    close = pd.Series(np.asarray(closes, dtype=float), index=index)
+    frame = pd.DataFrame({"Open": close, "High": close, "Low": close, "Close": close,
+                          "Volume": volume if volume is not None else np.full(len(closes), 100.0)}, index=index)
+    mid = close.rolling(20).mean()
+    sd = close.rolling(20).std(ddof=0)
+    frame["BOLL_Mid"], frame["BOLL_Upper"], frame["BOLL_Lower"] = mid, mid + 2 * sd, mid - 2 * sd
+    return frame
+
+
+def test_benchmark_by_market():
+    assert aw.benchmark_for("510300.SS") == "000300.SS"
+    assert aw.benchmark_for("159915.SZ") == "000300.SS"
+    assert aw.benchmark_for("2800.HK") == "2800.HK"
+    assert aw.benchmark_for("QQQ") == "SPY"
+    assert aw.benchmark_for("BTC-USD") is None
+    assert aw.benchmark_for("GC=F") is None
+
+
+def test_stage_sequence_through_a_full_cycle():
+    closes = list(np.linspace(100, 60, 50)) + [60.0] * 30 + list(np.linspace(60, 120, 40))
+    frame = _weekly(closes)
+    stages = aw.stage_series(frame["Close"], frame["Close"].rolling(30).mean())
+
+    assert np.isnan(stages.iloc[0])
+    assert stages.iloc[45] == 4          # falling average, price below
+    assert stages.iloc[79] == 1          # flat base after a decline
+    assert stages.iloc[-1] == 2          # rising average, price above
+
+
+def test_flat_after_advance_is_stage_three():
+    closes = list(np.linspace(60, 120, 60)) + [120.0] * 30
+    frame = _weekly(closes)
+    stages = aw.stage_series(frame["Close"], frame["Close"].rolling(30).mean())
+    assert stages.iloc[-1] == 3
+
+
+def test_relative_strength_aligns_by_week_and_uses_26_weeks():
+    own = _weekly(np.linspace(100, 200, 40))["Close"]
+    bench = own * 0 + 100.0
+    bench.iloc[-27:] = np.linspace(100, 110, 27)
+    rs = aw.relative_strength(own, bench)
+
+    expected = own.iloc[-1] / own.iloc[-27] - 1 - (110 / 100 - 1)
+    assert np.isclose(rs.iloc[-1], expected)
+    assert aw.relative_strength(own, None) is None
+
+
+def test_summary_reports_stage_breakout_and_volume(monkeypatch):
+    closes = [100.0] * 60 + [100.5, 101.0, 101.5, 102.0, 120.0]
+    volume = np.full(len(closes), 100.0)
+    volume[-1] = 300.0
+    monkeypatch.setattr(aw, "_benchmark_weekly_close", lambda benchmark: None)
+
+    summary = aw.weinstein_summary("512480.SS", _weekly(closes, volume))
+
+    assert summary["stage"] == 2
+    assert summary["stageLabel"] == "上涨"
+    assert summary["bbState"] == "squeeze_breakout"
+    assert np.isclose(summary["volumeRatio"], 3.0)
+    assert summary["rs26"] is None
+    assert summary["ma30Distance"] > 0
+
+
+def test_summary_needs_enough_history():
+    assert aw.weinstein_summary("SPY", _weekly([100.0] * 20)) is None
+
+
+def test_price_against_the_slope_reads_as_transition_stage():
+    rising = list(np.linspace(60, 120, 60))
+    frame = _weekly(rising + [90.0])
+    stages = aw.stage_series(frame["Close"], frame["Close"].rolling(30).mean())
+    assert stages.iloc[-1] == 3
+
+    falling = list(np.linspace(120, 60, 60))
+    frame = _weekly(falling + [95.0])
+    stages = aw.stage_series(frame["Close"], frame["Close"].rolling(30).mean())
+    assert stages.iloc[-1] == 1
