@@ -41,6 +41,13 @@ export interface WeinsteinView {
   weekLabel: string;
 }
 
+export interface WeinsteinScanItem extends WeinsteinView {
+  symbol: string;
+  previousStage: 1 | 2 | 3 | 4 | null;
+  close: number | null;
+  history: Array<{ time: string; close: number; ma30: number | null; stage: 1 | 2 | 3 | 4 | null }>;
+}
+
 export interface MacdDivergenceSignal {
   type: 'bullish' | 'bearish';
   status: 'candidate' | 'confirmed';

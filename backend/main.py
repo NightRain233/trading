@@ -1535,6 +1535,32 @@ def precompute_history_trades(
     }
 
 
+@app.get("/api/weinstein/scan")
+def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
+    """Weinstein stage view for every watchlist symbol, read from the cached weekly bars only."""
+    from analysis_weinstein import weinstein_scan_item
+
+    items = []
+    seen = set()
+    for group in load_watchlist():
+        for entry in group.get("symbols", []):
+            symbol = (entry["symbol"] if isinstance(entry, dict) else entry).upper()
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            path = os.path.join(DATA_DIR, f"{symbol}_weekly.parquet")
+            if not os.path.exists(path):
+                continue
+            try:
+                item = weinstein_scan_item(symbol, pd.read_parquet(path), weeks=weeks)
+            except Exception as exc:
+                logger.warning("温斯坦扫描失败 %s: %s", symbol, exc)
+                continue
+            if item is not None:
+                items.append({"symbol": symbol, **item})
+    return items
+
+
 @app.get("/api/weekly-breakout/scan")
 def weekly_breakout_scan():
     """扫描所有 watchlist 标的的周线BB突破状态，返回九宫格所需数据。"""

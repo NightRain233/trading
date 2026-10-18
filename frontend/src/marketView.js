@@ -74,3 +74,41 @@ export function marketReading(view) {
     default: return '筑底阶段，等待站稳 30 周线';
   }
 }
+
+/**
+ * Market bucket for the weekly scan. US indices and ETFs are the learning
+ * focus (the frozen research found the stage rules help only there).
+ * @param {string} symbol
+ * @returns {'us' | 'crypto' | 'cn' | 'other'}
+ */
+export function marketOf(symbol) {
+  const upper = symbol.toUpperCase();
+  if (upper.endsWith('-USD')) return 'crypto';
+  if (/\.(SS|SZ|HK)$/.test(upper)) return 'cn';
+  if (upper.includes('=') || upper.startsWith('^')) return 'other';
+  return 'us';
+}
+
+/**
+ * What the plain Weinstein rule says right now: buy on a fresh stage 2 with
+ * positive relative strength, sell on a weekly close below the 30-week line.
+ * @param {WeinsteinView | null | undefined} view
+ * @returns {{ key: 'entry' | 'hold' | 'exit' | 'caution' | 'out' | 'wait'; label: string; hint: string }}
+ */
+export function ruleState(view) {
+  if (!view) return { key: 'wait', label: '数据不足', hint: '周线历史不够 34 周。' };
+  const below = view.ma30Distance != null && view.ma30Distance < 0;
+  if (view.stage === 2) {
+    if (view.weeksInStage <= 4 && (view.rs26 == null || view.rs26 > 0)) {
+      return { key: 'entry', label: '新进第二阶段', hint: '符合买入条件：站上上升的 30 周线，且强于大盘。' };
+    }
+    return { key: 'hold', label: '持有', hint: '仍在上涨阶段，周收盘跌破 30 周线再走。' };
+  }
+  if (view.stage === 3) {
+    return below
+      ? { key: 'exit', label: '跌破 30 周线', hint: '按规则卖出，不等反弹。' }
+      : { key: 'caution', label: '涨势松动', hint: '30 周线走平，不开新仓，持有的盯紧 30 周线。' };
+  }
+  if (view.stage === 4) return { key: 'out', label: '不持有', hint: '下跌阶段，等它重新筑底。' };
+  return { key: 'wait', label: '观望', hint: '筑底中，等放量站上 30 周线。' };
+}

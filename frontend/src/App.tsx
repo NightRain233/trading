@@ -5,11 +5,11 @@ import { getWatchlistPollDelay } from './pollingPolicy.js';
 const ChartModal = lazy(() => import('./components/ChartModal').then(m => ({ default: m.ChartModal })));
 const BacktestChart = lazy(() => import('./components/BacktestChart').then(m => ({ default: m.BacktestChart })));
 const RsRotationPage = lazy(() => import('./components/RsRotationPage').then(m => ({ default: m.RsRotationPage })));
-const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').then(m => ({ default: m.WeeklyBreakoutPage })));
+const WeeklyScanPage = lazy(() => import('./components/WeeklyScanPage').then(m => ({ default: m.WeeklyScanPage })));
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
 const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
 const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
-const REDESIGNED_TABS = new Set<AppTab>(['portfolio']);
+const REDESIGNED_TABS = new Set<AppTab>(['portfolio', 'wbb']);
 const MarketPage = lazy(() => import('./components/MarketPage').then(m => ({ default: m.MarketPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
@@ -194,7 +194,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'watchlist') {
+    // The weekly scan reuses the watchlist names, so it loads the same data.
+    if (activeTab === 'watchlist' || activeTab === 'wbb') {
       loadData();
     }
   }, [activeTab, loadData]);
@@ -677,7 +678,7 @@ function App() {
         </Suspense>
       ) : activeTab === 'wbb' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>
-          <WeeklyBreakoutPage />
+          <WeeklyScanPage groups={groups} />
         </Suspense>
       ) : activeTab === 'st' ? (
         <Suspense fallback={<div className="text-zinc-500 text-sm p-8">加载中…</div>}>

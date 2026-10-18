@@ -8,3 +8,10 @@ export declare function matchesFilter(stock: StockData, filter: string): boolean
 export declare function sortByStrength(stocks: StockData[]): StockData[];
 export declare function slopeArrow(slope: number | null | undefined): string;
 export declare function marketReading(view: WeinsteinView | null | undefined): string;
+
+export declare function marketOf(symbol: string): 'us' | 'crypto' | 'cn' | 'other';
+export declare function ruleState(view: WeinsteinView | null | undefined): {
+  key: 'entry' | 'hold' | 'exit' | 'caution' | 'out' | 'wait';
+  label: string;
+  hint: string;
+};

@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
-import type { Candle, StockData, WatchlistGroup, WeinsteinView } from '../types';
+import type { Candle, StockData, WatchlistGroup } from '../types';
 import { fetchStockData } from '../utils';
+import { signed, stageColor, tone } from '../marketFormat';
+import { useWidth } from '../useWidth';
+import { Signals, StageChip } from './StageBits';
 import { fmtNum } from '../portfolioStrategies.js';
 import {
   BB_LABELS,
   MARKET_FILTERS,
-  STAGE_HINTS,
   STAGE_NAMES,
   marketReading,
   matchesFilter,
@@ -19,13 +21,6 @@ const SHOW_KEYS = [['bb', '布林带'], ['vol', '成交量'], ['rs', '相对强�
 type ShowKey = typeof SHOW_KEYS[number][0];
 type Show = Record<ShowKey, boolean>;
 
-const signed = (value: number | null | undefined, digits = 1) =>
-  value == null || !Number.isFinite(value) ? '—' : `${value > 0 ? '+' : ''}${(value * 100).toFixed(digits)}%`;
-const tone = (value: number | null | undefined) =>
-  value == null || !Number.isFinite(value) || value === 0 ? '' : value > 0 ? 'ui-rise' : 'ui-fall';
-const stageColor = (stage: number | null | undefined) =>
-  stage === 2 ? 'var(--ui-rise)' : stage === 4 ? 'var(--ui-fall)' : stage === 3 ? 'var(--ui-warn)' : 'var(--ui-flat)';
-
 function loadShow(): Show {
   const fallback: Show = { bb: true, vol: true, rs: true, macd: true };
   try {
@@ -36,41 +31,6 @@ function loadShow(): Show {
 }
 
 const displayName = (stock: StockData) => stock.alias || stock.name || stock.symbol;
-
-/** Only what is worth noticing this week: a Bollinger event or heavy volume. */
-function Signals({ view }: { view?: WeinsteinView | null }) {
-  if (!view) return null;
-  const items: Array<[string, string]> = [];
-  if (view.bbState === 'squeeze_breakout') items.push(['warn', '收窄后突破']);
-  else if (view.bbState === 'squeeze') items.push(['s1', '布林收窄']);
-  else if (view.bbState === 'above_upper') items.push(['s2', '上轨之上']);
-  if (view.volumeRatio != null && view.volumeRatio > 1.8) items.push(['ok', `放量 ${view.volumeRatio.toFixed(1)}`]);
-  if (!items.length) return null;
-  return <span className="ui-row" style={{ gap: 4, flexWrap: 'nowrap' }}>{items.map(([kind, text]) => <span key={text} className={`ui-chip ${kind}`}>{text}</span>)}</span>;
-}
-
-function StageChip({ view, compact }: { view?: WeinsteinView | null; compact?: boolean }) {
-  if (!view) return <span className="ui-muted">—</span>;
-  return (
-    <span className={`ui-chip s${view.stage}`}>
-      <i />{compact ? STAGE_HINTS[view.stage] : `${STAGE_NAMES[view.stage]}·${STAGE_HINTS[view.stage]}`}
-    </span>
-  );
-}
-
-function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    setWidth(Math.floor(node.getBoundingClientRect().width));
-    const observer = new ResizeObserver(entries => setWidth(Math.floor(entries[0].contentRect.width)));
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
 
 function niceTicks(lo: number, hi: number, count: number) {
   const raw = (hi - lo) / count;

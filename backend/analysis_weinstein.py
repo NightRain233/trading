@@ -182,3 +182,27 @@ def weinstein_summary(symbol: str, df_weekly: Optional[pd.DataFrame]) -> Optiona
         "volumeRatio": volume_ratio,
         "weekLabel": week_label.strftime("%Y-%m-%d"),
     }
+
+
+def weinstein_scan_item(symbol: str, df_weekly: Optional[pd.DataFrame], weeks: int = 52) -> Optional[dict]:
+    """Summary plus last-week stage and a short weekly history for the scan page."""
+    summary = weinstein_summary(symbol, df_weekly)
+    if summary is None:
+        return None
+    frame = add_view_columns(symbol, df_weekly).dropna(subset=["Close"])
+    stages = frame["Stage"].to_numpy()
+    previous = _finite(stages[-2]) if len(stages) > 1 else None
+    history = []
+    for ts, row in frame.tail(weeks).iterrows():
+        history.append({
+            "time": pd.Timestamp(ts).date().isoformat(),
+            "close": float(row["Close"]),
+            "ma30": _finite(row.get("MA30")),
+            "stage": int(row["Stage"]) if _finite(row.get("Stage")) is not None else None,
+        })
+    return {
+        **summary,
+        "previousStage": int(previous) if previous is not None else None,
+        "close": _finite(frame["Close"].iloc[-1]),
+        "history": history,
+    }

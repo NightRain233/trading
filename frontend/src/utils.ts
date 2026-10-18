@@ -276,6 +276,7 @@ import type {
   PortfolioLedgerEvents,
   PortfolioNavSeries,
   BtcTrendSeries,
+  WeinsteinScanItem,
   PortfolioRebalanceDiff,
   PortfolioSnapshot,
   PortfolioStrategyItem,
@@ -324,6 +325,12 @@ export async function fetchPortfolioLedger(
     `${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/ledger?${params.toString()}`
   );
   if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchWeinsteinScan(): Promise<WeinsteinScanItem[]> {
+  const response = await fetch(`${API_BASE_URL}/weinstein/scan`);
+  if (!response.ok) throw new Error(`weinstein scan ${response.status}`);
   return await response.json();
 }
 

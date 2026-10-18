@@ -256,3 +256,16 @@ details.ui-details[open] > summary::after { content: "收起"; }
 
 /* Pages not yet redesigned keep their dark look in either theme. */
 .ui-legacy { background: #09090b; color: #f4f4f5; color-scheme: dark; min-height: 100vh; }
+
+/* ---------- weekly scan ---------- */
+.ui-scan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.ui-scan-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+.ui-scan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.ui-scan-head b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-scan-head small { color: var(--ui-ink-3); font-size: 12px; }
+.ui-scan-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.ui-scan-nums dt { font-size: 11.5px; color: var(--ui-ink-3); }
+.ui-scan-nums dd { margin: 0; font-size: 14px; }
+.ui-change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ui-change-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--ui-line); flex-wrap: wrap; }
+.ui-change-list li:last-child { border-bottom: 0; }

@@ -83,3 +83,33 @@ def test_price_against_the_slope_reads_as_transition_stage():
     frame = _weekly(falling + [95.0])
     stages = aw.stage_series(frame["Close"], frame["Close"].rolling(30).mean())
     assert stages.iloc[-1] == 1
+
+
+def test_scan_item_reports_previous_stage_and_history(monkeypatch):
+    monkeypatch.setattr(aw, "_benchmark_weekly_close", lambda benchmark: None)
+    rising = list(np.linspace(60, 120, 60))
+    item = aw.weinstein_scan_item("QQQ", _weekly(rising + [90.0]), weeks=10)
+
+    assert item["stage"] == 3
+    assert item["previousStage"] == 2
+    assert len(item["history"]) == 10
+    assert item["history"][-1]["close"] == 90.0
+    assert item["history"][-1]["stage"] == 3
+
+
+def test_scan_endpoint_reads_cached_weekly_bars(monkeypatch, tmp_path):
+    import main
+
+    rising = list(np.linspace(60, 120, 60))
+    _weekly(rising).to_parquet(tmp_path / "QQQ_weekly.parquet")
+    monkeypatch.setattr(main, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(aw, "_benchmark_weekly_close", lambda benchmark: None)
+    monkeypatch.setattr(main, "load_watchlist", lambda: [
+        {"id": "g", "name": "美股", "symbols": [{"symbol": "qqq", "alias": ""}, {"symbol": "MISSING", "alias": ""}]},
+    ])
+
+    items = main.weinstein_scan(weeks=12)
+
+    assert [item["symbol"] for item in items] == ["QQQ"]
+    assert items[0]["stage"] == 2
+    assert len(items[0]["history"]) == 12
