@@ -191,3 +191,7 @@ details.ui-details[open] > summary::after { content: "收起"; }
   .ui-detail.sheet-open { position: fixed; inset: 0; z-index: 50; border-radius: 0; border: 0; overflow-y: auto; padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
   .ui-back { display: inline-block; }
 }
+
+/* BTC panel: chart left, numbers right; stacked on narrow screens */
+.ui-btc-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 860px) { .ui-btc-body { grid-template-columns: minmax(0, 1fr); } }

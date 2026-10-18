@@ -1,5 +1,5 @@
 import argparse
-from fastapi import FastAPI, HTTPException, Header, Response
+from fastapi import FastAPI, HTTPException, Header, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -605,7 +605,7 @@ def api_data_source_status():
 
 
 @app.get("/api/quote/{symbol}", response_model=StockResponse)
-def get_quote(symbol: str, timeframe: Literal["1D", "1W"] = "1D"):
+def get_quote(symbol: str, timeframe: Literal["1D", "1W"] = "1D", decision: bool = True):
     normalized_symbol = symbol.upper()
     try:
         data = analyze_stock(normalized_symbol)
@@ -629,6 +629,10 @@ def get_quote(symbol: str, timeframe: Literal["1D", "1W"] = "1D"):
     if timeframe == "1W":
         data["candles"] = data.get("weekly_candles", [])
     data["candlesTimeframe"] = timeframe
+    if not decision:
+        # Chart-only callers (the market view) skip the slower decision scan.
+        data["decisionAvailable"] = False
+        return data
 
     try:
         decision_payload = supertrend_scan(
@@ -3051,6 +3055,16 @@ def api_portfolio_nav(
         raise HTTPException(status_code=404, detail=str(exc))
     except ComparisonStrategyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/portfolio-strategies/{strategy_id}/btc-trend", response_model=pm.BtcTrendResponse)
+def api_portfolio_btc_trend(strategy_id: str, sessions: int = Query(250, ge=20, le=1500)):
+    try:
+        return _get_portfolio_service().btc_trend(strategy_id, sessions=sessions)
+    except UnknownStrategyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/api/portfolio-strategies/{strategy_id}/refresh", response_model=pm.SnapshotResponse)

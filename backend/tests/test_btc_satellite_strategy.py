@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from portfolio_strategies.btc_satellite import (
+    btc_trend_history,
     build_btc_target_weights,
     calculate_btc_satellite,
 )
@@ -180,3 +181,20 @@ def test_btc_comparison_variants_calculate_without_becoming_paper_accounts(
     assert result.strategy_id == strategy_id
     assert _weights(result)["BTC-USD"] == pytest.approx(cap)
     assert sum(_weights(result).values()) == pytest.approx(1.0)
+
+
+def test_btc_trend_history_matches_formal_switch_on_check_days():
+    config = get_strategy("btc_supertrend_satellite")
+    market = _btc_market()
+
+    points = btc_trend_history(config, market, sessions=60)
+
+    assert len(points) == 60
+    assert points[-1]["date"] == market.market_data_date.isoformat()
+    checks = [point for point in points if point["check"]]
+    assert checks
+    for point in checks:
+        assert point["formalOn"] == point["on"]
+    calculation = calculate_btc_satellite(config, market, market.market_data_date)
+    assert points[-1]["formalOn"] == calculation.observation.values["formal_supertrend_on"]
+    assert points[-1]["line"] == pytest.approx(calculation.observation.values["supertrend_line"])

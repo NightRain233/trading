@@ -31,9 +31,10 @@ export type BatchQuotesSnapshot = {
   refreshTriggered: boolean;
 };
 
-export async function fetchStockData(symbol: string): Promise<StockData | null> {
+export async function fetchStockData(symbol: string, options: { chartOnly?: boolean } = {}): Promise<StockData | null> {
   try {
-    const response = await fetch(`${API_BASE_URL}/quote/${symbol}`);
+    const query = options.chartOnly ? '?decision=false' : '';
+    const response = await fetch(`${API_BASE_URL}/quote/${symbol}${query}`);
     if (!response.ok) return null;
     return await response.json();
   } catch (error) {
@@ -274,6 +275,7 @@ export async function fetchHistoryTrades(params: {
 import type {
   PortfolioLedgerEvents,
   PortfolioNavSeries,
+  BtcTrendSeries,
   PortfolioRebalanceDiff,
   PortfolioSnapshot,
   PortfolioStrategyItem,
@@ -321,6 +323,12 @@ export async function fetchPortfolioLedger(
   const response = await fetch(
     `${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/ledger?${params.toString()}`
   );
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+export async function fetchBtcTrend(strategyId: string, sessions = 500): Promise<BtcTrendSeries | null> {
+  const response = await fetch(`${API_BASE_URL}/portfolio-strategies/${encodeURIComponent(strategyId)}/btc-trend?sessions=${sessions}`);
   if (!response.ok) return null;
   return await response.json();
 }

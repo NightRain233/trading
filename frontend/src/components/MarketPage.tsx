@@ -246,7 +246,7 @@ function DetailPanel({ stock, show, setShow, onClose, open }: {
   const [full, setFull] = useState<{ symbol: string; data: StockData | null } | null>(null);
   useEffect(() => {
     let active = true;
-    fetchStockData(stock.symbol)
+    fetchStockData(stock.symbol, { chartOnly: true })
       .then(data => { if (active) setFull({ symbol: stock.symbol, data }); })
       .catch(() => { if (active) setFull({ symbol: stock.symbol, data: null }); });
     return () => { active = false; };

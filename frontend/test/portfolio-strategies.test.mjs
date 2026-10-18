@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { btcSwitch, buildAssetRows, buildDailyVerdict, drawdownLabel, stateTone } from '../src/portfolioStrategies.js';
+import { btcSwitch, btcSwitchEvents, buildAssetRows, buildDailyVerdict, drawdownLabel, stateTone } from '../src/portfolioStrategies.js';
 
 test('buildAssetRows aggregates cash held in independent sleeves', () => {
   const rows = buildAssetRows({
@@ -95,4 +95,17 @@ test('a fresh all-cash account waits for its first build', () => {
   }));
   assert.equal(verdict.kind, 'awaitingBuild');
   assert.match(verdict.sub, /2026-10-28 检查时建仓/);
+});
+
+test('btcSwitchEvents lists only formal switch changes', () => {
+  const p = (date, on, formalOn, check = false) => ({ date, close: 1, line: 1, on, check, formalOn });
+  const events = btcSwitchEvents([
+    p('d1', false, null),
+    p('d2', true, true, true),
+    p('d3', false, true),
+    p('d4', false, false, true),
+    p('d5', true, false),
+    p('d6', true, true, true),
+  ]);
+  assert.deepEqual(events.map(e => [e.date, e.on]), [['d4', false], ['d6', true]]);
 });

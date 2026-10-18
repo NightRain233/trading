@@ -435,6 +435,22 @@ export interface PortfolioNavPoint {
   drawdown: number;
 }
 
+export interface BtcTrendPoint {
+  date: string;
+  close: number;
+  line: number;
+  on: boolean;
+  check: boolean;
+  formalOn: boolean | null;
+}
+
+export interface BtcTrendSeries {
+  strategyId: string;
+  atrWindow: number;
+  multiplier: number;
+  points: BtcTrendPoint[];
+}
+
 export interface PortfolioNavSeries {
   strategyId: string;
   points: PortfolioNavPoint[];

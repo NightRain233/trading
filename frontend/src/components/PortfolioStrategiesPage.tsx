@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import type { Candle, PortfolioDiffRow, PortfolioNavPoint, PortfolioSnapshot, PortfolioStrategyItem } from '../types';
+import type { BtcTrendPoint, PortfolioDiffRow, PortfolioNavPoint, PortfolioSnapshot, PortfolioStrategyItem } from '../types';
 import {
+  fetchBtcTrend,
   fetchPortfolioNav,
   fetchPortfolioRebalanceDiff,
   fetchPortfolioSnapshot,
   fetchPortfolioStrategies,
-  fetchStockData,
   refreshPortfolioStrategy,
 } from '../utils';
 import {
   assetLabel,
   btcSwitch,
+  btcSwitchEvents,
   buildAssetRows,
   buildDailyVerdict,
   drawdownLabel,
@@ -107,78 +108,147 @@ function DrawdownChart({ points }: { points: PortfolioNavPoint[] }) {
   );
 }
 
-/** BTC closes from the quote feed, with the satellite's own ST line as a level. */
-function BtcChart({ candles, stLine, stUp }: { candles: Candle[]; stLine: number; stUp: boolean }) {
+const BTC_RANGES: Array<[number, string]> = [[63, '3 个月'], [250, '1 年'], [500, '2 年']];
+
+/** BTC closes with the satellite's own SuperTrend(10, 3) line and the formal switch it produced. */
+function BtcChart({ points }: { points: BtcTrendPoint[] }) {
   const [ref, width] = useWidth<HTMLDivElement>();
-  const W = Math.max(width, 260), H = 150, L = 4, R = 54, T = 8, B = 20;
-  const bars = candles.slice(-90);
-  const n = bars.length;
-  const values = [...bars.map(b => b.close), stLine].filter(Number.isFinite);
-  const lo = Math.min(...values) * 0.98, hi = Math.max(...values) * 1.02;
+  const W = Math.max(width, 260), PH = 170, RB = 10, L = 4, R = 54, T = 8;
+  const H = T + PH + 8 + RB + 22;
+  const n = points.length;
+  const values = points.flatMap(p => [p.close, p.line]).filter(Number.isFinite);
+  const lo = Math.min(...values) * 0.97, hi = Math.max(...values) * 1.02;
   const x = (i: number) => L + (i * (W - L - R)) / Math.max(n - 1, 1);
-  const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+  const y = (v: number) => T + ((hi - v) / (hi - lo)) * PH;
   const hover = useHover(n, x, W);
   if (n < 2) return null;
   const shown = hover.index ?? n - 1;
-  const stroke = stUp ? 'var(--ui-rise)' : 'var(--ui-fall)';
+  const p = points[shown];
+  const events = btcSwitchEvents(points);
+
+  // ST line in runs of one direction, so a flip breaks the line instead of drawing a jump.
+  const runs: Array<{ on: boolean; d: string }> = [];
+  points.forEach((pt, i) => {
+    const last = runs[runs.length - 1];
+    if (last && last.on === pt.on) last.d += `L${x(i)},${y(pt.line)}`;
+    else runs.push({ on: pt.on, d: `M${x(i)},${y(pt.line)}` });
+  });
+  // Formal switch ribbon: what the 7.5% sleeve actually held.
+  const holds: Array<{ start: number; end: number; on: boolean | null }> = [];
+  points.forEach((pt, i) => {
+    const last = holds[holds.length - 1];
+    if (last && last.on === pt.formalOn) last.end = i; else holds.push({ start: i, end: i, on: pt.formalOn });
+  });
+  const ribbonY = T + PH + 8;
+  const step = (W - L - R) / Math.max(n - 1, 1);
   return (
-    <div className="ui-chart" ref={ref}>
-      <div className="ui-readout">
-        {bars[shown].time} · BTC <span className="ui-num">{fmtNum(bars[shown].close, 0)}</span>
+    <div className="ui-stack" style={{ gap: 8 }}>
+      <div className="ui-readout-bar" aria-live="off">
+        <span><em>{p.date}</em></span>
+        <span><em>收盘</em><span className="ui-num">{fmtNum(p.close, 0)}</span></span>
+        <span><em>ST 线</em><span className={`ui-num ${p.on ? 'ui-rise' : 'ui-fall'}`}>{fmtNum(p.line, 0)}</span></span>
+        <span><em>日线</em><span className={p.on ? 'ui-rise' : 'ui-fall'}>{p.on ? '向上' : '向下'}</span></span>
+        <span><em>正式开关</em><span>{p.formalOn == null ? '—' : p.formalOn ? '持有 BTC' : '现金'}</span>{p.check && <span className="ui-muted">（检查日）</span>}</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} height={H} role="img" aria-label="BTC 近 90 日收盘价">
-        {niceTicks(lo, hi, 3).map(v => (
-          <g key={v}>
-            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--ui-line)" />
-            <text x={W - R + 6} y={y(v) + 4}>{(v / 1000).toFixed(0)}k</text>
-          </g>
-        ))}
-        {Number.isFinite(stLine) && (
-          <line x1={L} x2={W - R} y1={y(stLine)} y2={y(stLine)} stroke={stroke} strokeWidth={2} strokeDasharray="4 3" />
-        )}
-        <path d={bars.map((b, i) => `${i ? 'L' : 'M'}${x(i)},${y(b.close)}`).join('')} fill="none" stroke="var(--ui-ink)" strokeWidth={1.6} />
-        <circle cx={x(shown)} cy={y(bars[shown].close)} r={4} fill="var(--ui-ink)" stroke="var(--ui-surface)" strokeWidth={2} />
-        <text x={L} y={H - 4}>{bars[0].time}</text>
-        <text x={W - R} y={H - 4} textAnchor="end">{bars[n - 1].time}</text>
-        <rect x={0} y={0} width={W} height={H} fill="transparent" onPointerMove={hover.onMove} onPointerLeave={hover.onLeave} />
-      </svg>
+      <div className="ui-chart" ref={ref}>
+        <svg viewBox={`0 0 ${W} ${H}`} height={H} role="img" aria-label="BTC 收盘价与卫星 SuperTrend 历史">
+          {niceTicks(lo, hi, 4).map(v => (
+            <g key={v}>
+              <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--ui-line)" />
+              <text x={W - R + 6} y={y(v) + 4}>{(v / 1000).toFixed(0)}k</text>
+            </g>
+          ))}
+          {runs.map((run, i) => (
+            <path key={i} d={run.d} fill="none" stroke={run.on ? 'var(--ui-rise)' : 'var(--ui-fall)'} strokeWidth={1.6} strokeDasharray="4 3" />
+          ))}
+          <path d={points.map((pt, i) => `${i ? 'L' : 'M'}${x(i)},${y(pt.close)}`).join('')} fill="none" stroke="var(--ui-ink)" strokeWidth={1.6} strokeLinejoin="round" />
+          {events.map(e => (
+            <path key={e.date}
+              d={e.on
+                ? `M${x(e.index)},${y(e.close) + 8}l-5,9h10z`
+                : `M${x(e.index)},${y(e.close) - 8}l-5,-9h10z`}
+              fill={e.on ? 'var(--ui-rise)' : 'var(--ui-fall)'} stroke="var(--ui-surface)" strokeWidth={1.5} />
+          ))}
+          {holds.map(h => (
+            <rect key={h.start} x={x(h.start) - step / 2} y={ribbonY} width={Math.max(1, (h.end - h.start + 1) * step - 1)} height={RB} rx={2}
+              fill={h.on == null ? 'var(--ui-line)' : h.on ? 'var(--ui-btc)' : 'var(--ui-cash)'} opacity={0.85} />
+          ))}
+          <line x1={x(shown)} x2={x(shown)} y1={T} y2={ribbonY + RB} stroke="var(--ui-ink-3)" strokeDasharray="2 3" />
+          <circle cx={x(shown)} cy={y(p.close)} r={4} fill="var(--ui-ink)" stroke="var(--ui-surface)" strokeWidth={2} />
+          <text x={L} y={H - 4}>{points[0].date}</text>
+          <text x={W - R} y={H - 4} textAnchor="end">{points[n - 1].date}</text>
+          <rect x={0} y={0} width={W} height={H} fill="transparent" onPointerMove={hover.onMove} onPointerLeave={hover.onLeave} />
+        </svg>
+      </div>
     </div>
   );
 }
 
-function BtcPanel({ snapshot, candles }: { snapshot: PortfolioSnapshot; candles: Candle[] }) {
+function BtcPanel({ snapshot, trend }: { snapshot: PortfolioSnapshot; trend: BtcTrendPoint[] }) {
+  const [range, setRange] = useState(250);
   const btc = btcSwitch(snapshot);
   if (!btc) return null;
   const formalText = btc.formalOn ? '持有 BTC' : 'BTC 仓位为现金';
+  const visible = trend.slice(-range);
+  const events = btcSwitchEvents(trend).slice(-4).reverse();
   return (
     <section className="ui-panel ui-stack" aria-labelledby="h-btc">
       <div className="ui-sec-head">
         <div>
           <h2 className="ui-h2" id="h-btc">BTC 日线 SuperTrend</h2>
-          <div className={`ui-big-state ${btc.flipPending ? (btc.latestOn ? 'ui-rise' : 'ui-fall') : btc.latestOn ? 'ui-rise' : 'ui-fall'}`}>
+          <div className={`ui-big-state ${btc.latestOn ? 'ui-rise' : 'ui-fall'}`}>
             {btc.flipPending ? `已转${btc.latestOn ? '向上' : '向下'}` : btc.latestOn ? '向上' : '向下'}
           </div>
         </div>
         <span className={`ui-chip ${btc.flipPending ? 'warn' : 'ok'}`}><i />正式开关：{formalText}</span>
       </div>
-      {candles.length > 1 && <BtcChart candles={candles} stLine={btc.line} stUp={btc.latestOn} />}
-      <div className="ui-legend">
-        <span><i style={{ background: 'var(--ui-ink)' }} />BTC 收盘</span>
-        <span><i style={{ background: btc.latestOn ? 'var(--ui-rise)' : 'var(--ui-fall)' }} />卫星 ST 线（10, 3）当前位置</span>
+      <div className="ui-btc-body">
+        <div className="ui-stack" style={{ minWidth: 0 }}>
+          {trend.length > 1 && (
+            <div className="ui-seg" role="group" aria-label="时间范围" style={{ alignSelf: 'flex-start' }}>
+              {BTC_RANGES.map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={range === value} onClick={() => setRange(value)}>{label}</button>
+              ))}
+            </div>
+          )}
+          {trend.length > 1 ? <BtcChart points={visible} /> : <div className="ui-skeleton" style={{ height: 200 }} />}
+          <div className="ui-legend">
+            <span><i style={{ background: 'var(--ui-ink)' }} />BTC 收盘</span>
+            <span><i style={{ background: 'var(--ui-rise)' }} />ST 线·向上</span>
+            <span><i style={{ background: 'var(--ui-fall)' }} />ST 线·向下</span>
+            <span><i style={{ background: 'var(--ui-btc)' }} />底部条：持有 BTC</span>
+            <span><i style={{ background: 'var(--ui-cash)' }} />现金</span>
+          </div>
+        </div>
+        <div className="ui-stack" style={{ minWidth: 0 }}>
+          <dl className="ui-kv">
+            <dt>BTC 收盘</dt><dd className="ui-num">{fmtNum(btc.close, 0)}</dd>
+            <dt>ST 线</dt><dd className="ui-num">{fmtNum(btc.line, 0)}</dd>
+            <dt>距 ST 线</dt><dd className={`ui-num ${toneClass(btc.distance)}`}>{fmtSignedPct(btc.distance, 1)}</dd>
+            <dt>上次 / 下次检查</dt><dd className="ui-num">{snapshot.dates.signalDate ?? '—'} / {snapshot.dates.nextCheck ?? '—'}</dd>
+          </dl>
+          {events.length > 0 && (
+            <div>
+              <div className="ui-muted" style={{ fontSize: 12, marginBottom: 6 }}>最近的正式开关变化（检查日决定，下一交易日收盘执行）</div>
+              <dl className="ui-kv">
+                {events.map(e => (
+                  <div key={e.date} style={{ display: 'contents' }}>
+                    <dt className="ui-num">{e.date}</dt>
+                    <dd className={e.on ? 'ui-rise' : 'ui-fall'}>{e.on ? '▲ 买回 BTC' : '▼ 卖出 BTC'}<span className="ui-muted ui-num">（{fmtNum(e.close, 0)}）</span></dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+          <p className={`ui-note ${btc.flipPending ? 'warn' : ''}`}>
+            {btc.flipPending
+              ? `规则只在检查日生效：${snapshot.dates.nextCheck ?? '下次检查'} 检查时${btc.latestOn ? '买回 BTC' : '卖出 BTC，换成现金'}。`
+              : btc.latestOn
+                ? '价格在 ST 线上方，趋势向上。日线中途转向不用管，只看检查日。'
+                : '价格在 ST 线下方，这 7.5% 按规则持有现金。'}
+          </p>
+        </div>
       </div>
-      <dl className="ui-kv">
-        <dt>BTC 收盘</dt><dd className="ui-num">{fmtNum(btc.close, 0)}</dd>
-        <dt>ST 线</dt><dd className="ui-num">{fmtNum(btc.line, 0)}</dd>
-        <dt>距 ST 线</dt><dd className={`ui-num ${toneClass(btc.distance)}`}>{fmtSignedPct(btc.distance, 1)}</dd>
-        <dt>上次 / 下次检查</dt><dd className="ui-num">{snapshot.dates.signalDate ?? '—'} / {snapshot.dates.nextCheck ?? '—'}</dd>
-      </dl>
-      <p className={`ui-note ${btc.flipPending ? 'warn' : ''}`}>
-        {btc.flipPending
-          ? `规则只在检查日生效：${snapshot.dates.nextCheck ?? '下次检查'} 检查时${btc.latestOn ? '买回 BTC' : '卖出 BTC，换成现金'}。`
-          : btc.latestOn
-            ? '价格在 ST 线上方，趋势向上。离 ST 线越近，越要留意转向。'
-            : '价格在 ST 线下方，这 7.5% 按规则持有现金。'}
-      </p>
     </section>
   );
 }
@@ -224,7 +294,7 @@ export default function PortfolioStrategiesPage() {
   const [snapshots, setSnapshots] = useState<Record<string, PortfolioSnapshot>>({});
   const [navPoints, setNavPoints] = useState<PortfolioNavPoint[]>([]);
   const [diffRows, setDiffRows] = useState<PortfolioDiffRow[]>([]);
-  const [btcCandles, setBtcCandles] = useState<Candle[]>([]);
+  const [btcTrend, setBtcTrend] = useState<BtcTrendPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -271,9 +341,9 @@ export default function PortfolioStrategiesPage() {
   useEffect(() => {
     if (!btcSwitch(snapshot)) return;
     let active = true;
-    fetchStockData('BTC-USD')
-      .then(stock => { if (active) setBtcCandles(stock?.candles ?? []); })
-      .catch(() => { if (active) setBtcCandles([]); });
+    fetchBtcTrend(snapshot!.strategyId)
+      .then(series => { if (active) setBtcTrend(series?.points ?? []); })
+      .catch(() => { if (active) setBtcTrend([]); });
     return () => { active = false; };
   }, [snapshot]);
 
@@ -336,17 +406,18 @@ export default function PortfolioStrategiesPage() {
       )}
 
       {snapshot && (
-        <div className="ui-grid-2">
-          <Holdings snapshot={snapshot} />
-          <BtcPanel snapshot={snapshot} candles={btcCandles} />
-        </div>
-      )}
-
-      {navPoints.length > 1 && (
-        <section className="ui-panel ui-stack" aria-labelledby="h-dd">
-          <div className="ui-sec-head"><h2 className="ui-h2" id="h-dd">回撤走势</h2><p>从前高跌了多少 · 回测里最深一次约 -13%</p></div>
-          <DrawdownChart points={navPoints} />
-        </section>
+        <>
+          <div className="ui-grid-2">
+            <Holdings snapshot={snapshot} />
+            {navPoints.length > 1 ? (
+              <section className="ui-panel ui-stack" aria-labelledby="h-dd">
+                <div className="ui-sec-head"><h2 className="ui-h2" id="h-dd">回撤走势</h2><p>从前高跌了多少 · 回测里最深一次约 -13%</p></div>
+                <DrawdownChart points={navPoints} />
+              </section>
+            ) : <div />}
+          </div>
+          <BtcPanel snapshot={snapshot} trend={btcTrend} />
+        </>
       )}
 
       {snapshot && (

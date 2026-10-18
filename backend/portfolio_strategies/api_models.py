@@ -245,6 +245,22 @@ class NavPoint(BaseModel):
     accountResidual: Optional[float] = None
 
 
+class BtcTrendPoint(BaseModel):
+    date: str
+    close: float
+    line: float
+    on: bool
+    check: bool
+    formalOn: Optional[bool] = None
+
+
+class BtcTrendResponse(BaseModel):
+    strategyId: str
+    atrWindow: int
+    multiplier: float
+    points: list[BtcTrendPoint] = []
+
+
 class NavSeriesResponse(BaseModel):
     strategyId: str
     points: list[NavPoint] = []

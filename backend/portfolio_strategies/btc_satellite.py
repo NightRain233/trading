@@ -15,7 +15,7 @@ from .models import (
     StrategyObservation,
     TargetWeight,
 )
-from .schedules import schedule_status
+from .schedules import schedule_status, signal_dates
 
 
 CORE_SYMBOLS = ("510300.SS", "513100.SS", "518880.SS")
@@ -158,3 +158,49 @@ def calculate_btc_satellite(
         target_weights=_target_items(target, formal_on),
         diagnostics=market_data.diagnostics,
     )
+
+
+def btc_trend_history(
+    config: StrategyConfig,
+    market_data: PortfolioMarketData,
+    *,
+    sessions: int = 250,
+) -> list[dict]:
+    """Recent BTC closes with the strategy's own SuperTrend line and switch.
+
+    ``formalOn`` is the switch decided at the latest formal check on or before
+    each day, i.e. what the satellite was told to hold; ``check`` marks the
+    check days themselves.
+    """
+    if BTC_SYMBOL not in market_data.close or market_data.close.empty:
+        return []
+    close = market_data.close[BTC_SYMBOL]
+    trend = supertrend(
+        market_data.high[BTC_SYMBOL],
+        market_data.low[BTC_SYMBOL],
+        close,
+        atr_window=int(config.params["supertrend_atr_window"]),
+        multiplier=float(config.params["supertrend_multiplier"]),
+    )
+    index = pd.DatetimeIndex(close.index)
+    checks = signal_dates(config, index[0].date(), index[-1].date())
+    points: list[dict] = []
+    formal_on: bool | None = None
+    for position, day in enumerate(index):
+        line = float(trend["line"].iloc[position])
+        value = float(close.iloc[position])
+        if not math.isfinite(line) or not math.isfinite(value):
+            continue
+        on = bool(trend["direction"].iloc[position])
+        is_check = day.normalize() in checks
+        if is_check:
+            formal_on = on
+        points.append({
+            "date": day.date().isoformat(),
+            "close": value,
+            "line": line,
+            "on": on,
+            "check": is_check,
+            "formalOn": formal_on,
+        })
+    return points[-sessions:]

@@ -108,6 +108,11 @@ def _expected_signal_dates(
     )
 
 
+def signal_dates(config: StrategyConfig, start: date, end: date) -> set[pd.Timestamp]:
+    """Formal check dates for a strategy between two calendar dates."""
+    return _expected_signal_dates(config, start, end)
+
+
 def schedule_status(
     config: StrategyConfig,
     as_of_date: date,

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import exchange_calendars as xcals
 
-from .btc_satellite import calculate_btc_satellite
+from .btc_satellite import btc_trend_history, calculate_btc_satellite
 from .ledger import PortfolioLedger, connect
 from .market_data import (
     PortfolioMarketData,
@@ -1334,6 +1334,18 @@ class PortfolioStrategyService:
             }
         finally:
             conn.close()
+
+    def btc_trend(self, strategy_id: str, sessions: int = 250) -> dict[str, Any]:
+        config = get_strategy(strategy_id)
+        if not strategy_id.startswith("btc_supertrend_satellite"):
+            raise ValueError(f"Strategy has no BTC switch: {strategy_id}")
+        market_data = self._load_market_data(config)
+        return {
+            "strategyId": strategy_id,
+            "atrWindow": int(config.params["supertrend_atr_window"]),
+            "multiplier": float(config.params["supertrend_multiplier"]),
+            "points": btc_trend_history(config, market_data, sessions=sessions),
+        }
 
     def nav_series(self, strategy_id: str, start: str | None = None, end: str | None = None) -> dict[str, Any]:
         config = require_paper_strategy(strategy_id)

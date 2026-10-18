@@ -53,6 +53,10 @@ export interface BtcSwitch {
 }
 export declare function btcSwitch(snapshot: PortfolioSnapshot | null | undefined): BtcSwitch | null;
 
+export declare function btcSwitchEvents(
+  points: import('./types').BtcTrendPoint[]
+): Array<{ index: number; date: string; on: boolean; close: number }>;
+
 export interface DailyVerdict {
   kind: 'empty' | 'blocked' | 'rebalance' | 'awaitingBuild' | 'btcFlip' | 'calm';
   verdict: string;

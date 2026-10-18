@@ -139,3 +139,17 @@ def test_quote_keeps_legacy_payload_available_when_decision_build_fails(monkeypa
     assert result["price"] == 210.0
     assert result["decisionAvailable"] is False
     assert result["decisionError"] == "decision unavailable"
+
+
+def test_chart_only_quote_skips_decision_scan(monkeypatch):
+    monkeypatch.setattr(main, "analyze_stock", lambda symbol: {"symbol": symbol, "weekly_candles": []})
+
+    def fail(**kwargs):
+        raise AssertionError("decision scan should not run")
+
+    monkeypatch.setattr(main, "supertrend_scan", fail)
+
+    result = main.get_quote("aapl", decision=False)
+
+    assert result["symbol"] == "AAPL"
+    assert result["decisionAvailable"] is False

@@ -173,6 +173,27 @@ export function btcSwitch(snapshot) {
   return { latestOn, formalOn, close, line, distance, flipPending: latestOn !== formalOn };
 }
 
+/**
+ * Formal BTC switch changes in a trend series: the check days where the
+ * satellite was told to buy back or sell BTC. The first defined state is not
+ * a change.
+ * @param {import('./types').BtcTrendPoint[]} points
+ * @returns {Array<{ index: number; date: string; on: boolean; close: number }>}
+ */
+export function btcSwitchEvents(points) {
+  const events = [];
+  /** @type {boolean | null} */
+  let previous = null;
+  points.forEach((point, index) => {
+    if (point.formalOn == null) return;
+    if (previous != null && point.formalOn !== previous) {
+      events.push({ index, date: point.date, on: point.formalOn, close: point.close });
+    }
+    previous = point.formalOn;
+  });
+  return events;
+}
+
 const ACTIVE_ORDER_STATUSES = new Set(['PENDING', 'WAITING_OPEN', 'DELAYED']);
 
 /**
