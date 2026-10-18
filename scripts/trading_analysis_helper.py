@@ -626,7 +626,9 @@ def query_brief(api_base: str, symbol: str, timeout: float) -> dict:
         pass
     return {
         "symbol": data.get("symbol"),
-        "name": data.get("alias") or data.get("name"),
+        "name": data.get("alias") or data.get("name")
+        or ((primary or {}).get("assets") or {}).get((data.get("symbol") or "").upper())
+        or data.get("symbol"),
         "market": market_of(data.get("symbol") or symbol),
         "latestDataDate": data.get("latestDataDate"),
         "dataStale": data.get("dataStale"),
