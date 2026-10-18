@@ -9,6 +9,7 @@ const WeeklyBreakoutPage = lazy(() => import('./components/WeeklyBreakoutPage').
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
 const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
 const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
+const REDESIGNED_TABS = new Set<AppTab>(['portfolio']);
 const MarketPage = lazy(() => import('./components/MarketPage').then(m => ({ default: m.MarketPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
@@ -617,9 +618,12 @@ function App() {
     );
   }, []);
 
+  // Redesigned pages follow the light/dark theme; the rest keep the old dark look.
+  const isRedesigned = REDESIGNED_TABS.has(activeTab) || (activeTab === 'watchlist' && watchView === 'market');
+
   return (
     <AppShell activeTab={activeTab} onTabChange={handleTabChange}>
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
+    <div className={isRedesigned ? undefined : 'ui-legacy selection:bg-emerald-500/30'}>
       {activeTab === 'watchlist' && watchView === 'manage' && <Header
         onBack={() => setWatchView('market')}
         newTicker={newTicker}

@@ -1,8 +1,9 @@
 /* Design system for the redesigned pages (portfolio, shell).
    A calm instrument panel: one sentence answers "do I act today?", details sit below.
-   Dark-first because the older pages are still dark-only; light mode comes once they migrate.
-   A-share colour convention: rise is red, fall is green. */
+   Dark-first; light values follow the system setting or the toggle in the shell
+   (data-theme on <html>). A-share colour convention: rise is red, fall is green. */
 :root {
+  color-scheme: dark;
   --ui-bg: #101315;
   --ui-surface: #171b1e;
   --ui-sunken: #1d2226;
@@ -26,6 +27,53 @@
   --ui-font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --ui-radius: 14px;
 }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ui-bg: #f4f6f5;
+    --ui-surface: #ffffff;
+    --ui-sunken: #edf0f0;
+    --ui-ink: #15191c;
+    --ui-ink-2: #4a5258;
+    --ui-ink-3: #767e84;
+    --ui-line: #e0e5e6;
+    --ui-accent: #2b7d96;
+    --ui-accent-soft: #e2eff3;
+    --ui-rise: #d63a3a;
+    --ui-fall: #17945a;
+    --ui-warn: #a86f00;
+    --ui-warn-soft: #fbf0d9;
+    --ui-flat: #7d848b;
+    --ui-gold: #b47700;
+    --ui-csi: #2f78d6;
+    --ui-ndx: #128a60;
+    --ui-btc: #c94f1f;
+    --ui-cash: #a3a9ad;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --ui-bg: #f4f6f5;
+  --ui-surface: #ffffff;
+  --ui-sunken: #edf0f0;
+  --ui-ink: #15191c;
+  --ui-ink-2: #4a5258;
+  --ui-ink-3: #767e84;
+  --ui-line: #e0e5e6;
+  --ui-accent: #2b7d96;
+  --ui-accent-soft: #e2eff3;
+  --ui-rise: #d63a3a;
+  --ui-fall: #17945a;
+  --ui-warn: #a86f00;
+  --ui-warn-soft: #fbf0d9;
+  --ui-flat: #7d848b;
+  --ui-gold: #b47700;
+  --ui-csi: #2f78d6;
+  --ui-ndx: #128a60;
+  --ui-btc: #c94f1f;
+  --ui-cash: #a3a9ad;
+  color-scheme: light;
+}
+body { background: var(--ui-bg); color: var(--ui-ink); }
 
 .ui-num { font-family: var(--ui-font-data); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .ui-rise { color: var(--ui-rise); }
@@ -55,7 +103,7 @@
   .ui-tabbar { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: color-mix(in srgb, var(--ui-surface) 92%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--ui-line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px)); }
   .ui-tabbar button { border: 0; background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--ui-ink-3); padding: 6px 0; cursor: pointer; }
   .ui-tabbar button[aria-current="page"] { color: var(--ui-accent); font-weight: 600; }
-  .ui-more-sheet { display: flex; flex-direction: column; gap: 4px; position: fixed; left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); z-index: 41; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--ui-radius); padding: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
+  .ui-more-sheet { display: flex; flex-direction: column; gap: 4px; position: fixed; left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); z-index: 41; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--ui-radius); padding: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
   .ui-more-sheet[hidden] { display: none; }
   .ui-more-sheet button { border: 0; background: none; color: var(--ui-ink); text-align: left; padding: 12px; border-radius: 10px; font-size: 15px; }
   .ui-more-sheet button small { display: block; color: var(--ui-ink-3); font-size: 12px; }
@@ -150,12 +198,16 @@ details.ui-details[open] > summary::after { content: "收起"; }
 .ui-chip.s4 { color: var(--ui-fall); background: color-mix(in srgb, var(--ui-fall) 13%, transparent); }
 .ui-mkt { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .ui-mkt .ui-panel { padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ui-mkt-card { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ui-mkt-card:hover:not(:disabled) { border-color: var(--ui-ink-3); }
+.ui-mkt-card[aria-pressed="true"] { border-color: var(--ui-accent); }
+.ui-mkt-card:disabled { cursor: default; }
 .ui-mkt h3 { font-size: 15px; font-weight: 600; margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .ui-mkt p { margin: 0; font-size: 13px; color: var(--ui-ink-2); }
 .ui-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
 .ui-seg { display: inline-flex; background: var(--ui-sunken); border-radius: 999px; padding: 3px; gap: 2px; flex-wrap: wrap; max-width: 100%; }
 .ui-seg button { border: 0; background: none; padding: 5px 12px; border-radius: 999px; font-size: 13px; cursor: pointer; color: var(--ui-ink-2); white-space: nowrap; }
-.ui-seg button[aria-pressed="true"] { background: var(--ui-surface); color: var(--ui-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.ui-seg button[aria-pressed="true"] { background: var(--ui-surface); color: var(--ui-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); }
 .ui-split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 1280px) and (min-width: 921px) { .ui-watch .hide-md { display: none; } }
 .ui-tbl-wrap { overflow-x: auto; }
@@ -195,3 +247,12 @@ details.ui-details[open] > summary::after { content: "收起"; }
 /* BTC panel: chart left, numbers right; stacked on narrow screens */
 .ui-btc-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 860px) { .ui-btc-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* theme toggle in the rail and the phone "more" sheet */
+.ui-theme { display: inline-flex; background: var(--ui-sunken); border-radius: 999px; padding: 3px; gap: 2px; margin: 0 10px; }
+.ui-theme button { border: 0; background: none; color: var(--ui-ink-3); border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ui-theme button[aria-pressed="true"] { background: var(--ui-surface); color: var(--ui-ink); font-weight: 600; }
+.ui-rail .ui-theme { margin-top: auto; align-self: flex-start; }
+
+/* Pages not yet redesigned keep their dark look in either theme. */
+.ui-legacy { background: #09090b; color: #f4f4f5; color-scheme: dark; min-height: 100vh; }

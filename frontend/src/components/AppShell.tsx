@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BarChart3, BookOpen, Home, LineChart, MoreHorizontal, Waves } from 'lucide-react';
 
 export type AppTab = 'watchlist' | 'rs' | 'wbb' | 'st' | 'history' | 'portfolio';
@@ -24,6 +24,27 @@ const MORE_TABS: NavItem[] = [
   { tab: 'rs', label: 'RS 轮动', hint: '历史研究工具', icon: <LineChart {...ICON} /> },
 ];
 
+type ThemeChoice = 'system' | 'light' | 'dark';
+const THEMES: Array<[ThemeChoice, string]> = [['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']];
+
+function loadTheme(): ThemeChoice {
+  try {
+    const saved = localStorage.getItem('ui.theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* per-viewer preference only */ }
+  return 'system';
+}
+
+function ThemeToggle({ theme, onChange }: { theme: ThemeChoice; onChange: (next: ThemeChoice) => void }) {
+  return (
+    <div className="ui-theme" role="group" aria-label="颜色主题">
+      {THEMES.map(([value, label]) => (
+        <button key={value} type="button" aria-pressed={theme === value} onClick={() => onChange(value)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
 interface AppShellProps {
   activeTab: AppTab;
   onTabChange: (tab: AppTab) => void;
@@ -32,6 +53,16 @@ interface AppShellProps {
 
 export const AppShell: React.FC<AppShellProps> = ({ activeTab, onTabChange, children }) => {
   const [moreOpen, setMoreOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeChoice>(loadTheme);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'system') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', theme);
+    try {
+      if (theme === 'system') localStorage.removeItem('ui.theme');
+      else localStorage.setItem('ui.theme', theme);
+    } catch { /* per-viewer preference only */ }
+  }, [theme]);
   const inMore = MORE_TABS.some(item => item.tab === activeTab);
   const go = (tab: AppTab) => {
     setMoreOpen(false);
@@ -59,6 +90,7 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onTabChange, chil
           <div className="ui-nav-sep">更多</div>
           {MORE_TABS.map(navButton)}
         </nav>
+        <ThemeToggle theme={theme} onChange={setTheme} />
       </aside>
 
       <div className="ui-content">{children}</div>
@@ -69,6 +101,7 @@ export const AppShell: React.FC<AppShellProps> = ({ activeTab, onTabChange, chil
             {item.label}<small>{item.hint}</small>
           </button>
         ))}
+        <ThemeToggle theme={theme} onChange={setTheme} />
       </div>
       <nav className="ui-tabbar" aria-label="主导航">
         {MAIN_TABS.map(item => (

@@ -2,6 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Apply the saved colour theme before first paint (see AppShell ThemeToggle).
+      try { var t = localStorage.getItem('ui.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+    </script>
     <link rel="preconnect" href="http://127.0.0.1:8000" />
     <link rel="dns-prefetch" href="http://127.0.0.1:8000" />
     <!-- Data Pre-fetch: 使用相对路径，带有自动重试机制，应对后端重启时的连接超时 -->

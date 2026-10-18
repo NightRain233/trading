@@ -339,13 +339,15 @@ export function MarketPage({ groups, updatedAt, onManage }: MarketPageProps) {
           {MARKET_BENCHMARKS.map(([symbol, label]) => {
             const stock = allStocks.get(symbol);
             return (
-              <div className="ui-panel" key={symbol}>
+              <button type="button" className="ui-panel ui-mkt-card" key={symbol} disabled={!stock}
+                aria-pressed={current?.symbol === symbol}
+                onClick={() => { setGroupId('all'); setFilter('all'); setSelected(symbol); setSheetOpen(true); }}>
                 <h3>{label} <StageChip view={stock?.weinstein} compact /></h3>
                 <p>{stock ? marketReading(stock.weinstein) : '自选里没有这个品种'}</p>
                 {stock?.weinstein && (
                   <p className="ui-muted">距 30 周线 <span className={`ui-num ${tone(stock.weinstein.ma30Distance)}`}>{signed(stock.weinstein.ma30Distance)}</span> {slopeArrow(stock.weinstein.ma30Slope)}{stock.weeklyMacdStatus ? ` · 周线 MACD ${stock.weeklyMacdStatus.replace('周线', '')}` : ''}</p>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
