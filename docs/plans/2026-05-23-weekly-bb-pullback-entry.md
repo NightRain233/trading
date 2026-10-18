@@ -58,7 +58,7 @@ Expected: pass.
 **Files:**
 - Modify: `backend/main.py`
 - Modify: `frontend/src/components/WeeklyBreakoutPage.tsx`
-- Modify: `docs/weekly-bb-breakout.md`
+- Modify: `docs/legacy/weekly-bb-breakout.md`
 
 **Step 1: Add API state**
 

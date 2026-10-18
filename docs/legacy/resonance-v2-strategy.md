@@ -2,7 +2,7 @@
 
 本文描述 `resonance_v2` 策略的完整逻辑，包括入池判断、评分系统、风险管理和策略版本机制。
 
-API 字段契约见 `doc/current-api-contract.md`，v1 基础逻辑见 `doc/current-system-strategy.md`。
+API 字段契约见 `docs/legacy/current-api-contract.md`，v1 基础逻辑见 `docs/legacy/current-system-strategy.md`。
 
 ## 1. 与 v1 的核心区别
 
@@ -118,4 +118,4 @@ API 字段契约见 `doc/current-api-contract.md`，v1 基础逻辑见 `doc/curr
 | `backend/analysis_strategy.py` | `_evaluate_resonance_strategy_v2()` 实现 |
 | `backend/strategy_versions.py` | 版本注册表 |
 | `backend/main.py` | `StockResponse` 模型（resonance 字段） |
-| `doc/current-system-strategy.md` | v1 策略和通用趋势层说明 |
+| `docs/legacy/current-system-strategy.md` | v1 策略和通用趋势层说明 |

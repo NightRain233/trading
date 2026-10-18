@@ -249,7 +249,7 @@ Expected: PASS.
 Run:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 uv run python ../scripts/backfill_historical_data.py \
   --symbols 511010.SS CNY=X GLD SPY QQQ BTC-USD \
   --start 2000-01-01 \
@@ -266,7 +266,7 @@ Expected:
 Inspect:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 uv run python -c "import pandas as pd; from pathlib import Path; [(lambda f: print(f.name, pd.read_parquet(f).index.min(), pd.read_parquet(f).index.max(), len(pd.read_parquet(f))))(Path('data') / f'{s}.parquet') for s in ['511010.SS','CNY=X','GLD','SPY','QQQ','BTC-USD']]"
 ```
 
@@ -862,7 +862,7 @@ Expected: all tests PASS.
 **Step 5: Run the full research**
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run python ../scripts/research_multi_asset_balanced_portfolio.py \
   --config universes/multi_asset_balanced.json \
   --data-dir data \
@@ -882,7 +882,7 @@ Expected:
 **Step 6: Inspect the top-level output**
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 jq '{
   coverage: .coverage,
   recommendation: .recommendation,

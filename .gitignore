@@ -41,3 +41,6 @@ backend/backtest_results/
 outputs/
 data/
 .worktrees/
+
+# Unrelated local scratch work
+.codex_spreadsheet_work/

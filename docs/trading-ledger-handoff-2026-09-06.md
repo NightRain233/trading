@@ -13,10 +13,10 @@
 
 历史研究和每日纸面状态是两条不同的工作流：
 
-- [xquant 研究包](/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/README.md)
+- [xquant 研究包](../../xquant/research/trading-ledger-2026-09-05/README.md)
   保存原始研究恢复、修复后历史基准、五个三资产变种的统一账本、审计文件和复现脚本。它用于
   复现、审计和开启下一轮独立研究，不用于显示今天的持仓或决定今天是否成交。
-- trading 中已有的 [`/portfolio-daily-brief` skill](/Users/zz/Desktop/Code/zsd/trading/.agents/skills/portfolio-daily-brief/SKILL.md)
+- trading 中已有的 [`/portfolio-daily-brief` skill](../.agents/skills/portfolio-daily-brief/SKILL.md)
   用当前 API 和日报渲染器展示纸面账户。它是只读入口，不创建订单、不刷新账户、不修改参数，
   也不把连接失败解释成“没有订单”。目前不需要再做第二套日报 skill。
 - 写入账户状态的是 `scripts/run_portfolio_daily.sh` 及其调用的 `portfolio_daily_job.py`；日报
@@ -33,7 +33,7 @@
 `dataStale=false`、`dataIntegrity.hasGap=false`。服务器缓存显示 A 股走 TickFlow，8 月 25 日
 份额拆分与后续三分之一价格对应；现有证据高度指向复权切换触发全量刷新保护，但无法从旧日志
 还原最初的具体异常。详见
-[`docs/issue-5-live-audit-2026-09-05.md`](/Users/zz/Desktop/Code/zsd/trading/docs/issue-5-live-audit-2026-09-05.md)。
+[`docs/issue-5-live-audit-2026-09-05.md`](../docs/issue-5-live-audit-2026-09-05.md)。
 
 结论是“线上已恢复，根因高度指向拆分复权保护”，没有放松新鲜度门槛，也没有改写生产账本或
 关闭 GitHub issue。
@@ -92,7 +92,7 @@ xquant 的 `research/trading-ledger-2026-09-05/` 现在包含：
 由维护任务先更新行情、推进纸面账户并生成 Markdown 日报：
 
 ```bash
-cd /Users/zz/Desktop/Code/zsd/trading
+cd <workspace>/trading
 scripts/run_portfolio_daily.sh
 ```
 
@@ -136,8 +136,8 @@ python3 scripts/openclaw_supertrend_alerts.py \
 
 ## 入口索引
 
-- 研究包总说明：`/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/README.md`
+- 研究包总说明：`<workspace>/xquant/research/trading-ledger-2026-09-05/README.md`
 - 主策略复现：`.../core90_current_contract_2026_09_05/README.md`
 - 变种比较：`.../three_asset_variant_comparison_2026_09_05/README.md`
-- 纸面策略合同：[`docs/portfolio-strategies-paper-tracking.md`](/Users/zz/Desktop/Code/zsd/trading/docs/portfolio-strategies-paper-tracking.md)
-- 日报 skill：[`portfolio-daily-brief/SKILL.md`](/Users/zz/Desktop/Code/zsd/trading/.agents/skills/portfolio-daily-brief/SKILL.md)
+- 纸面策略合同：[`docs/portfolio-strategies-paper-tracking.md`](../docs/portfolio-strategies-paper-tracking.md)
+- 日报 skill：[`portfolio-daily-brief/SKILL.md`](../.agents/skills/portfolio-daily-brief/SKILL.md)

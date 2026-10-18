@@ -1,6 +1,6 @@
 # 当前 API 契约说明
 
-本文只描述当前后端 API 的请求、返回和字段语义。策略规则见 `doc/current-system-strategy.md`。
+本文只描述当前后端 API 的请求、返回和字段语义。策略规则见 `docs/legacy/current-system-strategy.md`。
 
 ## 1. API 总览
 
@@ -368,7 +368,7 @@ v2 新增字段（实时行情页使用）：
 - `resonanceTargetPrice`: ATR 目标价（无固定目标时为 `null`）
 - `resonanceRewardRiskRatio`: 盈亏比（无目标时为 `null`）
 
-v2 策略逻辑详见 `docs/resonance-v2-strategy.md`。
+v2 策略逻辑详见 `docs/legacy/resonance-v2-strategy.md`。
 
 ### 5.6 图表字段
 

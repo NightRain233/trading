@@ -20,9 +20,9 @@ BTC satellite 等纸面账户不删除，继续后台积累前向对照记录，
 - 成本：单边 5 bps 手续费加 5 bps 不利滑点；
 - 约束：单标的 10%、最多 10 个并发、bull sleeve 最大 100% 敞口。
 
-来源：`/Users/zz/Desktop/Code/zsd/xquant/outputs/scan-v2-all-bull-flip-long-sample/`
+来源：`<workspace>/xquant/outputs/scan-v2-all-bull-flip-long-sample/`
 以及经开盘价定仓修正的
-`/Users/zz/Desktop/Code/zsd/xquant/outputs/scan-v2-all-bull-flip-defense-open-sizing-fix-2026-08-20/`。
+`<workspace>/xquant/outputs/scan-v2-all-bull-flip-defense-open-sizing-fix-2026-08-20/`。
 
 ## 三个问题如何处理
 
@@ -91,7 +91,7 @@ Bull10 保留为增强观察线；两者的统一账本结果和限制已经记�
 ## 2026-09-05 原始产物恢复
 
 原始行情、决策、成员、交易与 NAV 已恢复为 sibling xquant 仓库内的独立研究包：
-`/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/core90_recovery_2026_09_05/README.md`。
+`<workspace>/xquant/research/trading-ledger-2026-09-05/core90_recovery_2026_09_05/README.md`。
 封存源码对 81 份历史行情进行离线重跑，三条原始 NAV 共 12,627 行对齐，差异为浮点精度。
 因此旧指标已有可复核来源；当前主策略的统一执行、PIT 和 FX 边界也已在新基准中记录。
 完整历史证券主表和完整开盘限制数据仍是本基准的已知限制，不影响本阶段研究包冻结，但会限制结论外推范围。
@@ -110,4 +110,4 @@ Bull10 保留为增强观察线；两者的统一账本结果和限制已经记�
 新结果限定于 81 个可观察候选及现有 FX 阻断和开盘可成交假设，完整历史证券主表、
 样本外盈利与成本压力仍未验证；Raw 对照仍用旧执行合同，不能据此单独归因 MA200 的效果。
 详细合同、逐订单差异、守恒审计和封存源码见 sibling xquant 研究包：
-`/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/core90_current_contract_2026_09_05/README.md`。
+`<workspace>/xquant/research/trading-ledger-2026-09-05/core90_current_contract_2026_09_05/README.md`。

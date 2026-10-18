@@ -2,7 +2,7 @@
 
 ## 口径
 
-- 样本：`/Users/zz/Downloads/trading/backend/universes/a_share_etf_core.json`
+- 样本：`<workspace>/trading/backend/universes/a_share_etf_core.json`
 - 数据：本地 parquet 缓存，不联网下载。
 - 成本：单边手续费 5 bps，单边滑点 5 bps。
 - RS：60 日强度排序、20 个交易日再平衡、持有 top5、用 510300 月 MACD 做市场过滤。

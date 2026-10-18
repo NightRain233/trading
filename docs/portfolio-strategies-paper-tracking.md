@@ -1,7 +1,7 @@
 # Portfolio Strategies Paper Tracking
 
 跨仓库交接、研究包与日报入口见
-[`docs/trading-ledger-handoff-2026-09-06.md`](/Users/zz/Desktop/Code/zsd/trading/docs/trading-ledger-handoff-2026-09-06.md)。
+[`docs/trading-ledger-handoff-2026-09-06.md`](../docs/trading-ledger-handoff-2026-09-06.md)。
 
 ## Quick Start
 
@@ -71,7 +71,7 @@ days, and limited each bull-flip instrument to about 1% of total portfolio NAV.
 
 Those figures describe the original xquant study. The repaired primary 2.1.0
 contract has a separate recomputed baseline in the sibling xquant research package
-(`/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/core90_current_contract_2026_09_05/README.md`):
+(`<workspace>/xquant/research/trading-ledger-2026-09-05/core90_current_contract_2026_09_05/README.md`):
 14.98% CAGR, 1.30 Sharpe and -12.66% maximum drawdown over the same sample window,
 subject to a limited observable universe and documented execution assumptions.
 Version 2.1.0 records satellite budget resizing as actual next-open orders/fills,

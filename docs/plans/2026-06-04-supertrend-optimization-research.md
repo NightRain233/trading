@@ -31,7 +31,7 @@ Cover these behaviors:
 Run:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run pytest tests/test_compare_supertrend_timeframes.py -q
 ```
 
@@ -98,7 +98,7 @@ Return all variants in each row while keeping old keys for baseline compatibilit
 Run:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run pytest tests/test_compare_supertrend_timeframes.py -q
 ```
 
@@ -141,7 +141,7 @@ Run the focused test file. Expected: PASS.
 **Step 1: Run BTC JSON**
 
 ```bash
-cd /Users/zz/Downloads/trading
+cd <workspace>/trading
 uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --symbols BTC-USD --json
 ```
 
@@ -150,7 +150,7 @@ Record baseline, squeeze, no-chase, weekly, and combo results.
 **Step 2: Run full watchlist table**
 
 ```bash
-cd /Users/zz/Downloads/trading
+cd <workspace>/trading
 uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --limit 80
 ```
 
@@ -161,14 +161,14 @@ Record global and bucket-level summaries.
 At minimum:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run pytest tests/test_compare_supertrend_timeframes.py -q
 ```
 
 If any backend shared module is touched, run:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run pytest -q
 ```
 
@@ -241,14 +241,14 @@ When enabled, include `annualSummary` in JSON/table output. Each year should sho
 Run:
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run pytest tests/test_compare_supertrend_timeframes.py -q
 ```
 
 Then:
 
 ```bash
-cd /Users/zz/Downloads/trading
+cd <workspace>/trading
 uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --symbols BTC-USD --annual --json
 uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --param-grid --json
 ```

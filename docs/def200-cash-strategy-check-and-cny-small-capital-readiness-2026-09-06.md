@@ -385,15 +385,15 @@ trading 实现中的入选 LVT 资产再按 20 日逆波动率配权，单个 LV
 ### 5.1 测算和证据输出
 
 ```bash
-cd /Users/zz/Desktop/Code/zsd/xquant
-PYTHONPATH=/Users/zz/Desktop/Code/zsd/trading/backend:/Users/zz/Desktop/Code/zsd/xquant \
-  /Users/zz/Desktop/Code/zsd/trading/backend/.venv/bin/python \
+cd <workspace>/xquant
+PYTHONPATH=<workspace>/trading/backend:<workspace>/xquant \
+  <workspace>/trading/backend/.venv/bin/python \
   scripts/replay_theme_alpha_next_close_v2.py
 ```
 
 v2 新输出目录（未覆盖冻结研究和 v1 静态证据）：
 
-`/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-manual-review-2026-09-06-v2/`
+`<workspace>/xquant/outputs/def200-cash-manual-review-2026-09-06-v2/`
 
 关键文件：
 
@@ -411,18 +411,18 @@ v2 新输出目录（未覆盖冻结研究和 v1 静态证据）：
 最新完整行情最低资金测算命令：
 
 ```bash
-cd /Users/zz/Desktop/Code/zsd/xquant
-PYTHONPATH=/Users/zz/Desktop/Code/zsd/trading/backend:/Users/zz/Desktop/Code/zsd/xquant \
-  /Users/zz/Desktop/Code/zsd/trading/backend/.venv/bin/python \
+cd <workspace>/xquant
+PYTHONPATH=<workspace>/trading/backend:<workspace>/xquant \
+  <workspace>/trading/backend/.venv/bin/python \
   scripts/scan_theme_alpha_minimum_capital.py \
   --as-of-date 2026-09-06 \
-  --input-dir /Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-minimum-capital-2026-09-06 \
-  --output-dir /Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2
+  --input-dir <workspace>/xquant/outputs/def200-cash-minimum-capital-2026-09-06 \
+  --output-dir <workspace>/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2
 ```
 
 新增输出目录（本轮复用已有隔离快照，没有再次抓取，也没有写回 `trading/backend/data`）：
 
-`/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2/`
+`<workspace>/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2/`
 
 关键文件：
 
@@ -438,7 +438,7 @@ PYTHONPATH=/Users/zz/Desktop/Code/zsd/trading/backend:/Users/zz/Desktop/Code/zsd
 
 上一版一次性取整证据仍在：
 
-`/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-manual-review-2026-09-06/`
+`<workspace>/xquant/outputs/def200-cash-manual-review-2026-09-06/`
 
 它只能作为 `staticExample`，不能替代 v2。
 
@@ -447,11 +447,11 @@ PYTHONPATH=/Users/zz/Desktop/Code/zsd/trading/backend:/Users/zz/Desktop/Code/zsd
 ### 5.2 测试命令与结果
 
 ```bash
-cd /Users/zz/Desktop/Code/zsd/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run --group dev pytest -q
 # 503 passed, 6 skipped, 3 warnings
 
-cd /Users/zz/Desktop/Code/zsd/xquant
+cd <workspace>/xquant
 uv run pytest -q
 # 63 passed
 
@@ -462,7 +462,7 @@ uv run pytest -q tests/test_def200_cash_manual_review.py
 本次新增的 focused tests：
 
 ```bash
-cd /Users/zz/Desktop/Code/zsd/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run --group dev pytest -q \
   tests/test_theme_alpha_strategy.py \
   tests/test_portfolio_paper_engine.py
@@ -522,31 +522,31 @@ trading 的 3 个 warning 是 pandas Copy-on-Write 和 FastAPI `on_event` 的既
 
 ### 必看研究/交接文件
 
-- `/Users/zz/Desktop/Code/zsd/trading/docs/trading-ledger-handoff-2026-09-06.md`
-- `/Users/zz/Desktop/Code/zsd/trading/docs/portfolio-strategies-paper-tracking.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/research/trading-ledger-2026-09-05/README.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/docs/notes/theme-alpha-q6-bear-defense-benchmark-completion-review.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/docs/notes/theme-alpha-q7-production-realism-review.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/docs/notes/theme-alpha-q8-signal-live-readiness-review.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/docs/notes/theme-alpha-q12-long-sample-proxy-validation-review.md`
-- `/Users/zz/Desktop/Code/zsd/xquant/docs/notes/paper-tracking-oos-2026-06-27-review.md`
+- `<workspace>/trading/docs/trading-ledger-handoff-2026-09-06.md`
+- `<workspace>/trading/docs/portfolio-strategies-paper-tracking.md`
+- `<workspace>/xquant/research/trading-ledger-2026-09-05/README.md`
+- `<workspace>/xquant/docs/notes/theme-alpha-q6-bear-defense-benchmark-completion-review.md`
+- `<workspace>/xquant/docs/notes/theme-alpha-q7-production-realism-review.md`
+- `<workspace>/xquant/docs/notes/theme-alpha-q8-signal-live-readiness-review.md`
+- `<workspace>/xquant/docs/notes/theme-alpha-q12-long-sample-proxy-validation-review.md`
+- `<workspace>/xquant/docs/notes/paper-tracking-oos-2026-06-27-review.md`
 
 ### 关键实现和本次核验文件
 
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/registry.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/theme_alpha.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/indicators.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/schedules.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/market_data.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/portfolio_strategies/paper_engine.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/tests/test_theme_alpha_strategy.py`
-- `/Users/zz/Desktop/Code/zsd/trading/backend/tests/test_portfolio_paper_engine.py`
-- `/Users/zz/Desktop/Code/zsd/xquant/scripts/review_def200_cash_manual_execution.py`
-- `/Users/zz/Desktop/Code/zsd/xquant/scripts/replay_theme_alpha_next_close_v2.py`
-- `/Users/zz/Desktop/Code/zsd/xquant/scripts/scan_theme_alpha_minimum_capital.py`
-- `/Users/zz/Desktop/Code/zsd/xquant/tests/test_def200_cash_manual_review.py`
-- `/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-manual-review-2026-09-06-v2/`
-- `/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2/`（本次固定预算主输出）
-- `/Users/zz/Desktop/Code/zsd/xquant/outputs/def200-cash-manual-review-2026-09-06/`（v1 静态示例）
+- `<workspace>/trading/backend/portfolio_strategies/registry.py`
+- `<workspace>/trading/backend/portfolio_strategies/theme_alpha.py`
+- `<workspace>/trading/backend/portfolio_strategies/indicators.py`
+- `<workspace>/trading/backend/portfolio_strategies/schedules.py`
+- `<workspace>/trading/backend/portfolio_strategies/market_data.py`
+- `<workspace>/trading/backend/portfolio_strategies/paper_engine.py`
+- `<workspace>/trading/backend/tests/test_theme_alpha_strategy.py`
+- `<workspace>/trading/backend/tests/test_portfolio_paper_engine.py`
+- `<workspace>/xquant/scripts/review_def200_cash_manual_execution.py`
+- `<workspace>/xquant/scripts/replay_theme_alpha_next_close_v2.py`
+- `<workspace>/xquant/scripts/scan_theme_alpha_minimum_capital.py`
+- `<workspace>/xquant/tests/test_def200_cash_manual_review.py`
+- `<workspace>/xquant/outputs/def200-cash-manual-review-2026-09-06-v2/`
+- `<workspace>/xquant/outputs/def200-cash-minimum-capital-2026-09-06-v2/`（本次固定预算主输出）
+- `<workspace>/xquant/outputs/def200-cash-manual-review-2026-09-06/`（v1 静态示例）
 
 本次工作保留了用户原有改动，未提交、未推送、未部署、未改定时任务、未激活账户、未连接券商接口。

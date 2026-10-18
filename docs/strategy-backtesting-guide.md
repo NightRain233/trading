@@ -130,7 +130,7 @@ HTML 报告可以保留一个”怎么看买卖点”的入口说明和一两个
 前端复盘页依赖后端 SQLite 缓存。可以用以下命令对观察池全部标的预计算 SuperTrend 历史交易（默认近 5 年），避免打开页面时逐个标的实时计算：
 
 ```bash
-cd /Users/zz/Downloads/trading/backend
+cd <workspace>/trading/backend
 PYTHONPATH=. uv run python main.py --precompute-history-trades
 ```
 

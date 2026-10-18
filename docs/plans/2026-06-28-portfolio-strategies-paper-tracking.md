@@ -13,7 +13,7 @@
 ## Preconditions
 
 - Work only on branch `codex/portfolio-strategies-paper-tracking`.
-- Treat `/Users/zz/Desktop/Code/zsd/xquant` as read-only.
+- Treat `<workspace>/xquant` as read-only.
 - Use xquant commit `1d1b36e0fd22239767d3e2293f750ce7a01ffb61` for fixture metadata.
 - Never import from or open the xquant path at trading runtime or during normal tests.
 - Official paper execution is next-close.
@@ -461,7 +461,7 @@ decision-composition comparisons.
 **Step 7: Prove no xquant runtime dependency**
 
 ```bash
-rg -n "/Users/zz/Desktop/Code/zsd/xquant|import xquant|from xquant" backend --glob '!tests/fixtures/**'
+rg -n "<workspace>/xquant|import xquant|from xquant" backend --glob '!tests/fixtures/**'
 ```
 
 Expected: no matches.
@@ -938,7 +938,7 @@ Expected: PASS and successful production build.
 
 ```bash
 cd ..
-rg -n "/Users/zz/Desktop/Code/zsd/xquant|import xquant|from xquant" backend frontend --glob '!backend/tests/fixtures/**'
+rg -n "<workspace>/xquant|import xquant|from xquant" backend frontend --glob '!backend/tests/fixtures/**'
 git diff --check
 git status --short
 ```

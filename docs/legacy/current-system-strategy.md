@@ -1,6 +1,6 @@
 # 当前系统策略说明
 
-本文只描述当前系统“实际实现的策略逻辑”，不展开 API 细节。接口和字段契约见 `doc/current-api-contract.md`。
+本文只描述当前系统“实际实现的策略逻辑”，不展开 API 细节。接口和字段契约见 `docs/legacy/current-api-contract.md`。
 
 ## 1. 系统定位
 
@@ -22,7 +22,7 @@
 2. `resonance_v1` 共振策略层（基础版，固定参数）
 3. `resonance_v2` 共振策略层（当前主力，支持多版本配置、评分系统、ATR 风险管理）
 
-前者描述市场状态，后两者更接近”筛池 + 买点 + 风险提示”。v2 详细说明见 `docs/resonance-v2-strategy.md`。
+前者描述市场状态，后两者更接近”筛池 + 买点 + 风险提示”。v2 详细说明见 `docs/legacy/resonance-v2-strategy.md`。
 
 ## 3. 通用趋势分析层
 
@@ -119,7 +119,7 @@ v2 在 v1 基础上新增：
 - `resonanceTargetPrice`：ATR 目标价（无固定目标时为 null）
 - `resonanceRewardRiskRatio`：盈亏比
 
-v2 完整逻辑见 `docs/resonance-v2-strategy.md`。
+v2 完整逻辑见 `docs/legacy/resonance-v2-strategy.md`。
 
 ### 5.1 `resonance_v1` 共振策略
 

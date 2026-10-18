@@ -756,7 +756,7 @@ Run:
 
 ```bash
 make deploy-full \
-  DEPLOY_HOST=root@8.153.71.148 \
+  DEPLOY_HOST=root@<server> \
   DEPLOY_PATH=/home/zsd/trading
 ```
 

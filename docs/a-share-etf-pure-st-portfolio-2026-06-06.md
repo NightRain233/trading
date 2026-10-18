@@ -2,7 +2,7 @@
 
 ## 口径
 
-- 样本：`/Users/zz/Downloads/trading/backend/universes/a_share_etf_core.json`
+- 样本：`<workspace>/trading/backend/universes/a_share_etf_core.json`
 - 本地可用 ETF：28 个
 - 区间：2021-05-06 到 2026-06-05
 - SuperTrend：`ST(7,3)`

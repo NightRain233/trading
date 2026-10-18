@@ -1,209 +1,81 @@
 # AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents (Claude Code reads it through `CLAUDE.md`). The user-facing overview is [README.md](README.md); the docs index is [docs/README.md](docs/README.md).
 
-## Project Overview
+## What this project is
 
-A trend trading system with real-time stock analysis and visualization. The application provides technical analysis based on EMA (Exponential Moving Average), ADX (Average Directional Index), MACD, RSI, and other indicators to support trend-following trading strategies.
+A personal market dashboard for one non-technical investor. It runs frozen strategy rules on paper accounts, keeps a ledger, renders the pages, and produces a daily push. It never places real orders. Research and backtests live in the sibling repo `../xquant`.
 
-**Architecture**: Full-stack application with Python FastAPI backend and React TypeScript frontend, containerized with Docker.
+**Talk to the user in plain Chinese**, conclusions first, with analogies rather than jargon.
 
-## 复盘记录
+### The primary strategy (decided 2026-10-18)
 
-分析任何标的之前，先读取 `reviews/README.md` 了解复盘目录结构，然后检查最近 3 天复盘和相关品种页面。复盘目录使用 Obsidian 格式（wikilink 互联）。
+`btc_supertrend_satellite`: 510300.SS / 513100.SS / 518880.SS weighted by 20-session inverse volatility (checked every 10 XSHG sessions) plus a 7.5% BTC sleeve switched by a daily SuperTrend(10, 3, SMA ATR) on check days, executed at the next close. Everything else in `backend/portfolio_strategies/registry.py` is a comparison account.
+
+- Do not add strategies, sleeves or complexity unless the user asks; first ask "does this serve the primary strategy?"
+- No bonds inside the strategy: the user's idle cash is the buffer.
+- Technical analysis (Weinstein stages, the SuperTrend scan) is a learning layer and never changes primary holdings. Frozen research: A-share timing never beat buy-and-hold; Weinstein helps on US indices; daily ST suits BTC; gold was not tested.
 
 ## Commands
 
-### Development
-
 ```bash
-# Install all dependencies (frontend + backend)
-make install
-
-# Run full stack locally (both frontend and backend in parallel)
-make dev
-
-# Run frontend only (Vite dev server on port 5173)
-make dev-fe
-
-# Run backend only (uvicorn on port 8000)
-make dev-be
+make install          # backend (uv) + frontend (pnpm)
+make dev              # frontend :5173, backend :8000
 ```
 
-### Build & Deploy
+Running the backend by hand (Yahoo needs a proxy in China):
 
-```bash
-# Build frontend production bundle
-make build-fe
-
-# Build Docker images
-make docker-build
-
-# Start containers (detached mode)
-make up
-
-# Stop containers
-make down
-
-# View logs
-make logs
-
-# Restart containers
-make restart
-
-# Deploy to remote server (uses rsync)
-make deploy
-```
-
-### Package Management
-
-- **Frontend**: Uses `pnpm` (required, not npm/yarn)
-- **Backend**: Uses `uv` for Python dependency management (replaces pip/venv)
-
-## Technical Architecture
-
-### Backend (`/backend`)
-
-**Framework**: FastAPI with uvicorn ASGI server
-
-**Core Files**:
-- `main.py`: FastAPI application with REST API endpoints and watchlist management
-- `analysis.py`: Facade module — re-exports all symbols from sub-modules and contains top-level functions (`analyze_stock`, `batch_fetch_and_update`, `analyze_stock_summary`)
-- `analysis_constants.py`: All configuration constants (cache durations, indicator periods, thresholds)
-- `analysis_cache.py`: Thread locks, in-memory cache, async/sync refresh workers, `get_cached_batch_summaries`
-- `analysis_data.py`: Data fetching (yfinance), merging, and indicator calculation (`_calculate_daily_indicators`, `_calculate_weekly_indicators`, `fetch_stock_data`)
-- `analysis_strategy.py`: Resonance strategy signals (`_evaluate_resonance_strategy_v2`, `_evaluate_resonance_exit_no_position`, etc.)
-- `analysis_candles.py`: Candlestick construction (`_build_candles`, `_build_mini_candles`)
-- `backtest.py`: Backtesting engine — single-symbol backtest, portfolio simulation, RS rotation strategy
-- `strategy_versions.py`: Strategy version registry (entry/exit parameters per version ID)
-
-**Key Features**:
-- **Watchlist Management**: Group-based organization with drag-and-drop support, symbol aliases
-- **Technical Indicators**: EMA20/50, ADX(14), RSI (7/14/21 periods), MACD, BOLL, KDJ, ATR
-- **Data Caching**: Parquet-based caching (1-hour cache duration, 2-year retention)
-- **Thread Safety**: Fine-grained locking per symbol for indicator calculation, global lock for yfinance downloads
-- **Weekly Data**: Resampled weekly candles and indicators for longer-term trend analysis
-
-**API Endpoints**:
-- `GET /api/quote/{symbol}`: Fetch detailed stock analysis with all indicators
-- `GET /api/watchlist`: Get watchlist structure (groups and symbols)
-- `POST /api/watchlist`: Add symbol to watchlist group
-- `DELETE /api/watchlist/{symbol}`: Remove symbol from watchlist
-- `PUT /api/watchlist/{symbol}/alias`: Update symbol alias
-- `POST /api/groups`: Create new watchlist group
-- `PUT /api/watchlist`: Update entire watchlist structure (for reordering)
-
-**Dependencies**: FastAPI, pandas, pandas-ta, yfinance, pyarrow (for Parquet), uvicorn
-
-### Frontend (`/frontend`)
-
-**Framework**: React 19 + TypeScript + Vite
-
-**Key Libraries**:
-- **UI**: Tailwind CSS 4, framer-motion (animations), lucide-react (icons)
-- **Charts**: lightweight-charts (TradingView-style charts)
-- **Drag & Drop**: @dnd-kit/core, @dnd-kit/sortable
-
-**Core Components**:
-- `App.tsx`: Main application with watchlist groups, drag-and-drop reordering, stock search
-- `ChartModal.tsx`: Full-screen chart modal with 5-panel stacked layout (Price/OHLC, RSI, KDJ, MACD, ATR), synchronized crosshairs and time axis, responsive mobile layout with magnet mode
-- `StatusBadge.tsx`: Visual indicator badges for trend/signal status
-- `StockGroup.tsx`: Collapsible group component with drag-and-drop support
-
-**State Management**: React hooks (useState, useEffect, useMemo) - no external state library
-
-**API Client**: Utility functions in `utils.ts` for all backend communication
-
-### Docker Deployment
-
-**Network Mode**: Both containers use `host` network mode for simplified communication
-
-**Backend Container**:
-- Base: `python:3.12-slim` with `uv` installed
-- Runs with 4 uvicorn workers
-- HTTP proxy configured for China network access
-- Volume mount: `./backend/data` for persistent cache
-
-**Frontend Container**:
-- Multi-stage build: Node.js build → Nginx serve
-- Nginx proxies `/api/*` requests to `http://127.0.0.1:8000`
-- Serves static files from `/usr/share/nginx/html`
-
-## Development Workflow
-
-### Adding New Technical Indicators
-
-1. Define parameters as constants in `analysis_constants.py`
-2. Calculate indicator in `_calculate_daily_indicators()` in `analysis_data.py`
-3. Add fields to `StockResponse` model in `main.py`
-4. Update TypeScript types in `frontend/src/types.ts`
-5. Render indicator in `ChartModal.tsx` (add new chart panel or overlay)
-
-### Modifying Chart Layout
-
-The chart modal uses a 5-panel stacked layout with synchronized time axis and crosshairs:
-- Price chart (OHLC + EMA + BOLL)
-- RSI panel
-- KDJ panel
-- MACD panel
-- ATR panel
-
-Each chart is created with `createChart()` from lightweight-charts. Synchronization is handled via shared `syncHandler` function that coordinates crosshair movement across all charts.
-
-### Watchlist Data Structure
-
-```typescript
-{
-  id: string,           // UUID for group
-  name: string,         // Display name
-  symbols: [            // Array of stocks
-    {
-      symbol: string,   // Ticker (e.g., "AAPL")
-      alias: string     // Custom name (e.g., "苹果")
-    }
-  ],
-  collapsed: boolean    // UI state
-}
-```
-
-Stored in `backend/watchlist.json` with automatic migration from legacy formats.
-
-## Trading System Context
-
-This application implements a trend-following system based on:
-- **Trend Direction**: EMA20 vs EMA50 positioning
-- **Trend Strength**: ADX > 25 indicates trending market
-- **Entry Timing**: 4-hour chart pullbacks to EMA lines with reversal patterns
-- **Risk Management**: Dynamic stops using 1.5× ATR
-
-The system is designed for twice-daily monitoring (lunch: 12:00-13:00, evening: 21:00-22:00) rather than continuous intraday trading.
-
-### Backtesting
-
-Run a backtest from the command line:
 ```bash
 cd backend
-uv run python backtest.py --symbols 510300.SS 510050.SS --strategy-version resonance_v2_atr_1_5 --start 2023-01-01
+BACKGROUND_PREWARM_ENABLED=false https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 \
+  no_proxy=127.0.0.1,localhost,free-api.tickflow.org .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Key functions in `backtest.py`:
-- `run_backtest_for_symbol`: single-symbol long-only backtest (signal → next-bar entry → stop/target/exit)
-- `simulate_rs_rotation_portfolio`: momentum rotation — ranks symbols by `lookback_bars` return, rebalances every `rebalance_days` trading days, holds top `top_n`
-- `summarize_backtest_report`: aggregates trades into report with `byPoolType`, `byAssetClass`, `byYear`, `diagnostics`, portfolio simulation
-- `annotate_relative_strength`: adds RS rank/bucket to each trade at entry date
+Tests:
 
-**RS Rotation presets** (used by the frontend backtest page):
-- `rs_rotation_a_share`: A-share ETFs, monthly MACD filter on CSI300
-- `rs_rotation_global`: A-share + SPY/QQQ/BTC-USD/GC=F, per-class monthly MACD filters
+```bash
+cd backend && PYTHONPATH=. uv run --frozen pytest -q     # or .venv/bin/python -m pytest
+cd frontend && node --test test/*.mjs && pnpm build && pnpm exec eslint src
+```
 
-**Backtest results** are saved to `backend/backtest_results/` (not the repo root).
+- Always pass `--frozen` to `uv run`: the configured Chinese mirror otherwise rewrites `backend/uv.lock`. If it changes anyway, `git checkout -- backend/uv.lock`.
+- `backend/tests/conftest.py` blocks the background refresh executor; a full run must not write anything under `backend/data/`.
+- Pre-existing lint errors live in untouched legacy components (`ChartModal`, `MiniChart`, `SortableGroup`, …) and `App.tsx` `any`s; do not count them against new work, and do not add new ones.
 
-**Regression tests** in `tests/test_backtest.py` (`RsRotationRegressionTests`) require local parquet data covering 2015–2022. They auto-skip when the cache only holds recent data (< 2 years history).
+## Architecture
 
-## Important Notes
+### Backend (`backend/`, FastAPI)
 
-- **yfinance API**: Downloads are throttled to avoid rate limiting. Cache aggressively.
-- **Time Zones**: Market data timestamps may require conversion for display
-- **Indicator Calculation**: pandas-ta column names vary by version (use prefix matching)
-- **Mobile Support**: ChartModal has responsive breakpoints and touch-optimized interactions
-- **Thread Safety**: When adding new data fetching, use `get_symbol_lock()` for indicator calculation and `global_download_lock` for yfinance downloads
+| Area | Files |
+|---|---|
+| Market data and cache | `analysis.py` (facade), `analysis_data.py` (fetch, indicators), `analysis_cache.py` (memory/disk cache, swr refresh), `data_source_guard.py` |
+| Weinstein view | `analysis_weinstein.py`: 30-week SMA stage with a 2% band, 26-week RS vs market benchmark, Bollinger state, volume ratio, `rule_state` |
+| SuperTrend scan (learning layer) | `supertrend_scan_policy.py`, `supertrend_alerts.py`, `/api/supertrend/scan` |
+| Paper portfolios | `portfolio_strategies/` (`registry.py`, `schedules.py`, `btc_satellite.py`, `service.py`, ledgers, next-open engine) |
+| History replay | `/api/history-trades*`, cache in `backtest_results/` (git-ignored) |
+
+Endpoints used by the redesigned pages: `/api/portfolio-strategies/{id}/snapshot|nav|rebalance-diff|btc-trend`, `/api/quotes/batch`, `/api/quote/{symbol}?decision=false` (chart-only, skips the slow decision scan), `/api/weinstein/scan` (cached until a weekly parquet changes). Full list: `http://127.0.0.1:8000/docs`.
+
+### Frontend (`frontend/`, React 19 + Vite + Tailwind 4)
+
+- `components/AppShell.tsx`: rail on desktop, bottom tab bar on phones, theme toggle.
+- Pages: `PortfolioStrategiesPage`, `MarketPage`, `WeeklyScanPage`, `HistoryTradesPage`, `SupertrendPage`, `RsRotationPage`. The watchlist "管理自选" view is still the old dark UI (wrapped in `.ui-legacy`) by the user's choice.
+- `design.css` holds the tokens (`--ui-*`), dark-first with light values under `prefers-color-scheme` and `[data-theme]`. Use tokens, never literal colours. A-share convention: **rise red, fall green**.
+- Charts: hand-written SVG on the new pages; lightweight-charts elsewhere via `useChartTheme()` (`chartTheme.ts`).
+- Pure helpers are `@ts-check` `.js` files with `.d.ts` declarations, tested with `node --test` (`portfolioStrategies.js`, `marketView.js`, `swrCache.js`, …).
+- System fonts only; do not add web-font imports (they block first paint in China).
+
+### Skills and agents
+
+`.agents/skills/` is the single source (Claude Code reads it via the `.claude/skills` symlink): `scan`, `analyze`, `portfolio-daily-brief`, `fupan`, plus `shared/market-rules.md` (the house view every skill reads first). Data comes from `scripts/trading_analysis_helper.py --query weekly|brief|portfolio|overview`. The daily push is `scripts/openclaw_supertrend_alerts.py --mode daily-brief`; its assistant prompt is `scripts/openclaw_daily_brief_prompt.md` (pasted into Hermes by the user).
+
+## 复盘记录
+
+分析任何标的之前，先读 `reviews/README.md`，再看最近几天的复盘、`reviews/持仓总览.md` 和相关品种页（Obsidian 格式，wikilink 互联）。复盘里的旧价格和止损不能当作当前事实。
+
+## Rules
+
+- Never write the production server address, personal paths or credentials into tracked files; use `Makefile.local` (git-ignored) or `TRADING_API_BASE`.
+- Do not activate, refresh or mutate paper accounts on the production server without the user's explicit request. Local activation only touches the local dev database.
+- Deploying (`make deploy-*`) is the user's call.
+- Keep dated research reports as written; add a note instead of rewriting their conclusions.

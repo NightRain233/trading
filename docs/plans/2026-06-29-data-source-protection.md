@@ -548,7 +548,7 @@ options after all verification passes.
 ### Task 9: Deploy Disabled and Verify Cooldown State
 
 **Files:**
-- External state: `8.153.71.148:/home/zsd/trading`
+- External state: `<server>:/home/zsd/trading`
 
 **Step 1: Deploy the verified branch**
 
