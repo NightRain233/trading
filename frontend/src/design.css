@@ -24,7 +24,7 @@
   --ui-btc: #d95926;
   --ui-cash: #4a5054;
   --ui-font-display: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
-  --ui-font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ui-font-data: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", Consolas, monospace;
   --ui-radius: 14px;
 }
 @media (prefers-color-scheme: light) {
@@ -73,7 +73,8 @@
   --ui-cash: #a3a9ad;
   color-scheme: light;
 }
-body { background: var(--ui-bg); color: var(--ui-ink); }
+/* System fonts only: no web-font request can block the first paint. */
+body { background: var(--ui-bg); color: var(--ui-ink); font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif; }
 
 .ui-num { font-family: var(--ui-font-data); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .ui-rise { color: var(--ui-rise); }

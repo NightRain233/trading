@@ -108,8 +108,32 @@ def test_scan_endpoint_reads_cached_weekly_bars(monkeypatch, tmp_path):
         {"id": "g", "name": "美股", "symbols": [{"symbol": "qqq", "alias": ""}, {"symbol": "MISSING", "alias": ""}]},
     ])
 
+    main._weinstein_scan_cache.update(key=None, items=None)
     items = main.weinstein_scan(weeks=12)
 
     assert [item["symbol"] for item in items] == ["QQQ"]
     assert items[0]["stage"] == 2
     assert len(items[0]["history"]) == 12
+
+
+def test_scan_endpoint_reuses_result_until_files_change(monkeypatch, tmp_path):
+    import os
+    import main
+
+    _weekly(list(np.linspace(60, 120, 60))).to_parquet(tmp_path / "QQQ_weekly.parquet")
+    monkeypatch.setattr(main, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(aw, "_benchmark_weekly_close", lambda benchmark: None)
+    monkeypatch.setattr(main, "load_watchlist", lambda: [{"id": "g", "name": "美股", "symbols": [{"symbol": "QQQ", "alias": ""}]}])
+    main._weinstein_scan_cache.update(key=None, items=None)
+    calls = []
+    real = aw.weinstein_scan_item
+    monkeypatch.setattr(aw, "weinstein_scan_item", lambda *a, **k: calls.append(1) or real(*a, **k))
+
+    main.weinstein_scan(weeks=12)
+    main.weinstein_scan(weeks=12)
+    assert len(calls) == 1
+
+    path = tmp_path / "QQQ_weekly.parquet"
+    os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 10))
+    main.weinstein_scan(weeks=12)
+    assert len(calls) == 2

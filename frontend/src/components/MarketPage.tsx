@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import type { Candle, StockData, WatchlistGroup } from '../types';
 import { fetchStockData } from '../utils';
+import { cached, peek } from '../swrCache.js';
 import { signed, stageColor, tone } from '../marketFormat';
 import { useWidth } from '../useWidth';
 import { Signals, StageChip } from './StageBits';
@@ -206,13 +207,14 @@ function DetailPanel({ stock, show, setShow, onClose, open }: {
   const [full, setFull] = useState<{ symbol: string; data: StockData | null } | null>(null);
   useEffect(() => {
     let active = true;
-    fetchStockData(stock.symbol, { chartOnly: true })
+    // Weekly bars change slowly; reopening a symbol within five minutes is instant.
+    cached(`quote:${stock.symbol}`, () => fetchStockData(stock.symbol, { chartOnly: true }), 5 * 60_000)
       .then(data => { if (active) setFull({ symbol: stock.symbol, data }); })
       .catch(() => { if (active) setFull({ symbol: stock.symbol, data: null }); });
     return () => { active = false; };
   }, [stock.symbol]);
   const view = stock.weinstein;
-  const loaded = full?.symbol === stock.symbol ? full.data : undefined;
+  const loaded = full?.symbol === stock.symbol ? full.data : peek<StockData | null>(`quote:${stock.symbol}`) ?? undefined;
   const toggle = (key: ShowKey) => {
     const next = { ...show, [key]: !show[key] };
     try { localStorage.setItem('market.show', JSON.stringify(next)); } catch { /* per-viewer preference only */ }

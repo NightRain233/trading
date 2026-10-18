@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { WatchlistGroup, WeinsteinScanItem } from '../types';
 import { fetchWeinsteinScan } from '../utils';
+import { cached, invalidate, peek } from '../swrCache.js';
 import { STAGE_NAMES, marketOf, ruleState } from '../marketView.js';
 import { signed, stageColor, tone } from '../marketFormat';
 import { useWidth } from '../useWidth';
 import { Signals, StageChip } from './StageBits';
 
+const SCAN_KEY = 'weinstein-scan';
 type Market = 'us' | 'crypto' | 'cn' | 'other';
 const MARKETS: Array<[Market, string]> = [['us', '美股'], ['crypto', '加密'], ['cn', 'A 股 · 港股'], ['other', '其他']];
 const MARKET_NOTES: Record<Market, string> = {
@@ -83,17 +85,17 @@ function ScanCard({ item, name, statusOnly }: { item: WeinsteinScanItem; name: s
 }
 
 export function WeeklyScanPage({ groups }: { groups: WatchlistGroup[] }) {
-  const [items, setItems] = useState<WeinsteinScanItem[] | null>(null);
+  const [items, setItems] = useState<WeinsteinScanItem[] | null>(() => peek<WeinsteinScanItem[]>(SCAN_KEY) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [market, setMarket] = useState<Market>('us');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => peek(SCAN_KEY) === undefined);
 
-  const fetchItems = useCallback(() => fetchWeinsteinScan()
+  const fetchItems = useCallback(() => cached(SCAN_KEY, fetchWeinsteinScan, 5 * 60_000)
     .then(next => { setItems(next); setError(null); })
     .catch(() => setError('扫描失败，稍后再试。'))
     .finally(() => setLoading(false)), []);
   useEffect(() => { fetchItems(); }, [fetchItems]);
-  const load = () => { setLoading(true); fetchItems(); };
+  const load = () => { setLoading(true); invalidate(SCAN_KEY); fetchItems(); };
 
   const names = useMemo(() => {
     const map = new Map<string, string>();

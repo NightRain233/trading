@@ -20,6 +20,7 @@ import {
   fmtPct,
   fmtSignedPct,
 } from '../portfolioStrategies.js';
+import { cached, invalidate, peek } from '../swrCache.js';
 
 const ASSET_COLORS: Record<string, string> = {
   '518880.SS': 'var(--ui-gold)',
@@ -289,37 +290,48 @@ function Holdings({ snapshot }: { snapshot: PortfolioSnapshot }) {
   );
 }
 
+const CACHE = 'portfolio:';
+const snapKey = (id: string) => `${CACHE}snap:${id}`;
+
+function cachedSnapshots(list: PortfolioStrategyItem[]) {
+  const out: Record<string, PortfolioSnapshot> = {};
+  list.forEach(item => {
+    const snap = peek<PortfolioSnapshot | null>(snapKey(item.strategyId));
+    if (snap) out[item.strategyId] = snap;
+  });
+  return out;
+}
+
 export default function PortfolioStrategiesPage() {
-  const [strategies, setStrategies] = useState<PortfolioStrategyItem[]>([]);
-  const [snapshots, setSnapshots] = useState<Record<string, PortfolioSnapshot>>({});
+  const [strategies, setStrategies] = useState<PortfolioStrategyItem[]>(() => peek<PortfolioStrategyItem[]>(`${CACHE}list`) ?? []);
+  const [snapshots, setSnapshots] = useState<Record<string, PortfolioSnapshot>>(() => cachedSnapshots(peek<PortfolioStrategyItem[]>(`${CACHE}list`) ?? []));
   const [navPoints, setNavPoints] = useState<PortfolioNavPoint[]>([]);
   const [diffRows, setDiffRows] = useState<PortfolioDiffRow[]>([]);
   const [btcTrend, setBtcTrend] = useState<BtcTrendPoint[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => peek(`${CACHE}list`) === undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const primary = useMemo(() => strategies.find(item => item.isPrimary) ?? null, [strategies]);
   const snapshot = primary ? snapshots[primary.strategyId] ?? null : null;
+  const primaryId = primary?.strategyId ?? null;
+  // Dependent series reload only when the primary account's data date moves.
+  const dataKey = snapshot ? `${snapshot.strategyId}@${snapshot.dates.marketDataDate ?? ''}@${snapshot.nav?.netNav ?? ''}` : null;
 
   const loadPage = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
-      const list = await fetchPortfolioStrategies();
+      const list = await cached(`${CACHE}list`, fetchPortfolioStrategies);
       setStrategies(list);
-      const entries = await Promise.all(list.filter(item => item.paperEnabled).map(async item => {
-        try {
-          const snap = await fetchPortfolioSnapshot(item.strategyId);
-          return snap ? ([item.strategyId, snap] as const) : null;
-        } catch {
-          return null;
-        }
-      }));
-      setSnapshots(Object.fromEntries(entries.filter((entry): entry is readonly [string, PortfolioSnapshot] => entry !== null)));
+      const loadSnap = (id: string) => cached(snapKey(id), () => fetchPortfolioSnapshot(id).catch(() => null))
+        .then(snap => { if (snap) setSnapshots(current => ({ ...current, [id]: snap })); });
+      // The primary account decides what the page says; show it before the comparison accounts.
+      const main = list.find(item => item.isPrimary && item.paperEnabled);
+      if (main) await loadSnap(main.strategyId);
+      setLoading(false);
+      list.filter(item => item.paperEnabled && !item.isPrimary).forEach(item => { void loadSnap(item.strategyId); });
     } catch {
       setError('组合数据加载失败，请检查后端服务是否在运行。');
-    } finally {
       setLoading(false);
     }
   }, []);
@@ -327,25 +339,26 @@ export default function PortfolioStrategiesPage() {
   useEffect(() => { void loadPage(); }, [loadPage]);
 
   useEffect(() => {
-    if (!primary) return;
+    if (!primaryId || !dataKey) return;
     let active = true;
-    fetchPortfolioNav(primary.strategyId)
+    cached(`${CACHE}nav:${dataKey}`, () => fetchPortfolioNav(primaryId))
       .then(series => { if (active) setNavPoints(series?.points.slice(-250) ?? []); })
       .catch(() => { if (active) setNavPoints([]); });
-    fetchPortfolioRebalanceDiff(primary.strategyId)
+    cached(`${CACHE}diff:${dataKey}`, () => fetchPortfolioRebalanceDiff(primaryId))
       .then(diff => { if (active) setDiffRows(diff?.rows ?? []); })
       .catch(() => { if (active) setDiffRows([]); });
     return () => { active = false; };
-  }, [primary, snapshot]);
+  }, [primaryId, dataKey]);
 
+  const hasBtc = Boolean(btcSwitch(snapshot));
   useEffect(() => {
-    if (!btcSwitch(snapshot)) return;
+    if (!hasBtc || !primaryId || !dataKey) return;
     let active = true;
-    fetchBtcTrend(snapshot!.strategyId)
+    cached(`${CACHE}btc:${dataKey}`, () => fetchBtcTrend(primaryId), 10 * 60_000)
       .then(series => { if (active) setBtcTrend(series?.points ?? []); })
       .catch(() => { if (active) setBtcTrend([]); });
     return () => { active = false; };
-  }, [snapshot]);
+  }, [hasBtc, primaryId, dataKey]);
 
   const handleRefresh = useCallback(async () => {
     if (!primary) return;
@@ -354,6 +367,7 @@ export default function PortfolioStrategiesPage() {
     try {
       const next = await refreshPortfolioStrategy(primary.strategyId);
       if (!next) throw new Error('refresh failed');
+      invalidate(CACHE);
       setSnapshots(current => ({ ...current, [primary.strategyId]: next }));
     } catch {
       setError('刷新失败，账本没有写入重复的信号或订单。');
