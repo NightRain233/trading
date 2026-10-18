@@ -39,10 +39,12 @@ export interface WeinsteinView {
   bbState: 'none' | 'squeeze' | 'squeeze_breakout' | 'above_upper';
   volumeRatio: number | null;
   weekLabel: string;
+  rule?: { key: string; label: string };
 }
 
 export interface WeinsteinScanItem extends WeinsteinView {
   symbol: string;
+  name?: string;
   previousStage: 1 | 2 | 3 | 4 | null;
   close: number | null;
   history: Array<{ time: string; close: number; ma30: number | null; stage: 1 | 2 | 3 | 4 | null }>;

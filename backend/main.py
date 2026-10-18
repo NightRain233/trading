@@ -1548,13 +1548,15 @@ def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
     from analysis_weinstein import weinstein_scan_item
 
     symbols: list[str] = []
+    aliases: dict[str, str] = {}
     for group in load_watchlist():
         for entry in group.get("symbols", []):
             symbol = (entry["symbol"] if isinstance(entry, dict) else entry).upper()
             if symbol not in symbols:
                 symbols.append(symbol)
+                aliases[symbol] = (entry.get("alias") or "") if isinstance(entry, dict) else ""
     paths = {symbol: os.path.join(DATA_DIR, f"{symbol}_weekly.parquet") for symbol in symbols}
-    signature = (weeks, tuple(
+    signature = (weeks, tuple(sorted(aliases.items())), tuple(
         (symbol, os.path.getmtime(path) if os.path.exists(path) else None)
         for symbol, path in paths.items()
     ))
@@ -1562,6 +1564,10 @@ def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
         if _weinstein_scan_cache["key"] == signature:
             return _weinstein_scan_cache["items"]
 
+        try:
+            summaries = get_cached_batch_summaries(symbols).get("results") or {}
+        except Exception:
+            summaries = {}
         items = []
         for symbol, path in paths.items():
             if not os.path.exists(path):
@@ -1572,7 +1578,8 @@ def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
                 logger.warning("温斯坦扫描失败 %s: %s", symbol, exc)
                 continue
             if item is not None:
-                items.append({"symbol": symbol, **item})
+                cached_name = (summaries.get(symbol) or {}).get("name") or ""
+                items.append({"symbol": symbol, "name": aliases.get(symbol) or cached_name or symbol, **item})
         _weinstein_scan_cache.update(key=signature, items=items)
         return items
 

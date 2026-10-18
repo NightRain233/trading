@@ -1,4 +1,4 @@
 interface:
-  display_name: "市场趋势扫描"
-  short_description: "扫描风险、可买、压缩布防、近触发机会及组合执行状态"
-  default_prompt: "Use $scan to run and summarize the project-wide SuperTrend market scan."
+  display_name: "周末复盘扫描"
+  short_description: "主策略是否操作、各市场温斯坦阶段、本周换阶段与美股学习账户规则状态"
+  default_prompt: "Use $scan to run this week's review: primary strategy first, then Weinstein stages by market."

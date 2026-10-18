@@ -1,93 +1,44 @@
 ---
 name: scan
-description: Use when the user asks for a market-wide SuperTrend scan, watchlist ranking, actionable trading candidates, trend continuation, or portfolio risk alerts.
+description: Use when the user asks for a market scan, weekend review, "看看现在市场怎么样", watchlist ranking, or which markets/symbols are worth watching. Produces the primary-strategy status first, then Weinstein weekly stages by market, with SuperTrend compressed to one learning line.
 ---
 
-# /scan — 自选股统一扫描
+# /scan — 周末复盘扫描
 
-扫描全部自选标的，使用后端正式分组回答：哪里必须风控、哪些正式买点仍可执行、哪些只接近触发，以及技术权限与组合权限是否一致。
+回答三个问题：**主策略这周要不要动？各个市场处在什么阶段？学习账户按规则该怎样？**
 
-开始前完整读取 `../trading-analysis/references/decision-contract.md`。阈值、权限、压缩突破实验状态和盘中边界只以该契约及 API 为准，本文件不复制策略公式。
+开始前完整读取 [../shared/market-rules.md](../shared/market-rules.md)。口径、边界和"不能下的结论"以它为准。
 
-## 准备
-
-1. 读取 `reviews/README.md`。
-2. 检查最近 3 个自然日内存在的每日复盘、`reviews/持仓总览.md`，以及当前持仓和最终重点标的的品种页。
-3. 品种页与每日复盘冲突时，以品种页当前有效规则为准；旧价格、旧仓位和旧止损不得当作当前事实。
-4. 最近三天无有效复盘时，明确说明本次只依据行情数据。
-
-本地服务优先：
+## 1. 取数
 
 ```bash
-uv run python scripts/trading_analysis_helper.py \
-  --api-base http://127.0.0.1:8000/api \
-  --query overview --timeout 180
+uv run python scripts/trading_analysis_helper.py --query weekly --timeout 120
 ```
 
-本地不可用或用户要求生产数据时，将 API base 改为 `http://8.153.71.148/api`。一次分析不得混用来源。只有需要候选 candles 时才补调 `GET /api/supertrend/scan?include_candles=true`；不能根据截断输出判断没有信号。
+若用户有近期复盘，再读 `reviews/README.md` 和最近 7 天的复盘文件，只用来对照"上次说要关注什么"，不沿用旧价格。
 
-## 验证响应
+## 2. 检查
 
-解释前确认：
+- `primary` 存在；`primary.diagnostics` 有 error/warning 时先报告。
+- `weekLabel` 和主策略 `dates.marketDataDate` 是否新鲜（相差超过一周要说明）。
+- `supertrend.error` 存在时，第 6 段写"学习观察暂不可用"，其余照常。
 
-- `schemaVersion`、`policyVersion` 存在；coverage 完整且 missing 为空。
-- `items` 与所有 `groups.*.symbols` 去重后的全集一致。
-- 每个标的都有 `decision`、`sessionContext`、`executionStatus`、`positionGuidance`、`lifecycle`。
-- `attention`、`themes`、`changes`、`portfolioMatrix` 存在。
-- `dataStale=false`、无真实交易日缺口且 `formalDecisionAvailable=true` 才能形成交易结论。
-- 交易时段进行中不是数据异常；沿用正式收盘权限，但盘中可以取消或降级执行。
-- 量能只使用 `ratio20Completed`；未完成时写“量能未完成”。
+## 3. 输出（按顺序，标题用中文）
 
-若 `changes.replayedFromCache=true`，只能称为缓存快照，不得将其中 transition 描述成“刚刚发生”。若 `baselineAvailable=false`，明确无比较基线。新增/移除自选分别读取 `addedSymbols`、`removedSymbols`，不冒充策略变化。
+1. **主策略**：一句话"这周要不要操作"。
+   - 有 `openOrders` 或 `dates.signalDate` 等于最新数据日：写要做什么。
+   - 否则写"不用操作，下次检查 `nextCheck`"。
+   - BTC 开关：日线方向、距 ST 线百分比、正式开关；`flipPending=true` 时说明"将在下次检查日执行"，不是已经交易。
+2. **大盘阶段**：表格列出 `benchmarks`（市场 / 阶段 / 已持续周数 / 离 30 周线 / 30 周线方向），再用一两句话总结。离 30 周线 3% 以内的上涨阶段要提醒"贴近 30 周线"。
+3. **本周换阶段**：逐个列 `stageChanges`，说明从几到几、意味着什么。没有就写"没有"。
+4. **美股学习账户**：按 `rule` 分组写——可买（新进第二阶段）、持有、卖出（跌破 30 周线）、不持有。每组列名称和一个关键数字（相对强度或离 30 周线）。
+5. **A 股只看状态**：`cn.stageCounts` 一句话概括；列出 `stage2StrongerThanCsi300`；不写买卖建议。加密和其他市场各一句。
+6. **学习观察（SuperTrend）**：一行，只写非 stable 分组的数量和名称。若 `marketModes` 与大盘阶段冲突，加一句"两套口径不一致，以周线为准"。
+7. **一句话结论**：这周最值得记住的一件事。
 
-## 扫描纪律
+## 4. 风格
 
-每个市场独立读取 `marketModes`，不能拿 A 股状态替代美股、黄金或加密。债券代表只作风险观察。市场模式不足或数据异常时，不自行补造许可。
-
-两个代表品种日期不同时，读取 `commonRepresentativeDate`，并只使用该共同完整交易日
-可见的历史月线方向计算市场模式。`representativeLagDays` 记录自然日差，
-`representativeLagSessions` 记录相对最新代表行情落后的已完成时段数；只有后者超过
-`representativeLagToleranceSessions` 才因滞后转为 `insufficient`。不得把
-`representativeDateMismatch=true` 单独解释成市场数据不可用。
-
-`bull_flip` 是趋势变化观察信号，不自动等于买入。只有 API 同时返回
-`decision.permission=buy`、`decision.setup=breakout` 且
-`executionStatus.executable=true`，才能放入正式可执行买点。其余刚翻多标的必须单独
-列为“刚翻多观察”，说明未通过的 `nextGate`；不能写成“今日可开新仓”。
-
-正式技术新仓路径只有：
-
-- `breakout`：完整日线 `bull_flip` 后的右侧突破；组合层的冻结 bull-flip
-  策略仍独立检查 MA200、仓位和账本。
-
-`pullback` 只记录已确认多头趋势中的回踩再走强，固定为观察标签，不能返回正式
-`buy`、最高接受价或技术可执行状态。不得使用单标的 ADX 特例将回踩升级为入口。
-
-`compression_breakout` 是尚未完成样本外和交易成本验证的实验路径：即使上一完整收盘给出 `conditional`、盘中进入 `paper_armed_triggered`，也只能记录纸面触发，`executionStatus.executable` 必须为 false。不得建议实盘小仓、挂单或成交。`authorization.consumptionTracked=false` 时也不得推断已成交或信号已消费。
-
-V 型反转、黄灯追踪、MACD 背离、RSI、KDJ、BOLL 和量能只用于观察或辅助确认，不能升级 API 权限。`readinessScore` 只在同权限内排序，不是胜率。
-
-优先直接采用 API 的 `decision.label`、`reasonCodes`、`failedGates`、`nextGate`、`nextTrigger` 和失效条件。正式 `buy` 仍须以 `executionStatus.executable=true` 为当前技术可执行前提；这不等于最终实盘许可，`liveTradingAllowed` 在技术层固定为 false。技术权限与组合权限永远分开：
-
-```text
-技术权限 | 组合权限 | 原因
-```
-
-`portfolioPermission=mixed` 表示不同策略意见冲突，必须展开每个 context，不能折叠成可执行。`blocked/no_rebalance` 不得给实际调仓动作；`unmanaged` 只表示不受纸面组合管理。
-
-## 输出顺序
-
-1. 数据日期、完整性、快照是否重放及比较基线。
-2. 各市场模式；A 股扫描时附上证、沪深300、中证500、科创50、中证2000的紧凑环境表。
-3. 真实新增、升级、降级、失效和自选增删。
-4. 全部持仓/风控项。
-5. 正式 bull-flip 突破买点及其 execution 状态；回踩只列观察项。
-6. 刚翻多观察项：说明它只是观察信号、当前 `decision.permission`/`executionStatus` 和唯一 `nextGate`。
-7. 压缩突破纸面实验项，显著标注“禁止实盘执行”。
-8. 最接近触发的 3–5 项：权限、唯一 nextGate、触发/上限/失效条件。
-9. 主题去重后的重点机会和交易载体。
-10. 技术/组合权限矩阵；mixed 展开策略分歧。
-11. 其余观察组仅列数量与 symbol。
-12. 一句“今天最关键的结论”。
-
-单标的紧凑展示方向、trend age、ADX、距 ST 的 ATR、MACD 柱变化、完整量比、正式决策日和行动边界。不要用指标堆叠掩盖权限，不把 ST 说成未计算的前高或平台上沿，不凭空生成仓位数量。
+- 先结论后理由；整份不超过一屏半。
+- 数字保留一位小数，带正负号和单位。
+- 不堆指标：一个品种最多两个数字。
+- 用户追问某个品种时，切换到 `analyze` skill。

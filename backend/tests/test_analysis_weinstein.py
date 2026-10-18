@@ -112,6 +112,8 @@ def test_scan_endpoint_reads_cached_weekly_bars(monkeypatch, tmp_path):
     items = main.weinstein_scan(weeks=12)
 
     assert [item["symbol"] for item in items] == ["QQQ"]
+    assert items[0]["name"] == "QQQ"
+    assert items[0]["rule"]["key"] in {"entry", "hold"}
     assert items[0]["stage"] == 2
     assert len(items[0]["history"]) == 12
 
@@ -137,3 +139,23 @@ def test_scan_endpoint_reuses_result_until_files_change(monkeypatch, tmp_path):
     os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 10))
     main.weinstein_scan(weeks=12)
     assert len(calls) == 2
+
+
+def test_small_penetrations_keep_the_stage():
+    rising = list(np.linspace(60, 120, 60))
+    frame = _weekly(rising)
+    ma = frame["Close"].rolling(30).mean()
+    last_ma = float(ma.iloc[-1])
+    # one week 1% under a rising average stays stage 2; 5% under turns stage 3
+    near = _weekly(rising + [last_ma * 0.99])
+    far = _weekly(rising + [last_ma * 0.95])
+    assert aw.stage_series(near["Close"], near["Close"].rolling(30).mean()).iloc[-1] == 2
+    assert aw.stage_series(far["Close"], far["Close"].rolling(30).mean()).iloc[-1] == 3
+
+
+def test_rule_state_matches_plain_rules():
+    assert aw.rule_state({"stage": 2, "weeksInStage": 2, "rs26": 0.1, "ma30Distance": 0.03})["key"] == "entry"
+    assert aw.rule_state({"stage": 2, "weeksInStage": 9, "rs26": 0.1, "ma30Distance": 0.03})["key"] == "hold"
+    assert aw.rule_state({"stage": 3, "weeksInStage": 1, "rs26": 0, "ma30Distance": -0.03})["key"] == "exit"
+    assert aw.rule_state({"stage": 4, "weeksInStage": 5, "rs26": -0.1, "ma30Distance": -0.1})["key"] == "out"
+    assert aw.rule_state(None)["key"] == "wait"

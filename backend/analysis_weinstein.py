@@ -5,7 +5,9 @@ Stage 2 = close above a rising 30-week SMA, stage 4 = close below a falling
 SMA. A close below a still-rising SMA reads as stage 3 (the advance is
 loosening) and a close above a still-falling SMA as stage 1 (the decline is
 repairing). A flat SMA (|4-week change| < 0.4%) is stage 1 after a decline
-and stage 3 after an advance. These are viewing aids: the frozen research
+and stage 3 after an advance. A close within 2% of the SMA keeps the previous
+stage (Weinstein: ignore minor penetrations), so a price hugging the line does
+not flip the stage every week. These are viewing aids: the frozen research
 (xquant ``weinstein-summary-2026-10-18``) found the mechanical rules do not
 beat buy-and-hold on A-shares.
 """
@@ -22,6 +24,7 @@ from analysis_constants import DATA_DIR
 MA_WEEKS = 30
 SLOPE_LAG_WEEKS = 4
 FLAT_SLOPE = 0.004
+STAGE_BAND = 0.02
 RS_WEEKS = 26
 SQUEEZE_LOOKBACK = 8
 SQUEEZE_RATIO = 0.8
@@ -51,14 +54,15 @@ def stage_series(close: pd.Series, ma30: pd.Series) -> pd.Series:
         if not np.isfinite(m) or not np.isfinite(s):
             stages.append(np.nan)
             continue
+        near = abs(c / m - 1) <= STAGE_BAND
         if abs(s) < FLAT_SLOPE:
             stage = 3 if prev in (2, 3) else 1
         elif s > 0:
             # below a still-rising average: the advance is loosening
-            stage = 2 if c > m else 3
+            stage = prev if near and prev in (2, 3) else (2 if c > m else 3)
         else:
             # above a still-falling average: the decline is repairing
-            stage = 4 if c < m else 1
+            stage = prev if near and prev in (1, 4) else (4 if c < m else 1)
         stages.append(stage)
         prev = stage
     return pd.Series(stages, index=close.index, dtype=float)
@@ -169,7 +173,7 @@ def weinstein_summary(symbol: str, df_weekly: Optional[pd.DataFrame]) -> Optiona
 
     rs = _finite(last.get("RS26")) if "RS26" in frame.columns else None
     week_label = pd.Timestamp(frame.index[-1])
-    return {
+    view = {
         "stage": stage,
         "stageLabel": STAGE_LABELS[stage],
         "weeksInStage": weeks_in_stage,
@@ -182,6 +186,30 @@ def weinstein_summary(symbol: str, df_weekly: Optional[pd.DataFrame]) -> Optiona
         "volumeRatio": volume_ratio,
         "weekLabel": week_label.strftime("%Y-%m-%d"),
     }
+    view["rule"] = rule_state(view)
+    return view
+
+
+def rule_state(view: Optional[dict]) -> dict:
+    """What the plain Weinstein rule says now (mirrors frontend ruleState).
+
+    Buy on a fresh stage 2 (first 4 weeks) with non-negative relative strength;
+    sell when the stage turns 3 with the close below the 30-week average.
+    """
+    if not view:
+        return {"key": "wait", "label": "数据不足"}
+    below = view.get("ma30Distance") is not None and view["ma30Distance"] < 0
+    stage = view.get("stage")
+    if stage == 2:
+        rs = view.get("rs26")
+        if view.get("weeksInStage", 99) <= 4 and (rs is None or rs > 0):
+            return {"key": "entry", "label": "新进第二阶段"}
+        return {"key": "hold", "label": "持有"}
+    if stage == 3:
+        return {"key": "exit", "label": "跌破 30 周线"} if below else {"key": "caution", "label": "涨势松动"}
+    if stage == 4:
+        return {"key": "out", "label": "不持有"}
+    return {"key": "wait", "label": "观望"}
 
 
 def weinstein_scan_item(symbol: str, df_weekly: Optional[pd.DataFrame], weeks: int = 52) -> Optional[dict]:

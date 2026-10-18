@@ -102,7 +102,8 @@ export function WeeklyScanPage({ groups }: { groups: WatchlistGroup[] }) {
     groups.forEach(group => group.stocks?.forEach(stock => map.set(stock.symbol.toUpperCase(), stock.alias || stock.name || stock.symbol)));
     return map;
   }, [groups]);
-  const nameOf = (symbol: string) => names.get(symbol) || symbol;
+  const scanNames = useMemo(() => new Map((items ?? []).map(item => [item.symbol, item.name])), [items]);
+  const nameOf = (symbol: string) => names.get(symbol) || scanNames.get(symbol) || symbol;
 
   const byMarket = useMemo(() => {
     const out: Record<Market, WeinsteinScanItem[]> = { us: [], crypto: [], cn: [], other: [] };
@@ -160,8 +161,8 @@ export function WeeklyScanPage({ groups }: { groups: WatchlistGroup[] }) {
           <summary>温斯坦规则 · 我按什么判断</summary>
           <dl className="ui-kv" style={{ marginTop: 12, gridTemplateColumns: 'auto minmax(0, 1fr)' }}>
             <dt>买入</dt><dd style={{ textAlign: 'left' }}>周收盘站上 30 周线，30 周线向上，最好放量，且 26 周相对强度为正。只在刚进第二阶段的前 4 周算"新进"。</dd>
-            <dt>卖出</dt><dd style={{ textAlign: 'left' }}>周收盘跌破 30 周线就走，不等反弹。</dd>
-            <dt>阶段</dt><dd style={{ textAlign: 'left' }}>一 筑底 · 二 上涨 · 三 做顶 · 四 下跌。30 周线 4 周变化不到 0.4% 算走平。</dd>
+            <dt>卖出</dt><dd style={{ textAlign: 'left' }}>周收盘跌破 30 周线 2% 以上就走，不等反弹。</dd>
+            <dt>阶段</dt><dd style={{ textAlign: 'left' }}>一 筑底 · 二 上涨 · 三 做顶 · 四 下跌。30 周线 4 周变化不到 0.4% 算走平；价格离 30 周线 2% 以内不算换阶段，避免来回横跳。</dd>
             <dt>数据</dt><dd style={{ textAlign: 'left' }}>最新一周可能还没收盘，周五收盘后的结果才算数。</dd>
           </dl>
         </details>

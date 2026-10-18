@@ -102,7 +102,7 @@ export function ruleState(view) {
     if (view.weeksInStage <= 4 && (view.rs26 == null || view.rs26 > 0)) {
       return { key: 'entry', label: '新进第二阶段', hint: '符合买入条件：站上上升的 30 周线，且强于大盘。' };
     }
-    return { key: 'hold', label: '持有', hint: '仍在上涨阶段，周收盘跌破 30 周线再走。' };
+    return { key: 'hold', label: '持有', hint: '仍在上涨阶段，周收盘跌破 30 周线 2% 以上再走。' };
   }
   if (view.stage === 3) {
     return below

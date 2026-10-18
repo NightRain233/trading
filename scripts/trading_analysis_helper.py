@@ -22,10 +22,17 @@ Usage:
 
   # Weekly BOLL squeeze/breakout scan
   uv run python scripts/trading_analysis_helper.py --query squeeze
+
+  # Weekend review: primary strategy + Weinstein stages by market (a few KB)
+  uv run python scripts/trading_analysis_helper.py --query weekly
+
+  # Compact single-symbol brief: Weinstein view + SuperTrend decision essentials
+  uv run python scripts/trading_analysis_helper.py --query brief --symbol QQQ
 """
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from typing import Any, Optional
@@ -470,21 +477,199 @@ def query_overview(api_base: str, timeout: float, force: bool = False) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Weekly review and single-symbol brief (compact; Weinstein first)
+# ---------------------------------------------------------------------------
+
+BENCHMARKS = ("000300.SS", "SPY", "QQQ", "BTC-USD", "518880.SS")
+
+
+def market_of(symbol: str) -> str:
+    upper = symbol.upper()
+    if upper.endswith("-USD"):
+        return "crypto"
+    if upper.endswith((".SS", ".SZ", ".HK")):
+        return "cn"
+    if "=" in upper or upper.startswith("^"):
+        return "other"
+    return "us"
+
+
+def _pct(value: Any, digits: int = 1) -> Optional[float]:
+    return round(float(value) * 100, digits) if isinstance(value, (int, float)) else None
+
+
+def _stage_row(item: dict) -> dict:
+    return {
+        "symbol": item["symbol"],
+        "name": item.get("name") or item["symbol"],
+        "stage": item.get("stage"),
+        "stageLabel": item.get("stageLabel"),
+        "weeksInStage": item.get("weeksInStage"),
+        "ma30DistancePct": _pct(item.get("ma30Distance")),
+        "ma30Slope4wPct": _pct(item.get("ma30Slope"), 2),
+        "rs26Pct": _pct(item.get("rs26"), 0),
+        "rsBenchmark": item.get("rsBenchmark"),
+        "bbState": item.get("bbState"),
+        "volumeRatio": round(item["volumeRatio"], 1) if isinstance(item.get("volumeRatio"), (int, float)) else None,
+        "rule": (item.get("rule") or {}).get("label"),
+    }
+
+
+def _primary_summary(api_base: str, timeout: float) -> Optional[dict]:
+    strategies = _api_get(api_base, "/portfolio-strategies", timeout)
+    primary = next((s for s in strategies if s.get("isPrimary")), None)
+    if primary is None:
+        return None
+    snap = _api_get(api_base, f"/portfolio-strategies/{primary['strategyId']}/snapshot", timeout)
+    values = (snap.get("observation") or {}).get("values") or {}
+    nav = snap.get("nav") or {}
+    btc = None
+    if "supertrend_on" in values:
+        close, line = values.get("btc_close"), values.get("supertrend_line")
+        btc = {
+            "close": close,
+            "stLine": line,
+            "distancePct": _pct((close - line) / close) if close and line else None,
+            "dailyOn": values.get("supertrend_on"),
+            "formalOn": values.get("formal_supertrend_on"),
+            "flipPending": values.get("supertrend_on") != values.get("formal_supertrend_on"),
+        }
+    orders = ((snap.get("operations") or {}).get("orders")) or []
+    return {
+        "strategyId": primary["strategyId"],
+        "displayName": primary.get("displayName"),
+        "state": snap.get("state"),
+        "dates": snap.get("dates"),
+        "nav": {k: nav.get(k) for k in ("netNav", "dailyReturn", "cumulativeReturn", "drawdown")},
+        "currentWeights": {w["symbol"]: round(w["weight"], 4) for w in snap.get("currentWeights") or [] if w.get("weight")},
+        "assets": {a["symbol"]: a.get("alias") for a in snap.get("assets") or []},
+        "desiredWeights": {w["symbol"]: round(w["weight"], 4) for w in snap.get("desiredWeights") or [] if w.get("weight")},
+        "openOrders": [o for o in orders if o.get("status") in ("PENDING", "WAITING_OPEN", "DELAYED")],
+        "btcSwitch": btc,
+        "diagnostics": [d for d in snap.get("diagnostics") or [] if d.get("severity") in ("error", "warning")][:5],
+    }
+
+
+def _supertrend_digest(api_base: str, timeout: float) -> dict:
+    scan = _api_get(api_base, "/supertrend/scan?force=false&include_candles=false", timeout)
+    groups = {
+        key: value.get("symbols", [])
+        for key, value in (scan.get("groups") or {}).items()
+        if isinstance(value, dict) and value.get("symbols") and key != "stable"
+    }
+    return {
+        "role": "learning observation only; never overrides the primary strategy",
+        "groups": groups,
+        "marketModes": {k: v.get("mode") for k, v in (scan.get("marketModes") or {}).items()},
+    }
+
+
+def query_weekly(api_base: str, timeout: float) -> dict:
+    """Weekend review: primary strategy, market stages, stage changes, per-market rows."""
+    items = _api_get(api_base, "/weinstein/scan?weeks=12", timeout)
+    by_symbol = {item["symbol"]: item for item in items}
+    rows: dict[str, list[dict]] = {"us": [], "crypto": [], "cn": [], "other": []}
+    for item in items:
+        rows[market_of(item["symbol"])].append(_stage_row(item))
+    for market_rows in rows.values():
+        market_rows.sort(key=lambda r: -(r["rs26Pct"] if r["rs26Pct"] is not None else -999))
+    cn = rows["cn"]
+    changes = [
+        {**_stage_row(item), "market": market_of(item["symbol"]), "from": item["previousStage"]}
+        for item in items
+        if item.get("previousStage") and item["previousStage"] != item.get("stage")
+    ]
+    try:
+        supertrend = _supertrend_digest(api_base, timeout)
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        supertrend = {"error": str(exc)}
+    return {
+        "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+        "weekLabel": items[0].get("weekLabel") if items else None,
+        "primary": _primary_summary(api_base, timeout),
+        "benchmarks": [_stage_row(by_symbol[s]) for s in BENCHMARKS if s in by_symbol],
+        "stageChanges": changes,
+        "us": rows["us"],
+        "crypto": rows["crypto"],
+        "cn": {
+            "stageCounts": {str(st): sum(1 for r in cn if r["stage"] == st) for st in (1, 2, 3, 4)},
+            "stage2StrongerThanCsi300": [r for r in cn if r["stage"] == 2 and (r["rs26Pct"] or 0) > 0],
+            "rows": cn,
+        },
+        "other": rows["other"],
+        "supertrend": supertrend,
+    }
+
+
+def query_brief(api_base: str, symbol: str, timeout: float) -> dict:
+    """One symbol: Weinstein view with recent weeks, then SuperTrend essentials."""
+    data = _api_get(api_base, f"/quote/{symbol.upper()}", timeout)
+    view = data.get("weinstein")
+    weeks = []
+    for candle in (data.get("weekly_candles") or [])[-10:]:
+        weeks.append({
+            "week": candle.get("time"),
+            "close": candle.get("close"),
+            "ma30": round(candle["ma30"], 4) if isinstance(candle.get("ma30"), (int, float)) else None,
+            "stage": int(candle["stage"]) if isinstance(candle.get("stage"), (int, float)) else None,
+            "rs26Pct": _pct(candle.get("rs26")),
+            "bollUpper": candle.get("boll_upper"),
+            "bollLower": candle.get("boll_lower"),
+            "macdHist": candle.get("macd_hist"),
+            "volume": candle.get("volume"),
+        })
+    decision = data.get("decision") or {}
+    primary = None
+    try:
+        primary = _primary_summary(api_base, timeout)
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        pass
+    return {
+        "symbol": data.get("symbol"),
+        "name": data.get("alias") or data.get("name"),
+        "market": market_of(data.get("symbol") or symbol),
+        "latestDataDate": data.get("latestDataDate"),
+        "dataStale": data.get("dataStale"),
+        "price": data.get("price"),
+        "weinstein": {**(view or {}), "rule": None} if view is None else {**_stage_row({"symbol": data.get("symbol"), **view}), "ma30": view.get("ma30"), "weekLabel": view.get("weekLabel")},
+        "recentWeeks": weeks,
+        "supertrend": {
+            "role": "learning observation only",
+            "dailyState": data.get("state"),
+            "weeklyState": data.get("weeklyState"),
+            "stVal": data.get("stVal"),
+            "adx": data.get("adx"),
+            "permission": decision.get("permission"),
+            "label": decision.get("label"),
+            "nextGate": decision.get("nextGate"),
+            "failedGates": decision.get("failedGates"),
+            "invalidation": decision.get("invalidation"),
+            "marketMode": data.get("marketMode"),
+        },
+        "inPrimaryStrategy": bool(primary and (data.get("symbol") or "").upper() in primary["assets"]),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fetch structured trading data for Claude analysis.")
-    parser.add_argument("--api-base", default="http://127.0.0.1:8000/api")
+    parser.add_argument(
+        "--api-base",
+        default=os.environ.get("TRADING_API_BASE", "http://127.0.0.1:8000/api"),
+        help="API base; defaults to $TRADING_API_BASE or the local backend.",
+    )
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument(
         "--query",
-        choices=("stock", "scan", "portfolio", "overview", "squeeze"),
+        choices=("stock", "scan", "portfolio", "overview", "squeeze", "weekly", "brief"),
         required=True,
         help="What to query.",
     )
-    parser.add_argument("--symbol", help="Stock symbol (required for --query stock).")
+    parser.add_argument("--symbol", help="Stock symbol (required for --query stock / brief).")
     parser.add_argument("--strategy", help="Strategy ID (optional for --query portfolio).")
     parser.add_argument("--grouped", action=argparse.BooleanOptionalAction, default=True, help="Group scan results.")
     parser.add_argument("--force", action="store_true", default=False, help="Force refresh cached scan data.")
@@ -504,6 +689,13 @@ def main() -> int:
             result = query_overview(args.api_base, args.timeout)
         elif args.query == "squeeze":
             result = query_squeeze(args.api_base, args.timeout)
+        elif args.query == "weekly":
+            result = query_weekly(args.api_base, args.timeout)
+        elif args.query == "brief":
+            if not args.symbol:
+                print("Error: --symbol required for brief query.", file=sys.stderr)
+                return 1
+            result = query_brief(args.api_base, args.symbol, args.timeout)
         else:
             return 1
     except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:

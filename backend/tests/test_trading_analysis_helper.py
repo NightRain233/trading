@@ -250,3 +250,73 @@ def test_overview_marks_conflicting_strategy_permissions_as_mixed():
     assert {row["permission"] for row in result["allSymbols"][0]["portfolioExecution"]["contexts"]} == {
         "executable", "blocked"
     }
+
+
+def _scan_item(symbol, stage, previous=None, rs=0.1, dist=0.05, name=None):
+    return {
+        "symbol": symbol, "name": name or symbol, "stage": stage, "stageLabel": "x", "weeksInStage": 3,
+        "ma30Distance": dist, "ma30Slope": 0.01, "rs26": rs, "rsBenchmark": "SPY", "bbState": "none",
+        "volumeRatio": 1.2, "weekLabel": "2026-10-18", "previousStage": previous or stage,
+        "rule": {"key": "hold", "label": "持有"},
+    }
+
+
+def _fake_api(routes):
+    def get(api_base, path, timeout=20.0):
+        for prefix, value in routes.items():
+            if path.startswith(prefix):
+                return value
+        raise AssertionError(f"unexpected path {path}")
+    return get
+
+
+PRIMARY_ROUTES = {
+    "/portfolio-strategies/btc_supertrend_satellite/snapshot": {
+        "state": "NOT_DUE", "dates": {"nextCheck": "2026-10-28"}, "nav": {"netNav": 1.0},
+        "assets": [{"symbol": "510300.SS", "alias": "沪深300ETF"}, {"symbol": "BTC-USD", "alias": "BTC"}],
+        "currentWeights": [{"symbol": "CASH", "weight": 1.0}], "desiredWeights": [],
+        "observation": {"values": {"btc_close": 100.0, "supertrend_line": 90.0, "supertrend_on": True, "formal_supertrend_on": False}},
+        "operations": {"orders": []}, "diagnostics": [],
+    },
+    "/portfolio-strategies": [{"strategyId": "btc_supertrend_satellite", "displayName": "BTC 7.5%", "isPrimary": True}],
+}
+
+
+def test_query_weekly_groups_by_market_and_lists_stage_changes(monkeypatch):
+    routes = {
+        "/weinstein/scan": [
+            _scan_item("SPY", 2), _scan_item("GOOGL", 3, previous=2, dist=-0.03),
+            _scan_item("510880.SS", 2, name="红利ETF"), _scan_item("000300.SS", 4, rs=0.0), _scan_item("BTC-USD", 2, rs=None),
+        ],
+        "/supertrend/scan": {"groups": {"stable": {"symbols": ["SPY"]}, "wait_confirmation": {"symbols": ["510880.SS"]}}, "marketModes": {"us": {"mode": "seek"}}},
+        **PRIMARY_ROUTES,
+    }
+    monkeypatch.setattr(helper, "_api_get", _fake_api(routes))
+
+    result = helper.query_weekly("http://example.test/api", timeout=1.0)
+
+    assert [row["symbol"] for row in result["benchmarks"]] == ["000300.SS", "SPY", "BTC-USD"]
+    assert [(c["symbol"], c["from"], c["stage"]) for c in result["stageChanges"]] == [("GOOGL", 2, 3)]
+    assert {row["symbol"] for row in result["us"]} == {"SPY", "GOOGL"}
+    assert result["cn"]["stageCounts"] == {"1": 0, "2": 1, "3": 0, "4": 1}
+    assert [row["name"] for row in result["cn"]["stage2StrongerThanCsi300"]] == ["红利ETF"]
+    assert result["supertrend"]["groups"] == {"wait_confirmation": ["510880.SS"]}
+    assert result["primary"]["btcSwitch"]["flipPending"] is True
+    assert result["primary"]["btcSwitch"]["distancePct"] == 10.0
+
+
+def test_query_brief_marks_primary_assets(monkeypatch):
+    quote = {
+        "symbol": "510300.SS", "alias": "沪深300ETF", "latestDataDate": "2026-10-16", "dataStale": False, "price": 4.2,
+        "weinstein": {**_scan_item("510300.SS", 4, rs=0.01, dist=-0.1), "ma30": 4.7},
+        "weekly_candles": [{"time": "2026-10-18", "close": 4.2, "ma30": 4.7, "stage": 4.0, "rs26": 0.01}],
+        "state": "bear", "weeklyState": "bear", "decision": {"permission": "watch", "label": "只观察"},
+    }
+    monkeypatch.setattr(helper, "_api_get", _fake_api({"/quote/510300.SS": quote, **PRIMARY_ROUTES}))
+
+    result = helper.query_brief("http://example.test/api", "510300.ss", timeout=1.0)
+
+    assert result["inPrimaryStrategy"] is True
+    assert result["weinstein"]["stage"] == 4
+    assert result["recentWeeks"][-1]["stage"] == 4
+    assert result["supertrend"]["permission"] == "watch"

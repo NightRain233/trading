@@ -1,6 +1,6 @@
 ---
 name: portfolio-daily-brief
-description: View the deterministic daily paper-portfolio brief for the primary three-asset + BTC 7.5% satellite, including rebalance status, holdings, NAV, drawdown, the BTC daily SuperTrend switch, audit issues, and a one-line SuperTrend study scan. Read-only; do not use it to change strategy state.
+description: View the deterministic daily paper-portfolio brief or a portfolio health check for the primary three-asset + BTC 7.5% satellite, including rebalance status, holdings, NAV, drawdown, the BTC daily SuperTrend switch, audit issues, and a one-line SuperTrend study scan. Read-only; do not use it to change strategy state.
 ---
 
 # Portfolio Daily Brief
@@ -9,7 +9,7 @@ Generate or explain the trading project's daily paper-execution brief from the b
 
 ## Choose the source
 
-Prefer `http://127.0.0.1:8000/api` when the local backend is available. If it is unavailable, use `http://8.153.71.148/api` only when the user asks for production data or the current OpenClaw deployment is configured to use that server. State which source and `asOfDate` were used. Never combine local and production responses in one report.
+Prefer `http://127.0.0.1:8000/api` when the local backend is available. Use the production API (from the `TRADING_API_BASE` environment variable; never write the server address into the repository) only when the user asks for production data or the current OpenClaw deployment is configured to use it. State which source and `asOfDate` were used. Never combine local and production responses in one report.
 
 If neither source is reachable, report that the daily brief is unavailable. Do not turn a connection failure into “no orders”.
 
@@ -56,3 +56,13 @@ Theme Alpha and BTC 7.5% retain their existing accounts and next-close ledgers. 
 Keep comparison strategies collapsed unless the user explicitly asks for comparisons. `core90_ma200_bull10` and `core90_raw_bull10` keep their own forward paper ledgers, but they remain comparisons and are not primary daily candidates.
 
 Explain deterministic output only. Do not change signals, parameters, allocations, or give a trade recommendation outside the frozen rules.
+
+## Health check (formerly portfolio-status)
+
+When the user asks how the portfolio accounts are doing rather than for today's brief:
+
+```bash
+uv run python scripts/trading_analysis_helper.py --query portfolio --timeout 120
+```
+
+Report the primary account first (NAV, cumulative return, drawdown, current vs desired weights, open orders, next check, state). Then one line per comparison account. Flag `BLOCKED` (data problem), pending orders (describe by the strategy's own execution price, not "filled"), and drawdowns beyond -15% (the backtest's worst was about -13%). Answer in plain Chinese; see [../shared/market-rules.md](../shared/market-rules.md) for the boundaries.
