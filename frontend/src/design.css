@@ -227,7 +227,7 @@ details.ui-details[open] > summary::after { content: "收起"; }
 .ui-detail { position: sticky; top: 24px; }
 .ui-back { display: none; border: 0; background: none; color: var(--ui-accent); font-size: 15px; padding: 0; cursor: pointer; text-align: left; }
 .ui-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
-.ui-toggles button { border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-3); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
+.ui-toggles button { display: inline-flex; align-items: center; white-space: nowrap; border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-3); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
 .ui-toggles button[aria-pressed="true"] { border-color: var(--ui-accent); color: var(--ui-accent); background: var(--ui-accent-soft); font-weight: 600; }
 .ui-readout-bar { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; min-height: 44px; align-content: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--ui-sunken); }
 .ui-readout-bar > span { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }

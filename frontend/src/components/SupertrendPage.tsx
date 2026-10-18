@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
+import { useChartTheme, type ChartTheme } from '../chartTheme';
 import type { Time } from 'lightweight-charts';
 import { Bell, BriefcaseBusiness, CircleOff, Eye, RefreshCw, ShieldAlert, Target } from 'lucide-react';
 import {
-  DISPLAY_SIGNAL_TONES,
   deriveConfluenceLabel,
   deriveDisplaySignal,
   getWeakOpportunityHint,
@@ -111,25 +111,14 @@ const MARK_STORAGE_KEY = 'supertrend:user-marks:v1';
 const STATE_LABEL: Record<STItem['state'], string> = {
   bull_flip: '金叉', bear_flip: '死叉', bull: '多头', bear: '空头',
 };
-const STATE_COLOR: Record<STItem['state'], string> = {
-  bull_flip: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
-  bear_flip: 'text-red-400 border-red-500/40 bg-red-500/10',
-  bull: 'text-sky-400 border-sky-500/40 bg-sky-500/10',
-  bear: 'text-zinc-500 border-zinc-700 bg-zinc-800/30',
-};
-
 const MARK_OPTIONS: { value: Exclude<UserMark, 'none'>; label: string; icon: typeof Eye }[] = [
   { value: 'watch', label: '关注', icon: Eye },
   { value: 'holding', label: '持有', icon: BriefcaseBusiness },
   { value: 'ignored', label: '忽略', icon: CircleOff },
 ];
 
-const MARK_COLOR: Record<UserMark, string> = {
-  none: 'border-zinc-800 bg-zinc-950/30 text-zinc-500 hover:text-zinc-300',
-  watch: 'border-cyan-500/35 bg-cyan-500/10 text-cyan-200',
-  holding: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200',
-  ignored: 'border-zinc-700 bg-zinc-900/70 text-zinc-500',
-};
+// Chip styles from design.css; A-share colours (bullish red, bearish green).
+const SIGNAL_CHIP: Record<string, string> = { emerald: 's2', cyan: 'ok', amber: 'warn', red: 's4' };
 
 const formatPrice = (value: number | null) => {
   if (value == null || !Number.isFinite(value)) return '-';
@@ -177,7 +166,7 @@ const saveStoredMarks = (marks: Record<string, UserMark>) => {
   window.localStorage.setItem(MARK_STORAGE_KEY, JSON.stringify(marks));
 };
 
-function renderSTLines(chart: ReturnType<typeof createChart>, candles: STCandle[]) {
+function renderSTLines(chart: ReturnType<typeof createChart>, candles: STCandle[], theme: ChartTheme) {
   const stCandles = candles.filter(c => c.st_val != null);
   let i = 0;
   while (i < stCandles.length) {
@@ -186,80 +175,57 @@ function renderSTLines(chart: ReturnType<typeof createChart>, candles: STCandle[
     while (i < stCandles.length && stCandles[i].st_dir === dir) seg.push(stCandles[i++]);
     if (i < stCandles.length) seg.push(stCandles[i]);
     const s = chart.addSeries(LineSeries, {
-      color: dir === 1 ? '#22c55e' : '#ef4444',
+      color: dir === 1 ? theme.rise : theme.fall,
       lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
     });
     s.setData(seg.map(c => ({ time: c.time as Time, value: c.st_val! })));
   }
 }
 
+function useMiniChart(ref: React.RefObject<HTMLDivElement | null>, candles: STCandle[], height: number, theme: ChartTheme) {
+  useEffect(() => {
+    if (!ref.current || candles.length === 0) return;
+    const chart = createChart(ref.current, {
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: theme.text, attributionLogo: false },
+      grid: { vertLines: { visible: false }, horzLines: { color: theme.grid } },
+      width: ref.current.clientWidth,
+      height,
+      timeScale: { borderColor: theme.border, timeVisible: false },
+      rightPriceScale: { borderColor: theme.border, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      crosshair: { mode: 0 },
+      handleScroll: false,
+      handleScale: false,
+    });
+    const cs = chart.addSeries(CandlestickSeries, {
+      upColor: theme.rise, downColor: theme.fall,
+      borderUpColor: theme.rise, borderDownColor: theme.fall,
+      wickUpColor: theme.rise, wickDownColor: theme.fall,
+      priceLineVisible: false,
+    });
+    cs.setData(candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    renderSTLines(chart, candles, theme);
+    chart.timeScale().fitContent();
+    const node = ref.current;
+    const ro = new ResizeObserver(() => chart.applyOptions({ width: node.clientWidth }));
+    ro.observe(node);
+    return () => { ro.disconnect(); chart.remove(); };
+  }, [ref, candles, height, theme]);
+}
+
 function MiniSTChart({ candles, weeklyCandles }: { candles: STCandle[]; weeklyCandles: STCandle[] }) {
   const dailyRef = useRef<HTMLDivElement>(null);
   const weeklyRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!dailyRef.current || candles.length === 0) return;
-    const chart = createChart(dailyRef.current, {
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#71717a' },
-      grid: { vertLines: { color: '#27272a' }, horzLines: { color: '#27272a' } },
-      width: dailyRef.current.clientWidth,
-      height: 130,
-      timeScale: { borderColor: '#3f3f46', timeVisible: false },
-      rightPriceScale: { borderColor: '#3f3f46', scaleMargins: { top: 0.1, bottom: 0.1 } },
-      crosshair: { mode: 0 },
-      handleScroll: false,
-      handleScale: false,
-    });
-    const cs = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981', downColor: '#ef4444',
-      borderUpColor: '#10b981', borderDownColor: '#ef4444',
-      wickUpColor: '#10b981', wickDownColor: '#ef4444',
-    });
-    cs.setData(candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })));
-    renderSTLines(chart, candles);
-    chart.timeScale().fitContent();
-    const ro = new ResizeObserver(() => {
-      if (dailyRef.current) chart.applyOptions({ width: dailyRef.current.clientWidth });
-    });
-    ro.observe(dailyRef.current);
-    return () => { ro.disconnect(); chart.remove(); };
-  }, [candles]);
-
-  useEffect(() => {
-    if (!weeklyRef.current || weeklyCandles.length === 0) return;
-    const chart = createChart(weeklyRef.current, {
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#71717a' },
-      grid: { vertLines: { color: '#27272a' }, horzLines: { color: '#27272a' } },
-      width: weeklyRef.current.clientWidth,
-      height: 90,
-      timeScale: { borderColor: '#3f3f46', timeVisible: false },
-      rightPriceScale: { borderColor: '#3f3f46', scaleMargins: { top: 0.1, bottom: 0.1 } },
-      crosshair: { mode: 0 },
-      handleScroll: false,
-      handleScale: false,
-    });
-    const cs = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981', downColor: '#ef4444',
-      borderUpColor: '#10b981', borderDownColor: '#ef4444',
-      wickUpColor: '#10b981', wickDownColor: '#ef4444',
-    });
-    cs.setData(weeklyCandles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })));
-    renderSTLines(chart, weeklyCandles);
-    chart.timeScale().fitContent();
-    const ro = new ResizeObserver(() => {
-      if (weeklyRef.current) chart.applyOptions({ width: weeklyRef.current.clientWidth });
-    });
-    ro.observe(weeklyRef.current);
-    return () => { ro.disconnect(); chart.remove(); };
-  }, [weeklyCandles]);
-
+  const theme = useChartTheme();
+  useMiniChart(dailyRef, candles, 130, theme);
+  useMiniChart(weeklyRef, weeklyCandles, 90, theme);
   return (
-    <div>
-      <div ref={dailyRef} className="w-full" />
+    <div className="ui-stack" style={{ gap: 4 }}>
+      <div className="ui-muted" style={{ fontSize: 11 }}>日线</div>
+      <div ref={dailyRef} />
       {weeklyCandles.length > 0 && (
         <>
-          <div className="px-2 pt-1 pb-0.5 text-[9px] text-zinc-600 uppercase tracking-widest">周线</div>
-          <div ref={weeklyRef} className="w-full" />
+          <div className="ui-muted" style={{ fontSize: 11 }}>周线</div>
+          <div ref={weeklyRef} />
         </>
       )}
     </div>
@@ -416,265 +382,140 @@ export function SupertrendPage() {
     return { latestDataDate, latestUpdatedAt, cacheStaleCount, dataStaleCount, gapCount, refreshingCount };
   }, [items]);
 
+  const statusIssues = [
+    dataStatus.refreshingCount > 0 && `${dataStatus.refreshingCount} 个正在刷新`,
+    dataStatus.cacheStaleCount > 0 && `${dataStatus.cacheStaleCount} 个缓存偏旧`,
+    dataStatus.dataStaleCount > 0 && `${dataStatus.dataStaleCount} 个数据可能延迟`,
+    dataStatus.gapCount > 0 && `${dataStatus.gapCount} 个可能有缺口`,
+  ].filter(Boolean).join(' · ');
+  const statusWarn = dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0;
+  const focusCount = items.filter(item => isDefaultVisible(item, marks[item.symbol])).length;
+  const filterGroups: Array<[string, Array<{ key: FilterType; label: string }>]> = [
+    ['日线', (['bull_flip', 'bear_flip', 'bull', 'bear'] as const).map(key => ({ key, label: STATE_LABEL[key] }))],
+    ['提醒', ALERT_FILTERS],
+    ['共振', CROSS_FILTERS],
+  ];
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <span className="text-sm font-semibold text-zinc-300">SuperTrend 扫描</span>
-        <button
-          onClick={() => void load({ force: true })}
-          title="刷新"
-          className={`ml-auto p-2 rounded-xl text-zinc-500 hover:text-emerald-400 btn-glass active:scale-[0.98] ${loading ? 'animate-spin' : ''}`}
-        >
-          <RefreshCw size={15} />
-        </button>
-      </div>
-
-      <div className={`mb-4 rounded-lg border px-3 py-2 text-[11px] ${
-        dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0
-          ? 'border-amber-500/25 bg-amber-500/10 text-amber-200'
-          : dataStatus.cacheStaleCount > 0 || dataStatus.refreshingCount > 0
-            ? 'border-sky-500/25 bg-sky-500/10 text-sky-200'
-            : 'border-zinc-800 bg-zinc-900/45 text-zinc-400'
-      }`}>
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            数据截至 {formatDateLabel(dataStatus.latestDataDate)} · 更新 {formatDateTimeLabel(dataStatus.latestUpdatedAt)}
-          </span>
-          {(dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0 || dataStatus.cacheStaleCount > 0 || dataStatus.refreshingCount > 0) && (
-            <span className="font-medium">
-              {dataStatus.refreshingCount > 0 && `${dataStatus.refreshingCount} 个正在刷新`}
-              {dataStatus.refreshingCount > 0 && (dataStatus.cacheStaleCount > 0 || dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0) ? ' · ' : ''}
-              {dataStatus.cacheStaleCount > 0 && `${dataStatus.cacheStaleCount} 个缓存偏旧`}
-              {dataStatus.cacheStaleCount > 0 && (dataStatus.dataStaleCount > 0 || dataStatus.gapCount > 0) ? ' · ' : ''}
-              {dataStatus.dataStaleCount > 0 && `${dataStatus.dataStaleCount} 个数据可能延迟`}
-              {dataStatus.dataStaleCount > 0 && dataStatus.gapCount > 0 ? ' · ' : ''}
-              {dataStatus.gapCount > 0 && `${dataStatus.gapCount} 个可能有缺口`}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">刚翻多</div>
-          <div className="text-lg font-semibold text-emerald-300">{signalCounts.fresh_bull || 0}</div>
-        </div>
-        <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">回踩观察</div>
-          <div className="text-lg font-semibold text-cyan-300">{signalCounts.pullback_watch || 0}</div>
-        </div>
-        <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">预备翻多</div>
-          <div className="text-lg font-semibold text-amber-300">{signalCounts.pre_bull || 0}</div>
-        </div>
-        <div className="border border-zinc-800 bg-zinc-900/45 rounded-lg px-3 py-2">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest">风控</div>
-          <div className="text-lg font-semibold text-red-300">{signalCounts.risk || 0}</div>
-        </div>
-      </div>
-
-      {/* 日线状态过滤 */}
-      <div className="flex gap-1.5 flex-wrap mb-2">
-        <span className="text-[10px] text-zinc-600 self-center mr-1">日线</span>
-        {(['all', 'bull_flip', 'bear_flip', 'bull', 'bear'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all ${
-              filter === f
-                ? f === 'all' ? 'bg-zinc-700 border-zinc-600 text-zinc-200' : STATE_COLOR[f as STItem['state']]
-                : 'btn-glass text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {f === 'all' ? '全部' : STATE_LABEL[f as STItem['state']]}
+    <main className="ui-page" style={{ maxWidth: 1240 }}>
+      <section className="ui-hero">
+        <div className="ui-row" style={{ justifyContent: 'space-between' }}>
+          <span className="ui-eyebrow">SuperTrend · 日线趋势扫描 · 学习观察</span>
+          <button type="button" className="ui-btn" onClick={() => void load({ force: true })} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : undefined} />{loading ? '扫描中' : '刷新'}
           </button>
-        ))}
-      </div>
+        </div>
+        <h1 className="ui-verdict" style={{ fontSize: 'clamp(26px, 4vw, 36px)' }}>
+          {items.length === 0 ? 'SuperTrend 扫描' : focusCount > 0 ? `今晚有 ${focusCount} 个值得看` : '今晚没有新信号'}
+        </h1>
+        <p className="ui-verdict-sub">
+          数据截至 {formatDateLabel(dataStatus.latestDataDate)} · 更新 {formatDateTimeLabel(dataStatus.latestUpdatedAt)}。
+          这里只是学习观察，主策略的 BTC 开关用的是自己的参数，看首页。
+        </p>
+        {statusIssues && <p className={`ui-note ${statusWarn ? 'warn' : ''}`}>{statusIssues}</p>}
+      </section>
 
-      {/* 提醒过滤 */}
-      <div className="flex gap-1.5 flex-wrap mb-2">
-        <span className="text-[10px] text-zinc-600 self-center mr-1">提醒</span>
-        {ALERT_FILTERS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilter(filter === key ? 'all' : key)}
-            className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all active:scale-[0.98] ${
-              filter === key
-                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                : 'btn-glass text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <section className="ui-stats">
+        <div className="ui-stat"><span>刚翻多</span><b className="ui-num ui-rise">{signalCounts.fresh_bull || 0}</b></div>
+        <div className="ui-stat"><span>回踩观察</span><b className="ui-num" style={{ color: 'var(--ui-accent)' }}>{signalCounts.pullback_watch || 0}</b></div>
+        <div className="ui-stat"><span>预备翻多</span><b className="ui-num" style={{ color: 'var(--ui-warn)' }}>{signalCounts.pre_bull || 0}</b></div>
+        <div className="ui-stat"><span>风控</span><b className="ui-num ui-fall">{signalCounts.risk || 0}</b></div>
+      </section>
 
-      {/* 共振过滤 */}
-      <div className="flex gap-1.5 flex-wrap mb-6">
-        <span className="text-[10px] text-zinc-600 self-center mr-1">共振</span>
-        {CROSS_FILTERS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilter(filter === key ? 'all' : key)}
-            className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all ${
-              filter === key
-                ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
-                : 'btn-glass text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {label}
-          </button>
+      <div className="ui-stack" style={{ gap: 8 }}>
+        {filterGroups.map(([label, options]) => (
+          <div key={label} className="ui-row" style={{ gap: 10 }}>
+            <span className="ui-muted" style={{ fontSize: 12, width: 28 }}>{label}</span>
+            <div className="ui-seg" role="group" aria-label={label}>
+              {options.map(({ key, label: text }) => (
+                <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(filter === key ? 'all' : key)}>{text}</button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 
       {filter === 'all' && (
-        <div className="mb-5 rounded-xl border border-zinc-800/90 bg-zinc-950/45 px-3 py-3 sm:px-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex-1">
-              <div className="text-xs font-semibold text-zinc-300">晚上复盘：优先显示明天最值得盯的买点队列</div>
-              <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                默认保留刚翻多、回踩观察、预备翻多、风控，以及带高优先级信号的手动关注/持有；其他标的仍可展开查看。
-              </div>
-            </div>
-            <button
-              onClick={() => setShowLowPriority(v => !v)}
-              className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:text-zinc-100 active:scale-[0.98]"
-            >
-              {showLowPriority ? '收起其他观察' : `展开其他 ${otherCount}`}
-            </button>
-          </div>
+        <div className="ui-note ui-row" style={{ justifyContent: 'space-between' }}>
+          <span>默认只显示刚翻多、回踩观察、预备翻多、风控，以及你标了关注/持有且有高优先级信号的。</span>
+          <button type="button" className="ui-btn" onClick={() => setShowLowPriority(v => !v)}>
+            {showLowPriority ? '收起其他' : `展开其他 ${otherCount}`}
+          </button>
         </div>
       )}
-
-      {loading && items.length === 0 && (
-        <div className="text-zinc-500 text-sm text-center py-16">扫描中…</div>
+      {filter !== 'all' && (
+        <button type="button" className="ui-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setFilter('all')}>清除筛选</button>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {loading && items.length === 0 && <div className="ui-skeleton" />}
+
+      <div className="ui-scan-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
         {visibleDisplayed.map(item => {
           const displaySignal = deriveDisplaySignal(item);
           const weakHint = getWeakOpportunityHint(item);
           const confluenceLabel = deriveConfluenceLabel(item);
-          const confluenceTone = item.state === 'bull_flip'
-            ? 'text-emerald-300'
-            : item.state === 'bear_flip'
-              ? 'text-red-300'
-              : 'text-zinc-500';
+          const mark = marks[item.symbol];
+          const focus = isFocusItem(item, mark);
+          const atRisk = item.opportunityStage === 'invalidated' || item.alertType === 'sell_or_risk';
 
           return (
-          <div
-            key={item.symbol}
-            className={`rounded-xl border overflow-hidden transition-all ${
-              isFocusItem(item, marks[item.symbol])
-                ? 'border-emerald-500/25 bg-zinc-900/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
-                : 'border-zinc-800 bg-zinc-900/45 opacity-80'
-            } ${marks[item.symbol] === 'ignored' ? 'opacity-60' : ''}`}
-          >
-            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <div className="min-w-0 flex items-center gap-2">
-                <span className="font-mono text-sm font-semibold text-zinc-200">{item.symbol}</span>
-                {item.alias && <span className="truncate text-xs text-zinc-500">{item.alias}</span>}
-              </div>
-              <span className={`ml-2 shrink-0 text-[10px] font-medium ${confluenceTone}`}>{confluenceLabel}</span>
-            </div>
-            <div className="px-3 py-2 border-b border-zinc-800/80">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  {displaySignal ? (
-                    <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-semibold ${DISPLAY_SIGNAL_TONES[displaySignal.tone]}`}>
-                      {displaySignal.key === 'risk' ? <ShieldAlert size={11} /> : <Bell size={11} />}
-                      {displaySignal.label}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border border-zinc-800 bg-zinc-950/30 text-zinc-500">
-                      <Target size={11} />
-                      {item.alertLabel || '观察'}
-                    </span>
-                  )}
-                  {weakHint && <span className="text-[10px] text-zinc-500">{weakHint}</span>}
+            <article key={item.symbol} className="ui-panel ui-scan-card" style={{ opacity: mark === 'ignored' ? 0.55 : focus ? 1 : 0.85, borderColor: focus ? 'var(--ui-ink-3)' : undefined }}>
+              <header className="ui-scan-head">
+                <div style={{ minWidth: 0 }}>
+                  <b>{item.alias || item.symbol}</b>
+                  {item.alias && <small className="ui-num">{item.symbol}</small>}
                 </div>
-                {item.alertPriority === 'high' && <span className="shrink-0 rounded border border-red-500/25 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">高</span>}
+                <span className={`ui-muted ${item.state === 'bull_flip' ? 'ui-rise' : item.state === 'bear_flip' ? 'ui-fall' : ''}`} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{confluenceLabel}</span>
+              </header>
+              <div className="ui-row" style={{ gap: 6 }}>
+                {displaySignal ? (
+                  <span className={`ui-chip ${SIGNAL_CHIP[displaySignal.tone]}`}>
+                    {displaySignal.key === 'risk' ? <ShieldAlert size={12} /> : <Bell size={12} />}{displaySignal.label}
+                  </span>
+                ) : (
+                  <span className="ui-chip s1"><Target size={12} />{item.alertLabel || '观察'}</span>
+                )}
+                {item.alertPriority === 'high' && <span className="ui-chip warn">高优先级</span>}
+                {weakHint && <span className="ui-muted" style={{ fontSize: 12 }}>{weakHint}</span>}
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-1.5">
+              <div className="ui-toggles" role="group" aria-label="我的标记">
                 {MARK_OPTIONS.map(({ value, label, icon: Icon }) => {
-                  const active = marks[item.symbol] === value;
+                  const active = mark === value;
                   return (
-                    <button
-                      key={value}
-                      onClick={() => updateMark(item.symbol, active ? 'none' : value)}
-                      className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-all active:scale-[0.98] ${
-                        active ? MARK_COLOR[value] : MARK_COLOR.none
-                      }`}
-                      title={label}
-                    >
-                      <Icon size={12} />
-                      <span>{label}</span>
+                    <button key={value} type="button" aria-pressed={active} onClick={() => updateMark(item.symbol, active ? 'none' : value)}>
+                      <Icon size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />{label}
                     </button>
                   );
                 })}
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-                <div>
-                  <div className="text-zinc-600">收盘</div>
-                  <div className="font-mono text-zinc-300">{formatPrice(item.close)}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-600">{item.keyLevelType === 'resistance' ? '阻力' : '支撑'}</div>
-                  <div className="font-mono text-zinc-300">{formatPrice(item.keyLevelPrice ?? item.stVal)}</div>
-                </div>
-                <div>
-                  <div className="text-zinc-600">距离</div>
-                  <div className="font-mono text-zinc-300">{formatPct(item.distanceToSupertrendPct)}</div>
-                </div>
-              </div>
-              <div className="mt-2 flex items-start justify-between gap-3">
-                <p className="text-[11px] leading-relaxed text-zinc-500">{item.alertReason}</p>
-                <span className="shrink-0 font-mono text-[10px] text-zinc-600">{formatAtr(item.distanceToSupertrendAtr)}</span>
-              </div>
-              {marks[item.symbol] === 'holding' && (
-                <div className={`mt-2 grid grid-cols-3 gap-2 rounded-lg border px-2 py-2 text-[10px] ${
-                  item.opportunityStage === 'invalidated' || item.alertType === 'sell_or_risk'
-                    ? 'border-red-500/25 bg-red-500/10'
-                    : 'border-emerald-500/20 bg-emerald-500/10'
-                }`}>
-                  <div>
-                    <div className="text-zinc-500">持有</div>
-                    <div className="font-semibold text-zinc-200">
-                      {item.opportunityStage === 'invalidated' ? '风控' : '跟踪'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-zinc-500">ST止损</div>
-                    <div className="font-mono text-zinc-200">{formatPrice(item.keyLevelPrice ?? item.stVal)}</div>
-                  </div>
-                  <div>
-                    <div className="text-zinc-500">距离</div>
-                    <div className="font-mono text-zinc-200">{formatPct(item.distanceToSupertrendPct)}</div>
-                  </div>
-                </div>
+              <dl className="ui-scan-nums">
+                <div><dt>收盘</dt><dd className="ui-num">{formatPrice(item.close)}</dd></div>
+                <div><dt>{item.keyLevelType === 'resistance' ? '阻力' : '支撑'}</dt><dd className="ui-num">{formatPrice(item.keyLevelPrice ?? item.stVal)}</dd></div>
+                <div><dt>距离</dt><dd className="ui-num">{formatPct(item.distanceToSupertrendPct)}</dd></div>
+              </dl>
+              <p className="ui-muted" style={{ margin: 0, fontSize: 12.5 }}>{item.alertReason}（{formatAtr(item.distanceToSupertrendAtr)}）</p>
+              {mark === 'holding' && (
+                <p className={`ui-note ${atRisk ? 'warn' : ''}`}>
+                  持有中：{atRisk ? '已触发风控' : '跟踪'}，ST 止损 <span className="ui-num">{formatPrice(item.keyLevelPrice ?? item.stVal)}</span>，距离 <span className="ui-num">{formatPct(item.distanceToSupertrendPct)}</span>
+                </p>
               )}
-              {item.isActionable && (
-                <div className="mt-2 text-[11px] leading-relaxed text-zinc-400 border-t border-zinc-800/70 pt-2">
-                  {item.suggestedAction}
-                </div>
-              )}
-            </div>
-            <div className="px-1 py-1">
+              {item.isActionable && <p style={{ margin: 0, fontSize: 13, color: 'var(--ui-ink-2)' }}>{item.suggestedAction}</p>}
               {item.candles.length > 0
                 ? <MiniSTChart candles={item.candles} weeklyCandles={item.weeklyCandles} />
-                : <div className="h-40 flex items-center justify-center text-zinc-600 text-xs">无数据</div>
-              }
-            </div>
-          </div>
+                : <p className="ui-muted" style={{ margin: 0 }}>无数据</p>}
+            </article>
           );
         })}
       </div>
 
       {!loading && visibleDisplayed.length === 0 && (
-        <div className="text-zinc-600 text-sm text-center py-16">
-          {onlyFoldedOther ? '当前只有其他观察，已默认折叠' : '暂无符合条件的标的'}
-        </div>
+        <p className="ui-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
+          {onlyFoldedOther ? '当前只有其他观察，已默认折叠。' : '暂无符合条件的标的。'}
+        </p>
       )}
-    </div>
+      <p className="ui-muted" style={{ fontSize: 11.5, margin: 0 }}>
+        K 线图由 <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>TradingView</a> Lightweight Charts 绘制。
+      </p>
+    </main>
   );
 }

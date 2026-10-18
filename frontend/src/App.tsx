@@ -9,7 +9,7 @@ const WeeklyScanPage = lazy(() => import('./components/WeeklyScanPage').then(m =
 const SupertrendPage = lazy(() => import('./components/SupertrendPage').then(m => ({ default: m.SupertrendPage })));
 const HistoryTradesPage = lazy(() => import('./components/HistoryTradesPage').then(m => ({ default: m.HistoryTradesPage })));
 const PortfolioStrategiesPage = lazy(() => import('./components/PortfolioStrategiesPage').then(m => ({ default: m.default })));
-const REDESIGNED_TABS = new Set<AppTab>(['portfolio', 'wbb', 'history']);
+const REDESIGNED_TABS = new Set<AppTab>(['portfolio', 'wbb', 'history', 'st', 'rs']);
 const MarketPage = lazy(() => import('./components/MarketPage').then(m => ({ default: m.MarketPage })));
 import { SortableGroup } from './components/SortableGroup';
 import { Header } from './components/Header';
