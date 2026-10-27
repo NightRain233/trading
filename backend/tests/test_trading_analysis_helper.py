@@ -255,7 +255,8 @@ def test_overview_marks_conflicting_strategy_permissions_as_mixed():
 def _scan_item(symbol, stage, previous=None, rs=0.1, dist=0.05, name=None):
     return {
         "symbol": symbol, "name": name or symbol, "stage": stage, "stageLabel": "x", "weeksInStage": 3,
-        "ma30Distance": dist, "ma30Slope": 0.01, "rs26": rs, "rsBenchmark": "SPY", "bbState": "none",
+        "ma30Distance": dist, "ma30Slope": 0.01, "rs26": rs,
+        "rsBenchmark": "000300.SS" if symbol.endswith((".SS", ".SZ")) else "SPY", "bbState": "none",
         "volumeRatio": 1.2, "weekLabel": "2026-10-18", "previousStage": previous or stage,
         "rule": {"key": "hold", "label": "持有"},
     }
@@ -274,7 +275,8 @@ PRIMARY_ROUTES = {
     "/portfolio-strategies/btc_supertrend_satellite/snapshot": {
         "state": "NOT_DUE", "dates": {"nextCheck": "2026-10-28"}, "nav": {"netNav": 1.0},
         "assets": [{"symbol": "510300.SS", "alias": "沪深300ETF"}, {"symbol": "BTC-USD", "alias": "BTC"}],
-        "currentWeights": [{"symbol": "CASH", "weight": 1.0}], "desiredWeights": [],
+        "currentWeights": [{"symbol": "CASH", "weight": 1.0}],
+        "desiredWeights": [{"symbol": "518880.SS", "weight": 0.25}, {"symbol": "BTC-USD", "weight": 0.75}],
         "observation": {"values": {"btc_close": 100.0, "supertrend_line": 90.0, "supertrend_on": True, "formal_supertrend_on": False}},
         "operations": {"orders": []}, "diagnostics": [],
     },
@@ -320,3 +322,54 @@ def test_query_brief_marks_primary_assets(monkeypatch):
     assert result["weinstein"]["stage"] == 4
     assert result["recentWeeks"][-1]["stage"] == 4
     assert result["supertrend"]["permission"] == "watch"
+
+
+def test_weekly_uses_the_closed_week_and_labels_levels(monkeypatch):
+    live = {
+        **_scan_item("QQQ", 3, previous=2, dist=-0.03), "weekComplete": False, "close": 690.0, "bandPosition": 0.2,
+        "typicalWeeklyMove": 0.026, "live": {"asOf": "2026-10-27", "sessionComplete": False},
+        "closed": {**_scan_item("QQQ", 2, previous=2, dist=0.001), "weekLabel": "2026-10-25", "bandPosition": 0.318},
+        "levels": [{"side": "below", "price": 693.16, "change": -0.0160, "changeNow": -0.0340, "typicalMoves": 0.6, "becomes": 3},
+                   {"side": "above", "price": 820.0, "change": 0.16, "changeNow": 0.19, "typicalMoves": 6.2, "becomes": 9}],
+    }
+    gold = {**_scan_item("518880.SS", 2, previous=3, rs=None), "rsBenchmark": None, "weekComplete": True, "levels": []}
+    gold["closed"] = dict(gold)
+    # confirmed 2 -> 3 last week, provisionally back to 2 this week
+    dividend = {**_scan_item("510880.SS", 2), "weekComplete": False, "levels": [],
+                "closed": _scan_item("510880.SS", 3, previous=2)}
+    legacy = _scan_item("BTC-USD", 2, rs=None)       # an old server without a closed view
+    routes = {
+        "/weinstein/scan": [live, gold, dividend, legacy],
+        "/supertrend/scan": {"groups": {}, "marketModes": {}},
+        **PRIMARY_ROUTES,
+    }
+    monkeypatch.setattr(helper, "_api_get", _fake_api(routes))
+
+    result = helper.query_weekly("http://example.test/api", timeout=1.0)
+
+    qqq = result["us"][0]
+    assert (qqq["stage"], qqq["closedWeek"]) == (2, "2026-10-25")
+    assert qqq["bandPositionPct"] == 32.0          # last closed week, not the live 20%
+    assert qqq["now"] == {"asOf": "2026-10-27", "sessionComplete": False, "weekComplete": False, "close": 690.0,
+                          "ma30DistancePct": -3.0, "bandPositionPct": 20.0, "provisionalStage": 3}
+    assert qqq["levels"] == [
+        {"side": "below", "price": 693.2, "changePct": -1.6, "changePctNow": -3.4, "typicalMoves": 0.6, "becomesStage": 3},
+        {"side": "above", "price": 820.0, "changePct": 16.0, "changePctNow": 19.0, "typicalMoves": None, "far": True, "becomesStage": 9},
+    ]
+    assert qqq["volumeLabel"] == "正常"
+    assert result["fieldGuide"]["levels"].startswith("温斯坦周线")
+    assert [(c["symbol"], c.get("conflict")) for c in result["stageChanges"]] == [("518880.SS", None), ("510880.SS", True)]
+    assert result["provisionalStageChanges"] == [
+        {"symbol": "QQQ", "name": "QQQ", "from": 2, "to": 3},
+        {"symbol": "510880.SS", "name": "510880.SS", "from": 3, "to": 2, "conflict": True},
+    ]
+    assert "缺少已收盘周数据" in result["crypto"][0]["warning"]
+    assert "warning" not in qqq
+    assert result["primary"]["targetByStage"] == {"2": 1.0}
+    assert result["cn"]["stage2StrongerThanCsi300"] == []      # gold has no CSI 300 comparison
+    assert result["primary"]["accountStatus"].startswith("未建仓")
+    assert "不是止损" in result["primary"]["btcSwitch"]["rule"]
+
+
+def test_volume_labels_use_fixed_thresholds():
+    assert [helper._volume_label(r) for r in (1.5, 1.49, 0.71, 0.7, None)] == ["放量", "正常", "正常", "缩量", None]

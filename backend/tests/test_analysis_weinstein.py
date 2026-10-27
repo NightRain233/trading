@@ -159,3 +159,108 @@ def test_rule_state_matches_plain_rules():
     assert aw.rule_state({"stage": 3, "weeksInStage": 1, "rs26": 0, "ma30Distance": -0.03})["key"] == "exit"
     assert aw.rule_state({"stage": 4, "weeksInStage": 5, "rs26": -0.1, "ma30Distance": -0.1})["key"] == "out"
     assert aw.rule_state(None)["key"] == "wait"
+
+
+# --- frozen 2026-10-27 data: expected numbers were worked out by hand from the CSVs ---
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "weinstein_2026_10_27"
+TUESDAY_EVENING = datetime(2026, 10, 27, 15, 0, tzinfo=timezone.utc)   # 23:00 Shanghai, 11:00 New York
+SATURDAY = datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc)
+
+
+def _fixture(symbol):
+    return pd.read_csv(FIXTURE_DIR / f"{symbol}.csv", index_col="Date", parse_dates=True)
+
+
+def _fixture_summary(monkeypatch, symbol, now=TUESDAY_EVENING):
+    monkeypatch.setattr(aw, "_benchmark_weekly_close", lambda benchmark: _fixture(benchmark)["Close"] if benchmark == "SPY" else None)
+    return aw.weinstein_summary(symbol, _fixture(symbol), now=now)
+
+
+def test_cross_market_etfs_are_not_compared_with_csi300():
+    assert aw.benchmark_for("518880.SS") is None      # gold
+    assert aw.benchmark_for("513100.SS") is None      # Nasdaq 100
+    assert aw.benchmark_for("513180.SS") == "2800.HK"  # Hang Seng tech
+    assert aw.benchmark_for("510880.SS") == "000300.SS"
+
+
+def test_unfinished_week_keeps_the_last_closed_week_for_stage_calls(monkeypatch):
+    qqq = _fixture_summary(monkeypatch, "QQQ")
+
+    assert qqq["weekComplete"] is False
+    assert qqq["weekLabel"] == "2026-11-01"
+    assert np.isclose(qqq["ma30"], 708.1192, atol=1e-3)
+    closed = qqq["closed"]
+    assert closed["weekLabel"] == "2026-10-25"
+    assert np.isclose(closed["close"], 704.40, atol=0.01)
+    assert np.isclose(closed["ma30"], 703.6579, atol=1e-3)
+    assert closed["stage"] == 2
+
+
+def test_week_is_complete_after_friday_close_but_crypto_waits_for_sunday(monkeypatch):
+    assert _fixture_summary(monkeypatch, "QQQ", now=SATURDAY)["weekComplete"] is True
+    assert _fixture_summary(monkeypatch, "BTC-USD", now=SATURDAY)["weekComplete"] is False
+
+
+def test_levels_are_solved_against_the_average_the_close_moves(monkeypatch):
+    # sell line x = 0.98 * s29 / (30 - 0.98), s29 = the 29 closed weeks before this one;
+    # distance from last week's close (stable), and from the live close (drifts)
+    expected = {
+        "QQQ": (693.1594, -0.01596, 0.60, -0.03402),
+        "SPY": (731.1060, -0.03798, 2.65, -0.04778),
+        "BTC-USD": (71678.13, -0.10429, 1.64, -0.10506),
+    }
+    for symbol, (price, change, moves, now) in expected.items():
+        (level,) = _fixture_summary(monkeypatch, symbol)["levels"]
+        assert (level["side"], level["becomes"]) == ("below", 3), symbol
+        assert np.isclose(level["price"], price, rtol=1e-6), symbol
+        assert np.isclose(level["change"], change, atol=2e-5), symbol
+        assert np.isclose(level["typicalMoves"], moves, atol=0.01), symbol
+        assert np.isclose(level["changeNow"], now, atol=2e-5), symbol
+
+
+def test_gold_recovery_line_leads_to_a_base_not_an_advance(monkeypatch):
+    gold = _fixture_summary(monkeypatch, "518880.SS")
+
+    assert gold["rsBenchmark"] is None and gold["rs26"] is None
+    (level,) = gold["levels"]
+    assert (level["side"], level["becomes"]) == ("above", 1)   # the average still falls
+    assert np.isclose(level["price"], 9.2200, atol=1e-4)
+    assert np.isclose(level["change"], 0.12453, atol=1e-4)
+    assert np.isclose(level["changeNow"], 0.12893, atol=1e-4)
+    assert np.isclose(gold["typicalWeeklyMove"], 0.03231, atol=1e-4)
+
+
+def test_level_close_lands_on_the_line_it_was_solved_for():
+    closes = pd.Series(np.linspace(60, 120, 60))
+    (level,) = aw.stage_levels(closes, 2, 120.0, 0.02)
+    extended = pd.concat([closes, pd.Series([level["price"]])], ignore_index=True)
+    ma = extended.rolling(30).mean()
+    assert np.isclose(level["price"], ma.iloc[-1] * 0.98)
+    # a hair below the line flips to stage 3, a hair above stays stage 2
+    for nudge, stage in ((-1e-6, 3), (1e-6, 2)):
+        bumped = extended.copy()
+        bumped.iloc[-1] = level["price"] * (1 + nudge)
+        assert aw.stage_series(bumped, bumped.rolling(30).mean()).iloc[-1] == stage
+
+
+def test_band_position_and_closed_week_volume(monkeypatch):
+    qqq = _fixture_summary(monkeypatch, "QQQ")
+
+    assert np.isclose(qqq["bandPosition"], 0.4956, atol=1e-3)
+    assert np.isclose(qqq["closed"]["bandPosition"], 0.3181, atol=1e-3)   # (704.40 - 680.61) / (755.41 - 680.61)
+    # the closed week's volume is compared with the ten weeks before it, not a two-day week
+    assert qqq["closed"]["volumeRatio"] > 0.8
+
+
+def test_flat_average_has_no_price_levels():
+    assert aw.stage_levels(pd.Series([100.0] * 40), 3, 101.0, 0.02) == []
+
+
+def test_live_session_reports_whether_the_latest_bar_has_closed():
+    assert aw.live_session("QQQ", "2026-10-27", now=TUESDAY_EVENING) == {"asOf": "2026-10-27", "sessionComplete": False}
+    assert aw.live_session("510300.SS", "2026-10-27", now=TUESDAY_EVENING)["sessionComplete"] is True
+    assert aw.live_session("QQQ", None) == {"asOf": None, "sessionComplete": None}

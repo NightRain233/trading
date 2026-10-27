@@ -1543,9 +1543,10 @@ _weinstein_scan_lock = threading.Lock()
 def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
     """Weinstein stage view for every watchlist symbol, read from the cached weekly bars only.
 
-    The result is reused until the watchlist or any weekly parquet file changes.
+    The result is reused until the watchlist or any weekly parquet file changes, or a
+    market's current week closes (which moves the ``closed`` view forward).
     """
-    from analysis_weinstein import weinstein_scan_item
+    from analysis_weinstein import completion_key, live_session
 
     symbols: list[str] = []
     aliases: dict[str, str] = {}
@@ -1556,32 +1557,53 @@ def weinstein_scan(weeks: int = Query(52, ge=10, le=260)):
                 symbols.append(symbol)
                 aliases[symbol] = (entry.get("alias") or "") if isinstance(entry, dict) else ""
     paths = {symbol: os.path.join(DATA_DIR, f"{symbol}_weekly.parquet") for symbol in symbols}
-    signature = (weeks, tuple(sorted(aliases.items())), tuple(
+    signature = (weeks, completion_key(), tuple(sorted(aliases.items())), tuple(
         (symbol, os.path.getmtime(path) if os.path.exists(path) else None)
         for symbol, path in paths.items()
     ))
     with _weinstein_scan_lock:
-        if _weinstein_scan_cache["key"] == signature:
-            return _weinstein_scan_cache["items"]
+        if _weinstein_scan_cache["key"] != signature:
+            _weinstein_scan_cache.update(key=signature, items=_build_weinstein_scan(paths, aliases, weeks))
+        items = _weinstein_scan_cache["items"]
+    # whether the latest daily bar's session has closed changes with the clock, not the files
+    return [{**item, "live": live_session(item["symbol"], item.get("liveAsOf"))} for item in items]
 
+
+def _build_weinstein_scan(paths: dict, aliases: dict, weeks: int) -> list:
+    from analysis_weinstein import weinstein_scan_item
+
+    try:
+        summaries = get_cached_batch_summaries(list(paths)).get("results") or {}
+    except Exception:
+        summaries = {}
+    items = []
+    for symbol, path in paths.items():
+        if not os.path.exists(path):
+            continue
         try:
-            summaries = get_cached_batch_summaries(symbols).get("results") or {}
-        except Exception:
-            summaries = {}
-        items = []
-        for symbol, path in paths.items():
-            if not os.path.exists(path):
-                continue
-            try:
-                item = weinstein_scan_item(symbol, pd.read_parquet(path), weeks=weeks)
-            except Exception as exc:
-                logger.warning("温斯坦扫描失败 %s: %s", symbol, exc)
-                continue
-            if item is not None:
-                cached_name = (summaries.get(symbol) or {}).get("name") or ""
-                items.append({"symbol": symbol, "name": aliases.get(symbol) or cached_name or symbol, **item})
-        _weinstein_scan_cache.update(key=signature, items=items)
-        return items
+            item = weinstein_scan_item(symbol, pd.read_parquet(path), weeks=weeks)
+        except Exception as exc:
+            logger.warning("温斯坦扫描失败 %s: %s", symbol, exc)
+            continue
+        if item is not None:
+            cached_name = (summaries.get(symbol) or {}).get("name") or ""
+            items.append({
+                "symbol": symbol,
+                "name": aliases.get(symbol) or cached_name or symbol,
+                **item,
+                "liveAsOf": _latest_daily_date(symbol),
+            })
+    return items
+
+
+def _latest_daily_date(symbol: str) -> Optional[str]:
+    """Date of the newest cached daily bar, the bar the weekly row's latest close comes from."""
+    path = os.path.join(DATA_DIR, f"{symbol}.parquet")
+    try:
+        index = pd.read_parquet(path, columns=["Close"]).index
+    except Exception:
+        return None
+    return pd.Timestamp(index[-1]).strftime("%Y-%m-%d") if len(index) else None
 
 
 @app.get("/api/weekly-breakout/scan")

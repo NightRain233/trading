@@ -498,21 +498,116 @@ def _pct(value: Any, digits: int = 1) -> Optional[float]:
     return round(float(value) * 100, digits) if isinstance(value, (int, float)) else None
 
 
+def _round_price(value: Any) -> Optional[float]:
+    if not isinstance(value, (int, float)):
+        return None
+    return round(value, 4 if abs(value) < 100 else 1)
+
+
+# Printed once per payload instead of on every row.
+FIELD_GUIDE = {
+    "stage": "stage/rule/rs/volumeRatio 来自上周已收盘的周线（closedWeek）；本周没走完时只看 now.provisionalStage，周五收盘后才算数",
+    "levels": "温斯坦周线口径（学习/观察，不管主策略的钱）：下一个周收盘在 price 之上（side=above）或之下（below）就从上周阶段变成 becomesStage；"
+              "price 已经把这次收盘对 30 周线的拉动算进去，是精确的触发价。changePct 是离上周收盘价的涨跌幅（不随盘中漂动，报告用它），"
+              "changePctNow 是离最新价的涨跌幅（随行情变，引用时注明 now.asOf）；typicalMoves 是 changePct 相当于几次正常的一周涨跌（过去 20 周标准差）",
+    "far": "far=true：距离超过 4 次正常的一周涨跌，只说\"很远\"，不报次数（一周的波动不能线性折算成多周的距离）",
+    "bandPositionPct": "在 20 周布林带里的位置，0 是下轨，100 是上轨；负数是已跌出下轨，超过 100 是已涨出上轨。行上的是上周收盘时，now 里的是最新价",
+    "volumeLabel": "上周量比 >= 1.5 才叫放量，<= 0.7 叫缩量，其余是正常（约定门槛）；报告只用这个标签描述量能",
+    "now": "asOf 是最新日线的日期，sessionComplete=false 表示这根日线还在交易中（盘中价）",
+    "conflict": "同一品种上周确认换阶段、本周又暂定换回去：周五若成立，上周那次换阶段就是假信号",
+    "becomesStage": {"1": "站上仍在下降的 30 周线：止跌筑底，还不是上涨", "2": "重新站上 30 周线：回到上涨",
+                     "3": "跌破 30 周线：学习账户按规则卖出", "4": "跌回 30 周线下方：重新下跌"},
+    "targetByStage": "主策略目标仓位按各品种上周收盘阶段加总；只描述现状，不预测走势（A 股阶段择时没跑赢持有，黄金没测过），也不改变持仓",
+    "supertrendBlocked": "SuperTrend 的 blocked 是市场模式不允许新开仓（如加密处于 survival），不是数据问题；数据不足另有分组",
+}
+
+
 def _stage_row(item: dict) -> dict:
-    return {
+    """Stage, rule and strength come from the last closed week; ``now`` is the live,
+    possibly unfinished week, and ``levels`` are closes that would change the stage."""
+    closed = item.get("closed") or item
+    row = {
         "symbol": item["symbol"],
         "name": item.get("name") or item["symbol"],
-        "stage": item.get("stage"),
-        "stageLabel": item.get("stageLabel"),
-        "weeksInStage": item.get("weeksInStage"),
-        "ma30DistancePct": _pct(item.get("ma30Distance")),
-        "ma30Slope4wPct": _pct(item.get("ma30Slope"), 2),
-        "rs26Pct": _pct(item.get("rs26"), 0),
-        "rsBenchmark": item.get("rsBenchmark"),
-        "bbState": item.get("bbState"),
-        "volumeRatio": round(item["volumeRatio"], 1) if isinstance(item.get("volumeRatio"), (int, float)) else None,
-        "rule": (item.get("rule") or {}).get("label"),
+        "closedWeek": closed.get("weekLabel"),
+        "stage": closed.get("stage"),
+        "stageLabel": closed.get("stageLabel"),
+        "weeksInStage": closed.get("weeksInStage"),
+        "ma30DistancePct": _pct(closed.get("ma30Distance")),
+        "ma30Slope4wPct": _pct(closed.get("ma30Slope"), 2),
+        "rs26Pct": _pct(closed.get("rs26"), 0),
+        "rsBenchmark": closed.get("rsBenchmark"),
+        "bbState": closed.get("bbState"),
+        "volumeRatio": round(closed["volumeRatio"], 1) if isinstance(closed.get("volumeRatio"), (int, float)) else None,
+        "volumeLabel": _volume_label(closed.get("volumeRatio")),
+        "rule": (closed.get("rule") or {}).get("label"),
+        "bandPositionPct": _pct(closed.get("bandPosition"), 0),
     }
+    if closed is item:
+        row["warning"] = "缺少已收盘周数据：阶段是本周暂定口径，不能当确认结论"
+    if "weekComplete" not in item:
+        return row
+    live = item.get("live") or {}
+    row["now"] = {
+        "asOf": live.get("asOf"),
+        "sessionComplete": live.get("sessionComplete"),
+        "weekComplete": item.get("weekComplete"),
+        "close": _round_price(item.get("close")),
+        "ma30DistancePct": _pct(item.get("ma30Distance")),
+        "bandPositionPct": _pct(item.get("bandPosition"), 0),
+        **({} if item.get("weekComplete") else {"provisionalStage": item.get("stage")}),
+    }
+    row["typicalWeeklyMovePct"] = _pct(item.get("typicalWeeklyMove"))
+    row["levels"] = [_level_row(level) for level in item.get("levels") or []]
+    return row
+
+
+FAR_MOVES = 4.0
+VOLUME_HIGH, VOLUME_LOW = 1.5, 0.7
+
+
+def _level_row(level: dict) -> dict:
+    moves = level.get("typicalMoves")
+    far = isinstance(moves, (int, float)) and moves > FAR_MOVES
+    return {
+        "side": level.get("side"),
+        "price": _round_price(level["price"]),
+        "changePct": _pct(level["change"]),
+        "changePctNow": _pct(level.get("changeNow")),
+        "typicalMoves": None if far or not isinstance(moves, (int, float)) else round(moves, 1),
+        **({"far": True} if far else {}),
+        "becomesStage": level["becomes"],
+    }
+
+
+def _volume_label(ratio: Any) -> Optional[str]:
+    if not isinstance(ratio, (int, float)):
+        return None
+    return "放量" if ratio >= VOLUME_HIGH else "缩量" if ratio <= VOLUME_LOW else "正常"
+
+
+STATUS_KEYS = ("symbol", "name", "stage", "stageLabel", "weeksInStage", "ma30DistancePct", "rs26Pct", "rsBenchmark", "rule")
+
+
+def _status_row(row: dict) -> dict:
+    slim = {key: row.get(key) for key in STATUS_KEYS}
+    if row.get("warning"):
+        slim["warning"] = row["warning"]
+    provisional = (row.get("now") or {}).get("provisionalStage")
+    if provisional is not None and provisional != row.get("stage"):
+        slim["provisionalStage"] = provisional
+    return slim
+
+
+def _weights_by_stage(weights: dict, by_symbol: dict) -> dict:
+    """Primary target weight summed by each holding's last closed stage."""
+    totals: dict[str, float] = {}
+    for symbol, weight in weights.items():
+        item = by_symbol.get(symbol.upper())
+        stage = ((item.get("closed") or item).get("stage") if item else None)
+        key = str(stage) if stage else "unknown"
+        totals[key] = round(totals.get(key, 0.0) + weight, 4)
+    return dict(sorted(totals.items()))
 
 
 def _primary_summary(api_base: str, timeout: float) -> Optional[dict]:
@@ -533,15 +628,18 @@ def _primary_summary(api_base: str, timeout: float) -> Optional[dict]:
             "dailyOn": values.get("supertrend_on"),
             "formalOn": values.get("formal_supertrend_on"),
             "flipPending": values.get("supertrend_on") != values.get("formal_supertrend_on"),
+            "rule": "主策略：检查日看日线 ST(10,3)，下一交易日收盘执行；两次检查之间跌穿不会卖，不是止损",
         }
     orders = ((snap.get("operations") or {}).get("orders")) or []
+    current = {w["symbol"]: round(w["weight"], 4) for w in snap.get("currentWeights") or [] if w.get("weight")}
     return {
+        "accountStatus": "未建仓：账户全部是现金" if current.get("CASH", 0) >= 0.99 else "已建仓",
         "strategyId": primary["strategyId"],
         "displayName": primary.get("displayName"),
         "state": snap.get("state"),
         "dates": snap.get("dates"),
         "nav": {k: nav.get(k) for k in ("netNav", "dailyReturn", "cumulativeReturn", "drawdown")},
-        "currentWeights": {w["symbol"]: round(w["weight"], 4) for w in snap.get("currentWeights") or [] if w.get("weight")},
+        "currentWeights": current,
         "assets": {a["symbol"]: a.get("alias") for a in snap.get("assets") or []},
         "desiredWeights": {w["symbol"]: round(w["weight"], 4) for w in snap.get("desiredWeights") or [] if w.get("weight")},
         "openOrders": [o for o in orders if o.get("status") in ("PENDING", "WAITING_OPEN", "DELAYED")],
@@ -574,11 +672,21 @@ def query_weekly(api_base: str, timeout: float) -> dict:
     for market_rows in rows.values():
         market_rows.sort(key=lambda r: -(r["rs26Pct"] if r["rs26Pct"] is not None else -999))
     cn = rows["cn"]
-    changes = [
-        {**_stage_row(item), "market": market_of(item["symbol"]), "from": item["previousStage"]}
-        for item in items
-        if item.get("previousStage") and item["previousStage"] != item.get("stage")
-    ]
+    changes, provisional = [], []
+    for item in items:
+        closed = item.get("closed") or item
+        if closed.get("previousStage") and closed["previousStage"] != closed.get("stage"):
+            changes.append({**_stage_row(item), "market": market_of(item["symbol"]), "from": closed["previousStage"]})
+        if item.get("weekComplete") is False and item.get("stage") != closed.get("stage"):
+            provisional.append({"symbol": item["symbol"], "name": item.get("name") or item["symbol"],
+                                "from": closed.get("stage"), "to": item.get("stage")})
+    reverting = {p["symbol"] for p in provisional if any(c["symbol"] == p["symbol"] and c["from"] == p["to"] for c in changes)}
+    for entry in changes + provisional:
+        if entry["symbol"] in reverting:
+            entry["conflict"] = True
+    primary = _primary_summary(api_base, timeout)
+    if primary:
+        primary["targetByStage"] = _weights_by_stage(primary.get("desiredWeights") or {}, by_symbol)
     try:
         supertrend = _supertrend_digest(api_base, timeout)
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
@@ -586,15 +694,20 @@ def query_weekly(api_base: str, timeout: float) -> dict:
     return {
         "fetchedAt": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
         "weekLabel": items[0].get("weekLabel") if items else None,
-        "primary": _primary_summary(api_base, timeout),
+        "fieldGuide": FIELD_GUIDE,
+        "primary": primary,
         "benchmarks": [_stage_row(by_symbol[s]) for s in BENCHMARKS if s in by_symbol],
         "stageChanges": changes,
+        "provisionalStageChanges": provisional,
         "us": rows["us"],
         "crypto": rows["crypto"],
         "cn": {
             "stageCounts": {str(st): sum(1 for r in cn if r["stage"] == st) for st in (1, 2, 3, 4)},
-            "stage2StrongerThanCsi300": [r for r in cn if r["stage"] == 2 and (r["rs26Pct"] or 0) > 0],
-            "rows": cn,
+            "stage2StrongerThanCsi300": [
+                r for r in cn if r["stage"] == 2 and r["rsBenchmark"] == "000300.SS" and (r["rs26Pct"] or 0) > 0
+            ],
+            # A-shares are read for state only, so their rows skip levels and band position
+            "rows": [_status_row(r) for r in cn],
         },
         "other": rows["other"],
         "supertrend": supertrend,
@@ -618,6 +731,12 @@ def query_brief(api_base: str, symbol: str, timeout: float) -> dict:
             "macdHist": candle.get("macd_hist"),
             "volume": candle.get("volume"),
         })
+    if view is not None:
+        status = (data.get("sessionContext") or {}).get("status")
+        view = {**view, "live": {"asOf": data.get("latestDataDate"),
+                                 "sessionComplete": None if status is None else status != "in_progress"}}
+    if weeks and view and view.get("weekComplete") is False:
+        weeks[-1]["complete"] = False
     decision = data.get("decision") or {}
     primary = None
     try:
@@ -631,9 +750,10 @@ def query_brief(api_base: str, symbol: str, timeout: float) -> dict:
         or data.get("name") or data.get("symbol"),
         "market": market_of(data.get("symbol") or symbol),
         "latestDataDate": data.get("latestDataDate"),
+        "fieldGuide": FIELD_GUIDE,
         "dataStale": data.get("dataStale"),
         "price": data.get("price"),
-        "weinstein": {**(view or {}), "rule": None} if view is None else {**_stage_row({"symbol": data.get("symbol"), **view}), "ma30": view.get("ma30"), "weekLabel": view.get("weekLabel")},
+        "weinstein": None if view is None else {**_stage_row({"symbol": data.get("symbol"), **view}), "ma30Now": view.get("ma30")},
         "recentWeeks": weeks,
         "supertrend": {
             "role": "learning observation only",
