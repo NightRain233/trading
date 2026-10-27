@@ -31,6 +31,8 @@ BACKGROUND_PREWARM_ENABLED=false https_proxy=http://127.0.0.1:7890 http_proxy=ht
   no_proxy=127.0.0.1,localhost,free-api.tickflow.org .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
+Updating local market data: `make update-data` (incremental refresh of every cached symbol, then a stale-symbol report; `ARGS=--check-only` only reports). Do not improvise one-off pandas scripts for this: pyarrow can hang at interpreter exit on macOS, and the script ends with `os._exit` to avoid it.
+
 Tests:
 
 ```bash

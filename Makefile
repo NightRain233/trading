@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-backend deploy-frontend deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx
+.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-backend deploy-frontend deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx update-data
 
 
 # 初始化项目: make install
@@ -55,6 +55,17 @@ dev-be: ## Run backend in development mode
 dev: ## Run both frontend and backend locally (requires parallel execution)
 	@echo "Starting frontend and backend..."
 	@make -j 2 dev-fe dev-be
+
+# --- Market data ---
+
+# Yahoo needs a proxy from China; override in Makefile.local or with UPDATE_PROXY= to disable.
+UPDATE_PROXY ?= http://127.0.0.1:7890
+UPDATE_NO_PROXY := 127.0.0.1,localhost,free-api.tickflow.org
+
+update-data: ## Incrementally refresh local market data and report stale symbols
+	cd backend && BACKGROUND_PREWARM_ENABLED=false \
+		$(if $(UPDATE_PROXY),https_proxy=$(UPDATE_PROXY) http_proxy=$(UPDATE_PROXY) no_proxy=$(UPDATE_NO_PROXY)) \
+		uv run --frozen python ../scripts/update_market_data.py $(ARGS)
 
 # --- Build ---
 
