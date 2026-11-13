@@ -1,0 +1,4 @@
+interface:
+  display_name: "每日自选技术日报"
+  short_description: "每日市场温度、当天异动、AI解读与五日方向复核"
+  default_prompt: "Use $daily-market-brief to generate today's short-cycle technical watchlist brief and record the five-trading-day forecasts."

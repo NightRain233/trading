@@ -38,6 +38,7 @@
 ## 每日推送与 AI 助手
 
 - **每日推送**：`scripts/openclaw_supertrend_alerts.py --mode daily-brief` 生成日报，主策略和 BTC 日线开关在前，SuperTrend 扫描压成一行"学习观察"。推送助手（OpenClaw / Hermes）的系统提示词在 [`scripts/openclaw_daily_brief_prompt.md`](scripts/openclaw_daily_brief_prompt.md)。
+- **每日自选技术日报**：Hermes 按周二到周六 08:30 运行 `scripts/daily_market_brief.py --mode report`，生成四个市场的短周期指标、当天异动和主策略三只品种观察；`--mode record` 记录 AI 的方向判断，`--mode evaluate` 在 5 个交易日后用真实收盘价评分。运行提示在 [`scripts/openclaw_market_brief_prompt.md`](scripts/openclaw_market_brief_prompt.md)。
 - **AI 助手 skill**（`.agents/skills/`，Claude Code 通过 `.claude/skills` 读同一份）：
 
 | skill | 做什么 |
@@ -45,6 +46,7 @@
 | `scan` | 周末复盘：主策略是否操作 → 大盘阶段 → 本周换阶段 → 美股学习账户 → A 股状态 → 一行 SuperTrend |
 | `analyze` | 单标的：温斯坦周线结论 → SuperTrend 是否一致 → 和主策略的关系 |
 | `portfolio-daily-brief` | 每日组合简报和账户健康检查（只读） |
+| `daily-market-brief` | 每日自选技术指标、当天异动、AI 大局解读和 5 个交易日后的客观评分 |
 | `fupan` | 把对话里的判断整理成 `reviews/` 里的复盘笔记 |
 
 所有 skill 先读共用口径 [`.agents/skills/shared/market-rules.md`](.agents/skills/shared/market-rules.md)。取数用 `scripts/trading_analysis_helper.py --query weekly` 或 `--query brief --symbol <代码>`。
