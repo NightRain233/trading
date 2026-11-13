@@ -34,15 +34,19 @@ def _normalize_calendar_timestamp(value: date | str | pd.Timestamp) -> pd.Timest
     return timestamp.normalize()
 
 
-def xshg_sessions(start: date | str, end: date | str) -> pd.DatetimeIndex:
-    """Return XSHG sessions, safely clipped to the bundled calendar range.
+def exchange_sessions(
+    calendar_name: str,
+    start: date | str,
+    end: date | str,
+) -> pd.DatetimeIndex:
+    """Return exchange sessions, safely clipped to the bundled range.
 
     ``exchange_calendars`` raises ``DateOutOfBounds`` when either endpoint is
-    outside the calendar's finite data range. A strategy is allowed to ask for
-    a look-ahead window, so an expired calendar should mean "no sessions in
-    that part of the window", not a failed portfolio calculation.
+    outside a calendar's finite data range. Callers are allowed to ask for a
+    look-ahead window, so an exhausted calendar should mean "no sessions in
+    that part of the window", not an unrelated calculation failure.
     """
-    calendar = xcals.get_calendar("XSHG")
+    calendar = xcals.get_calendar(calendar_name)
     start_ts = _normalize_calendar_timestamp(start)
     end_ts = _normalize_calendar_timestamp(end)
     first_session = _normalize_calendar_timestamp(calendar.first_session)
@@ -55,6 +59,37 @@ def xshg_sessions(start: date | str, end: date | str) -> pd.DatetimeIndex:
         return pd.DatetimeIndex([])
     sessions = calendar.sessions_in_range(clipped_start, clipped_end)
     return _normalize_sessions(sessions)
+
+
+def xshg_sessions(start: date | str, end: date | str) -> pd.DatetimeIndex:
+    """Return XSHG sessions using the bounded exchange-session adapter."""
+    return exchange_sessions("XSHG", start, end)
+
+
+def xshg_calendar_health(
+    as_of_date: date | str,
+    *,
+    warning_days: int = 90,
+) -> dict[str, object]:
+    """Report whether the bundled XSHG calendar still covers the horizon."""
+    calendar = xcals.get_calendar("XSHG")
+    as_of = _normalize_calendar_timestamp(as_of_date)
+    last_session = _normalize_calendar_timestamp(calendar.last_session)
+    days_remaining = (last_session - as_of).days
+    if days_remaining < 0:
+        status = "CALENDAR_RANGE_EXHAUSTED"
+    elif days_remaining <= warning_days:
+        status = "CALENDAR_RANGE_LOW"
+    else:
+        status = "OK"
+    return {
+        "calendar": "XSHG",
+        "lastSession": last_session.date().isoformat(),
+        "asOfDate": as_of.date().isoformat(),
+        "daysRemaining": days_remaining,
+        "warningDays": warning_days,
+        "status": status,
+    }
 
 
 def every_n_session_dates(

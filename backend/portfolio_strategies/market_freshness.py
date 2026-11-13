@@ -7,6 +7,8 @@ from typing import Any
 import exchange_calendars as xcals
 import pandas as pd
 
+from .schedules import exchange_sessions
+
 
 def venue_for_symbol(symbol: str) -> str | None:
     normalized = str(symbol or "").upper()
@@ -39,8 +41,10 @@ def _completed_sessions(venue: str, known_at) -> pd.DatetimeIndex:
     calendar = _calendar(venue)
     reference = _utc_timestamp(known_at)
     local_date = reference.tz_convert(calendar.tz).date()
-    sessions = calendar.sessions_in_range(
-        pd.Timestamp(local_date - timedelta(days=45)), pd.Timestamp(local_date),
+    sessions = exchange_sessions(
+        venue,
+        local_date - timedelta(days=45),
+        local_date,
     )
     return pd.DatetimeIndex([
         pd.Timestamp(session).tz_localize(None).normalize()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import math
 import json
@@ -9,7 +9,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import exchange_calendars as xcals
 
 from .btc_satellite import btc_trend_history, calculate_btc_satellite
 from .ledger import PortfolioLedger, connect
@@ -44,7 +43,7 @@ from .next_open_strategies import (
     core_signal_due,
 )
 from .operation_lock import portfolio_operation_lock
-from .schedules import schedule_status
+from .schedules import schedule_status, xshg_sessions
 from .registry import (
     ComparisonStrategyError,
     PRIMARY_STRATEGY_IDS,
@@ -532,7 +531,12 @@ class PortfolioStrategyService:
             date.fromisoformat(activation["activation_date"])
             if activation is not None else None
         )
-        if calculation.state == CalculationState.READY and calculation.signal_date is not None:
+        # A refresh can arrive after the formal check session (for example
+        # when BTC data completes one day later than the XSHG ETFs). The
+        # calculation still carries the latest formal signal, so queue it as
+        # a catch-up signal instead of requiring the refresh to land on the
+        # exact signal date.
+        if calculation.signal_date is not None:
             if (
                 activation is None
                 or calculation.signal_date
@@ -745,9 +749,9 @@ class PortfolioStrategyService:
             errors["ACTIVATION_RECORD"] = "missing_for_existing_next_open_account"
             return self._get_next_open_snapshot(config, load_errors=errors)
         completed_core_cutoff = _completed_through("510300.SS", effective_now)
-        expected_sessions = xcals.get_calendar("XSHG").sessions_in_range(
-            pd.Timestamp(completed_core_cutoff) - pd.Timedelta(days=14),
-            pd.Timestamp(completed_core_cutoff),
+        expected_sessions = xshg_sessions(
+            completed_core_cutoff - timedelta(days=14),
+            completed_core_cutoff,
         )
         expected_core_date = (
             pd.Timestamp(expected_sessions[-1]).tz_localize(None).date()

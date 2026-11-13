@@ -15,6 +15,7 @@ from portfolio_strategies.next_open_data import load_next_open_frames
 from portfolio_strategies.operation_lock import portfolio_operation_lock
 from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.service import PortfolioStrategyService
+from portfolio_strategies.schedules import xshg_calendar_health
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -74,6 +75,7 @@ def run_daily_job(
         "dataUpdate": {"ok": False},
         "marketReadiness": {},
         "strategies": {},
+        "calendarHealth": xshg_calendar_health(started.astimezone(SHANGHAI).date()),
     }
     try:
         try:

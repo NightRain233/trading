@@ -8,7 +8,6 @@ from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
 
-import exchange_calendars as xcals
 import numpy as np
 import pandas as pd
 
@@ -30,6 +29,7 @@ from .next_open_strategies import (
     next_core_valid_open_date,
     next_valid_open_date,
 )
+from .schedules import exchange_sessions
 
 
 ACTIVE_ORDER_STATUSES = ("PENDING", "WAITING_OPEN")
@@ -61,10 +61,10 @@ def _execution_calendar_name(symbol: str) -> str | None:
 def expected_next_market_date(symbol: str, signal_date: date) -> date:
     if symbol.endswith("-USD"):
         return signal_date + timedelta(days=1)
-    calendar = xcals.get_calendar(_execution_calendar_name(symbol) or "XNYS")
-    sessions = calendar.sessions_in_range(
-        pd.Timestamp(signal_date + timedelta(days=1)),
-        pd.Timestamp(signal_date + timedelta(days=14)),
+    sessions = exchange_sessions(
+        _execution_calendar_name(symbol) or "XNYS",
+        signal_date + timedelta(days=1),
+        signal_date + timedelta(days=14),
     )
     if sessions.empty:
         raise ValueError(f"No expected market session for {symbol} after {signal_date}")

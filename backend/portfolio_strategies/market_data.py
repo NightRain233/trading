@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .models import AssetConfig, DataDiagnostic, StrategyConfig
-from .schedules import xshg_sessions
+from .schedules import xshg_calendar_health, xshg_sessions
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -123,6 +123,23 @@ def build_portfolio_market_data(
     now: datetime,
 ) -> PortfolioMarketData:
     diagnostics: list[DataDiagnostic] = []
+    calendar_health = xshg_calendar_health(now.astimezone(SHANGHAI).date())
+    if calendar_health["status"] == "CALENDAR_RANGE_EXHAUSTED":
+        diagnostics.append(
+            DataDiagnostic(
+                "BLOCKED_CALENDAR_RANGE_EXHAUSTED",
+                "XSHG calendar no longer covers the current date",
+                details=calendar_health,
+            )
+        )
+    elif calendar_health["status"] == "CALENDAR_RANGE_LOW":
+        diagnostics.append(
+            DataDiagnostic(
+                "CALENDAR_RANGE_LOW",
+                "XSHG calendar is nearing its last bundled session",
+                details=calendar_health,
+            )
+        )
     completed: dict[str, pd.DataFrame] = {}
     for asset in config.assets:
         source = frames.get(asset.symbol)

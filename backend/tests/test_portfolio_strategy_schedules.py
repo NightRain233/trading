@@ -9,6 +9,7 @@ from portfolio_strategies.schedules import (
     bimonthly_signal_dates,
     every_n_session_dates,
     schedule_status,
+    xshg_calendar_health,
     xshg_sessions,
 )
 
@@ -60,6 +61,25 @@ def test_xshg_sessions_returns_empty_when_window_is_after_calendar_end(monkeypat
     sessions = xshg_sessions(date(2027, 1, 1), date(2027, 1, 15))
 
     assert sessions.empty
+
+
+def test_xshg_calendar_health_warns_before_bundled_end(monkeypatch):
+    _calendar_ending_2026(monkeypatch)
+
+    health = xshg_calendar_health(date(2026, 11, 13), warning_days=90)
+
+    assert health["status"] == "CALENDAR_RANGE_LOW"
+    assert health["lastSession"] == "2026-12-31"
+    assert health["daysRemaining"] == 48
+
+
+def test_xshg_calendar_health_reports_exhausted_range(monkeypatch):
+    _calendar_ending_2026(monkeypatch)
+
+    health = xshg_calendar_health(date(2027, 1, 1))
+
+    assert health["status"] == "CALENDAR_RANGE_EXHAUSTED"
+    assert health["daysRemaining"] == -1
 
 
 def test_btc_every_ten_session_schedule_uses_frozen_xquant_reference():
