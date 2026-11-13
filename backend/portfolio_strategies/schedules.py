@@ -26,9 +26,34 @@ def _normalize_sessions(sessions: Sequence[pd.Timestamp]) -> pd.DatetimeIndex:
     return normalized.normalize().unique().sort_values()
 
 
+def _normalize_calendar_timestamp(value: date | str | pd.Timestamp) -> pd.Timestamp:
+    """Normalize a caller or exchange-calendar timestamp to a session date."""
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_localize(None)
+    return timestamp.normalize()
+
+
 def xshg_sessions(start: date | str, end: date | str) -> pd.DatetimeIndex:
+    """Return XSHG sessions, safely clipped to the bundled calendar range.
+
+    ``exchange_calendars`` raises ``DateOutOfBounds`` when either endpoint is
+    outside the calendar's finite data range. A strategy is allowed to ask for
+    a look-ahead window, so an expired calendar should mean "no sessions in
+    that part of the window", not a failed portfolio calculation.
+    """
     calendar = xcals.get_calendar("XSHG")
-    sessions = calendar.sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))
+    start_ts = _normalize_calendar_timestamp(start)
+    end_ts = _normalize_calendar_timestamp(end)
+    first_session = _normalize_calendar_timestamp(calendar.first_session)
+    last_session = _normalize_calendar_timestamp(calendar.last_session)
+    if end_ts < first_session or start_ts > last_session:
+        return pd.DatetimeIndex([])
+    clipped_start = max(start_ts, first_session)
+    clipped_end = min(end_ts, last_session)
+    if clipped_start > clipped_end:
+        return pd.DatetimeIndex([])
+    sessions = calendar.sessions_in_range(clipped_start, clipped_end)
     return _normalize_sessions(sessions)
 
 

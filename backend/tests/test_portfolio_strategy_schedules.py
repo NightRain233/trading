@@ -1,7 +1,9 @@
 from datetime import date
 
 import pandas as pd
+import exchange_calendars as xcals
 
+import portfolio_strategies.schedules as schedules
 from portfolio_strategies.registry import get_strategy
 from portfolio_strategies.schedules import (
     bimonthly_signal_dates,
@@ -9,6 +11,26 @@ from portfolio_strategies.schedules import (
     schedule_status,
     xshg_sessions,
 )
+
+
+def _calendar_ending_2026(monkeypatch):
+    real_get_calendar = xcals.get_calendar
+    real_calendar = real_get_calendar("XSHG")
+
+    class LimitedCalendar:
+        first_session = real_calendar.first_session
+        last_session = pd.Timestamp("2026-12-31")
+
+        @staticmethod
+        def sessions_in_range(start, end):
+            return real_calendar.sessions_in_range(start, end)
+
+    limited = LimitedCalendar()
+    monkeypatch.setattr(
+        schedules.xcals,
+        "get_calendar",
+        lambda name: limited if name == "XSHG" else real_get_calendar(name),
+    )
 
 
 def test_xshg_sessions_are_timezone_naive_normalized_dates():
@@ -23,6 +45,21 @@ def test_xshg_sessions_are_timezone_naive_normalized_dates():
     ]))
     assert sessions.tz is None
     assert all(timestamp == timestamp.normalize() for timestamp in sessions)
+
+
+def test_xshg_sessions_clips_a_lookahead_past_calendar_end(monkeypatch):
+    _calendar_ending_2026(monkeypatch)
+    sessions = xshg_sessions(date(2026, 12, 15), date(2027, 1, 15))
+
+    assert not sessions.empty
+    assert sessions[-1] == pd.Timestamp("2026-12-31")
+
+
+def test_xshg_sessions_returns_empty_when_window_is_after_calendar_end(monkeypatch):
+    _calendar_ending_2026(monkeypatch)
+    sessions = xshg_sessions(date(2027, 1, 1), date(2027, 1, 15))
+
+    assert sessions.empty
 
 
 def test_btc_every_ten_session_schedule_uses_frozen_xquant_reference():
@@ -76,6 +113,16 @@ def test_schedule_status_reports_next_date_and_remaining_sessions():
     assert status.last_signal_date == date(2026, 6, 15)
     assert status.next_signal_date == date(2026, 6, 30)
     assert status.sessions_until_next == 2
+    assert status.missing_signal_session is False
+
+
+def test_schedule_status_survives_lookahead_beyond_calendar_end():
+    config = get_strategy("btc_supertrend_satellite")
+    observed = xshg_sessions(date(2026, 10, 1), date(2026, 11, 12))
+
+    status = schedule_status(config, date(2026, 11, 12), observed)
+
+    assert status.next_signal_date == date(2026, 11, 25)
     assert status.missing_signal_session is False
 
 
