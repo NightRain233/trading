@@ -2,11 +2,7 @@
  * Portfolio strategy helpers — deterministic business logic covered by Node tests.
  */
 
-import type {
-  PortfolioSnapshot,
-  PortfolioWeightItem,
-  PortfolioPositionItem,
-} from './types';
+import type { PortfolioSnapshot } from './types';
 
 export declare const PANEL_KEYS: readonly [
   'dates',

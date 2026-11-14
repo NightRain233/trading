@@ -13,7 +13,7 @@ RS lookback 60 / 20 交易日再平衡 / top5 / 5bps 费率 + 5bps 滑点 / 月 
 数据来源：
 
 ```text
-backend/backtest_results/rs_rotation_robustness_2026-06-05.json
+../xquant/outputs/trading-research/rs_rotation_robustness_2026-06-05.json
 ```
 
 比较池：
@@ -161,3 +161,5 @@ RS 轮动 + 月 MACD 仍是当前最值得保留的策略底座。
 ```text
 自然年结果支持“动量轮动在不同市场都能工作”，但不同市场赚的钱不一样：A 股赚阶段性风格切换，美股更多吃长牛 beta + 防守过滤，全球裸组合主要暴露了风险预算问题。
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

@@ -1,5 +1,7 @@
 # SuperTrend 策略研究笔记
 
+> 计算合同已于 2026-11-14 固定为项目内的 SMA-ATR 实现。本文中的历史回测数字保留原报告口径；后续复现统一使用新合同。
+
 ## 策略原理
 
 SuperTrend 是基于 ATR 的动态趋势跟踪指标：
@@ -18,7 +20,8 @@ SuperTrend 是基于 ATR 的动态趋势跟踪指标：
 
 止损线是**动态跟踪**的——趋势走得越远，止损线跟得越高，不会过早离场。
 
-默认参数：`length=7, multiplier=3.0`（pandas-ta 标准默认值）
+学习观察层默认参数：`length=7, multiplier=3.0`；主策略的 BTC 卫星使用
+`length=10, multiplier=3.0`。两者都使用项目固定的 **SMA ATR** 口径。
 
 ---
 
@@ -122,7 +125,7 @@ SuperTrend 组合收益更高的核心原因：**资金利用率更高**（交�
 ## 实现说明
 
 `backtest.py` 中的 `run_supertrend_backtest()` 函数：
-- 使用 `pandas_ta.supertrend()` 计算指标
+- 使用 [`backend/supertrend_contract.py`](../backend/supertrend_contract.py) 的统一计算合同
 - 支持 `filter_weekly_df` 参数实现日线+周线共振过滤
 - 入场：次日开盘价（含滑点）
 - 止损：当日 Low 触及 SuperTrend 线时以 `min(Open, ST线)` 离场

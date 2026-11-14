@@ -25,15 +25,14 @@ RS Rotation top5 + 510300.SS monthly_macd
 输出文件：
 
 ```text
-backend/backtest_results/rs_drawdown_protection_2026-06-05.json
+../xquant/outputs/trading-research/rs_drawdown_protection_2026-06-05.json
 ```
 
 运行命令：
 
 ```bash
-cd backend
-PYTHONPATH=. uv run python ../scripts/research_rs_drawdown_protection.py \
-  --output backtest_results/rs_drawdown_protection_2026-06-05.json
+cd ../xquant && uv run python scripts/trading_research/research_rs_drawdown_protection.py \
+  --output outputs/trading-research/rs_drawdown_protection_2026-06-05.json
 ```
 
 ## 比较方案
@@ -100,3 +99,5 @@ B2 的严格确认明显减少保护天数：
 ## 下一步
 
 暂不改变默认策略。若继续研究，优先测试更短的保护半衰期，例如触发后最多保护 20/40/60 个交易日，到期必须恢复，再由新信号重新触发。这样可以直接约束“保护期拖过强修复年份”的问题。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

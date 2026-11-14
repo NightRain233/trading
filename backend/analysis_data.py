@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
+from supertrend_contract import calculate_supertrend
 import requests
 import yfinance as yf
 
@@ -24,6 +25,7 @@ from analysis_constants import (
     BOLL_PERIOD, BOLL_STD, KDJ_PERIOD, KDJ_SIGNAL_K, KDJ_SIGNAL_D, ATR_PERIOD,
     ST_LENGTH, ST_MULTIPLIER,
 )
+from supertrend_contract import CONTRACT_VERSION
 from analysis_cache import (
     get_symbol_lock, global_download_lock, ta_calculation_lock,
     _drop_incomplete_ohlcv_rows,
@@ -675,7 +677,6 @@ def _detect_unadjusted_splits(df: pd.DataFrame, symbol: str) -> None:
     """检测日线跌幅>40%且次日未反弹的异常点，可能是未复权的份额折算/拆分。"""
     daily_ret = df['Close'].pct_change()
     for idx in daily_ret[daily_ret < -0.40].index:
-        next_day = idx + pd.Timedelta(days=1)
         for offset in range(1, 5):
             check_date = idx + pd.Timedelta(days=offset)
             if check_date in df.index:
@@ -751,7 +752,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if 'ATR' not in df.columns or df['ATR'].isnull().all():
             df['ATR'] = 0
 
-        st = ta.supertrend(df['High'], df['Low'], df['Close'], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+        st = calculate_supertrend(df['High'], df['Low'], df['Close'], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
         if st is not None and not st.empty:
             val_col = next((c for c in st.columns if c.startswith('SUPERT_') and not any(c.startswith(p) for p in ('SUPERTd_', 'SUPERTs_', 'SUPERTl_', 'SUPERTu_'))), None)
             dir_col = next((c for c in st.columns if c.startswith('SUPERTd_')), None)
@@ -759,6 +760,7 @@ def _calculate_daily_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df['ST_Dir'] = st[dir_col] if dir_col else None
         else:
             df['ST_Val'] = df['ST_Dir'] = None
+        df['ST_ContractVersion'] = CONTRACT_VERSION
 
         return df
 
@@ -832,7 +834,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
         # contract.  Previously weekly candles had no ST fields, which made a
         # ``timeframe=1W`` consumer prone to mistaking daily ST values for the
         # weekly direction.
-        st = ta.supertrend(
+        st = calculate_supertrend(
             df_weekly['High'],
             df_weekly['Low'],
             df_weekly['Close'],
@@ -850,6 +852,7 @@ def _calculate_weekly_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df_weekly['ST_Dir'] = st[dir_col] if dir_col else None
         else:
             df_weekly['ST_Val'] = df_weekly['ST_Dir'] = None
+        df_weekly['ST_ContractVersion'] = CONTRACT_VERSION
 
         return df_weekly
 
@@ -875,7 +878,22 @@ def fetch_stock_data(symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]
             ):
                 needs_fetch = False
 
-        if not needs_fetch and df_local is not None and 'EMA20' in df_local.columns and 'EMA5' in df_local.columns:
+        has_st_columns = df_local is not None and (
+            'ST_Val' in df_local.columns or 'ST_Dir' in df_local.columns
+        )
+        if (
+            not needs_fetch
+            and df_local is not None
+            and 'EMA20' in df_local.columns
+            and 'EMA5' in df_local.columns
+            and (
+                not has_st_columns
+                or (
+                    'ST_ContractVersion' in df_local.columns
+                    and df_local['ST_ContractVersion'].eq(CONTRACT_VERSION).all()
+                )
+            )
+        ):
             return df_local.copy(), _calculate_weekly_indicators(df_local.copy())
 
         df = df_local

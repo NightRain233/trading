@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { fetchWatchlist, fetchBatchQuotesSnapshot, fetchBatchQuotesConditional, fetchBatchCharts, addTicker, removeTicker, createGroup, updateWatchlist, updateAlias, resolveSymbolCandidates } from './utils';
 import type { StockData, Candle, SymbolResolveCandidate, Timeframe, WatchlistGroup } from './types';
 import { getWatchlistPollDelay } from './pollingPolicy.js';
@@ -29,11 +30,16 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
+  type SortingStrategy,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 
-const SortableContextAny = SortableContext as any;
+const SortableContextCompat = SortableContext as unknown as ComponentType<{
+  children?: ReactNode;
+  items: string[];
+  strategy: SortingStrategy;
+}>;
 
 const weeklyFilterOptions = ['周线牛市', '周线反弹', '周线回调', '周线熊市'];
 const trendFilterOptions = ['强势多头', '潜在转空', '强势空头', '潜在转多'];
@@ -66,7 +72,7 @@ const getUniqueSymbols = (groupsData: WatchlistGroup[]) => {
 
 const scheduleIdle = (cb: () => void) => {
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    (window as any).requestIdleCallback(cb, { timeout: 1500 });
+    window.requestIdleCallback?.(cb, { timeout: 1500 });
     return;
   }
   setTimeout(cb, 0);
@@ -570,8 +576,8 @@ function App() {
         stocks.sort((a, b) => {
           if (!a || !b) return 0;
 
-          let valA: any = null;
-          let valB: any = null;
+          let valA: string | number | null = null;
+          let valB: string | number | null = null;
 
           if (sortConfig.key === 'weeklyStatus') {
             valA = a.weeklyMacdStatus || '';
@@ -582,8 +588,11 @@ function App() {
             valA = idxA === -1 ? Number.POSITIVE_INFINITY : idxA;
             valB = idxB === -1 ? Number.POSITIVE_INFINITY : idxB;
           } else {
-            valA = (a as any)[sortConfig.key];
-            valB = (b as any)[sortConfig.key];
+            const key = sortConfig.key as keyof StockData;
+            const valueA = a[key];
+            const valueB = b[key];
+            valA = typeof valueA === 'string' || typeof valueA === 'number' ? valueA : null;
+            valB = typeof valueB === 'string' || typeof valueB === 'number' ? valueB : null;
           }
 
           if (valA === undefined || valA === null) return 1;
@@ -604,7 +613,7 @@ function App() {
     });
   }, [groups, searchTerm, activeFilters, sortConfig]);
 
-  const toggleSort = useCallback((key: any) => {
+  const toggleSort = useCallback((key: keyof StockData | 'weeklyStatus') => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key
@@ -730,7 +739,7 @@ function App() {
           collisionDetection={closestCenter}
           onDragEnd={handleDragEnd}
         >
-          <SortableContextAny items={filteredGroups.map(g => g.id)} strategy={verticalListSortingStrategy}>
+          <SortableContextCompat items={filteredGroups.map(g => g.id)} strategy={verticalListSortingStrategy}>
             {filteredGroups.map(group => (
               <SortableGroup
                 key={group.id}
@@ -745,7 +754,7 @@ function App() {
                 showCharts={showCharts}
               />
             ))}
-          </SortableContextAny>
+          </SortableContextCompat>
         </DndContext>
 
         {filteredGroups.length === 0 && (

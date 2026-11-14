@@ -122,13 +122,13 @@ Promising if:
 
 Create:
 
-- `scripts/research_st_position_sizing.py`
-- `backend/tests/test_research_st_position_sizing.py`
+- `../xquant/scripts/trading_research/research_st_position_sizing.py`
+- `../xquant/tests/trading_research/test_research_st_position_sizing.py`
 - `docs/supertrend-position-sizing-research-2026-06-05.md`
 
 JSON output is written to ignored local results:
 
-- `backend/backtest_results/supertrend_position_sizing_2026-06-05.json`
+- `../xquant/outputs/trading-research/supertrend_position_sizing_2026-06-05.json`
 
 ## Product Boundary
 

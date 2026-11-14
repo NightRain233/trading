@@ -1,15 +1,22 @@
 import { memo } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { StockData, Candle, Timeframe, WatchlistGroup } from '../types';
 import { SortableStockRow } from './SortableStockRow';
 import { GripVertical, ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import {
   SortableContext,
+  type SortingStrategy,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-const SortableContextAny = SortableContext as any;
+const SortableContextCompat = SortableContext as unknown as ComponentType<{
+  children?: ReactNode;
+  items: string[];
+  strategy: SortingStrategy;
+}>;
+
 
 interface SortableGroupProps {
   group: WatchlistGroup;
@@ -112,7 +119,7 @@ export const SortableGroup = memo(function SortableGroup({
               拖拽股票到此分组
             </div>
           ) : (
-            <SortableContextAny items={(group.stocks || []).map(s => s.symbol)} strategy={verticalListSortingStrategy}>
+            <SortableContextCompat items={(group.stocks || []).map(s => s.symbol)} strategy={verticalListSortingStrategy}>
               <div>
                 {group.stocks?.map((stock, index) => (
                   <SortableStockRow
@@ -129,7 +136,7 @@ export const SortableGroup = memo(function SortableGroup({
                   />
                 ))}
               </div>
-            </SortableContextAny>
+            </SortableContextCompat>
           )}
         </div>
       )}

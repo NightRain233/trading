@@ -8,7 +8,7 @@ interface ColumnHeadersProps {
     key: keyof StockData | 'weeklyStatus';
     direction: 'asc' | 'desc' | null;
   };
-  toggleSort: (key: any) => void;
+  toggleSort: (key: keyof StockData | 'weeklyStatus') => void;
 }
 
 const SortIndicator = ({ active, direction }: { active: boolean; direction: 'asc' | 'desc' | null }) => {

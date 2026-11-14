@@ -121,7 +121,7 @@ make deploy-images   # 只上传已构建的镜像并重启
 │       ├── components/         # 各页面（PortfolioStrategiesPage、MarketPage、WeeklyScanPage …）
 │       ├── design.css          # 新版设计 token（浅色 / 深色）
 │       └── *.js + *.d.ts       # 纯函数助手，用 node --test 测试
-├── scripts/                    # 每日推送、分析助手、研究脚本
+├── scripts/                    # 每日推送、分析助手、运维脚本
 ├── .agents/skills/             # AI 助手 skill
 ├── docs/                       # 使用指南、研究报告、计划，入口见 docs/README.md
 └── reviews/                    # 个人复盘笔记（Obsidian 格式）

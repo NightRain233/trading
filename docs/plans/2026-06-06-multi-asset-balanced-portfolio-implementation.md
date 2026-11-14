@@ -34,7 +34,7 @@ If `511010.SS` or `CNY=X` cannot be downloaded reliably, stop and document the b
 
 **Files:**
 - Create: `backend/universes/multi_asset_balanced.json`
-- Create: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Create: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write the failing universe test**
 
@@ -47,8 +47,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = ROOT / "scripts" / "research_multi_asset_balanced_portfolio.py"
-UNIVERSE_PATH = ROOT / "backend" / "universes" / "multi_asset_balanced.json"
+TRADING_ROOT = ROOT.parent / "trading"
+SCRIPT_PATH = ROOT / "scripts" / "trading_research" / "research_multi_asset_balanced_portfolio.py"
+UNIVERSE_PATH = TRADING_ROOT / "backend" / "universes" / "multi_asset_balanced.json"
 
 
 def load_research_module():
@@ -75,8 +76,8 @@ def test_balanced_universe_declares_assets_currency_and_caps():
 Run:
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py::test_balanced_universe_declares_assets_currency_and_caps -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py::test_balanced_universe_declares_assets_currency_and_caps -v
 ```
 
 Expected: FAIL because the universe file does not exist.
@@ -120,15 +121,15 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add backend/universes/multi_asset_balanced.json backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add backend/universes/multi_asset_balanced.json ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: define multi-asset balanced universe"
 ```
 
 ### Task 2: Add Data Loading and CNY Normalization
 
 **Files:**
-- Create: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Create: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing tests for universe expansion and FX conversion**
 
@@ -198,8 +199,8 @@ def test_fx_alignment_never_backfills_future_rates():
 Run:
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -k "load_universe or normalize_ohlc or fx_alignment" -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -k "load_universe or normalize_ohlc or fx_alignment" -v
 ```
 
 Expected: FAIL because the research module and helpers do not exist.
@@ -254,7 +255,7 @@ uv run python ../scripts/backfill_historical_data.py \
   --symbols 511010.SS CNY=X GLD SPY QQQ BTC-USD \
   --start 2000-01-01 \
   --end 2026-06-06 \
-  --output backtest_results/multi_asset_balanced_backfill_2026-06-06.json
+  --output outputs/trading-research/multi_asset_balanced_backfill_2026-06-06.json
 ```
 
 Expected:
@@ -273,7 +274,7 @@ uv run python -c "import pandas as pd; from pathlib import Path; [(lambda f: pri
 **Step 6: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py backend/backtest_results/multi_asset_balanced_backfill_2026-06-06.json
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py ../xquant/outputs/trading-research/multi_asset_balanced_backfill_2026-06-06.json
 git commit -m "research: add CNY multi-asset data layer"
 ```
 
@@ -282,8 +283,8 @@ Do not commit rewritten parquet cache files unless repository policy already tra
 ### Task 3: Implement Completed-Month Trend Signals
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing signal tests**
 
@@ -320,8 +321,8 @@ Add a negative case where price is above MA10 but below its 12-month-ago close; 
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -k "trend" -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -k "trend" -v
 ```
 
 Expected: FAIL with missing signal helpers.
@@ -355,15 +356,15 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: add completed-month trend filters"
 ```
 
 ### Task 4: Implement Risk Budgets, Caps, and Intra-Class RS
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing allocation tests**
 
@@ -421,8 +422,8 @@ def test_a_share_rs_selects_only_assets_with_sufficient_history():
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -k "volatility or caps or crypto_cap or relative_strength" -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -k "volatility or caps or crypto_cap or relative_strength" -v
 ```
 
 Expected: FAIL with missing allocation helpers.
@@ -470,15 +471,15 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: add capped risk-budget allocation"
 ```
 
 ### Task 5: Implement the Monthly Portfolio Simulator
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing execution tests**
 
@@ -519,8 +520,8 @@ Use a test-only deterministic target-weight callback rather than invoking live s
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -k "rebalance or trade_costs or drift or cash" -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -k "rebalance or trade_costs or drift or cash" -v
 ```
 
 Expected: FAIL with missing simulator helpers.
@@ -578,8 +579,8 @@ Expected: PASS.
 **Step 5: Run the complete research test file**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -v
 ```
 
 Expected: all tests PASS.
@@ -587,15 +588,15 @@ Expected: all tests PASS.
 **Step 6: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: simulate monthly multi-asset portfolios"
 ```
 
 ### Task 6: Add Metrics, DCA Accounting, and Product Gates
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing metric tests**
 
@@ -641,8 +642,8 @@ def test_dca_principal_is_not_counted_as_strategy_return():
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -k "product_gate or dca or drawdown or recovery or rolling" -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -k "product_gate or dca or drawdown or recovery or rolling" -v
 ```
 
 Expected: FAIL with missing metric helpers.
@@ -692,15 +693,15 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: add balanced portfolio metrics and gates"
 ```
 
 ### Task 7: Build the Fixed Variant Matrix and Benchmarks
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write the failing variant-matrix test**
 
@@ -722,8 +723,8 @@ Also assert that all three trend modes, both volatility windows, both rebalance 
 **Step 2: Run the test to verify it fails**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py::test_variant_matrix_reports_every_predeclared_parameter_combination -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py::test_variant_matrix_reports_every_predeclared_parameter_combination -v
 ```
 
 Expected: FAIL with missing matrix builder.
@@ -756,8 +757,8 @@ Do not rank DCA account value against lump-sum total return.
 Run:
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -v
 ```
 
 Expected: all tests PASS.
@@ -765,17 +766,17 @@ Expected: all tests PASS.
 **Step 5: Commit**
 
 ```bash
-git add scripts/research_multi_asset_balanced_portfolio.py backend/tests/test_research_multi_asset_balanced_portfolio.py
+git add ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py
 git commit -m "research: define balanced portfolio experiment matrix"
 ```
 
 ### Task 8: Generate the Research Artifacts and Verdict
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Create: `backend/backtest_results/multi_asset_balanced_portfolio_2026-06-06.json`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Create: `../xquant/outputs/trading-research/multi_asset_balanced_portfolio_2026-06-06.json`
 - Create: `docs/multi-asset-balanced-portfolio-research-2026-06-06.md`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 
 **Step 1: Write failing report tests**
 
@@ -801,8 +802,8 @@ def test_render_report_includes_failed_candidates_and_coverage_limitations():
 **Step 2: Run the test to verify it fails**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py::test_render_report_includes_failed_candidates_and_coverage_limitations -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py::test_render_report_includes_failed_candidates_and_coverage_limitations -v
 ```
 
 Expected: FAIL with missing report renderer.
@@ -853,8 +854,8 @@ Do not substitute language such as "closest winner" in the recommendation field.
 Run:
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -v
 ```
 
 Expected: all tests PASS.
@@ -863,12 +864,12 @@ Expected: all tests PASS.
 
 ```bash
 cd <workspace>/trading/backend
-PYTHONPATH=. uv run python ../scripts/research_multi_asset_balanced_portfolio.py \
+cd ../xquant && uv run python scripts/trading_research/research_multi_asset_balanced_portfolio.py \
   --config universes/multi_asset_balanced.json \
   --data-dir data \
   --end 2026-06-06 \
-  --output backtest_results/multi_asset_balanced_portfolio_2026-06-06.json \
-  --report ../docs/multi-asset-balanced-portfolio-research-2026-06-06.md
+  --output outputs/trading-research/multi_asset_balanced_portfolio_2026-06-06.json \
+  --report docs/notes/multi-asset-balanced-portfolio-research-2026-06-06.md
 ```
 
 Expected:
@@ -897,9 +898,9 @@ Expected: valid JSON with no missing gate fields.
 
 ```bash
 git add \
-  scripts/research_multi_asset_balanced_portfolio.py \
-  backend/tests/test_research_multi_asset_balanced_portfolio.py \
-  backend/backtest_results/multi_asset_balanced_portfolio_2026-06-06.json \
+  ../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py \
+  ../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py \
+  ../xquant/outputs/trading-research/multi_asset_balanced_portfolio_2026-06-06.json \
   docs/multi-asset-balanced-portfolio-research-2026-06-06.md
 git commit -m "research: evaluate multi-asset balanced portfolios"
 ```
@@ -912,8 +913,8 @@ git commit -m "research: evaluate multi-asset balanced portfolios"
 **Step 1: Run the focused research tests**
 
 ```bash
-cd backend
-uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -v
+cd ../xquant
+uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -v
 ```
 
 Expected: PASS.
@@ -921,13 +922,12 @@ Expected: PASS.
 **Step 2: Run existing backtest and research regressions**
 
 ```bash
-cd backend
-uv run pytest \
-  tests/test_backtest.py \
-  tests/test_research_rs_rotation_robustness.py \
-  tests/test_research_rs_rotation_lookahead_audit.py \
-  tests/test_research_a_share_dca_timing.py \
-  tests/test_research_multi_asset_balanced_portfolio.py \
+cd backend && uv run pytest tests/test_backtest.py -v
+cd ../xquant && uv run pytest \
+  tests/trading_research/test_research_rs_rotation_robustness.py \
+  tests/trading_research/test_research_rs_rotation_lookahead_audit.py \
+  tests/trading_research/test_research_a_share_dca_timing.py \
+  tests/trading_research/test_research_multi_asset_balanced_portfolio.py \
   -v
 ```
 

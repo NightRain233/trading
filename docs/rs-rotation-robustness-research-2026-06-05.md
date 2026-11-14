@@ -25,7 +25,7 @@ scripts/backfill_historical_data.py
 输出：
 
 ```text
-backend/backtest_results/historical_data_backfill_2026-06-05.json
+../xquant/outputs/trading-research/historical_data_backfill_2026-06-05.json
 ```
 
 回填结果：
@@ -42,7 +42,7 @@ backend/backtest_results/historical_data_backfill_2026-06-05.json
 ## 输出文件
 
 ```text
-backend/backtest_results/rs_rotation_robustness_2026-06-05.json
+../xquant/outputs/trading-research/rs_rotation_robustness_2026-06-05.json
 ```
 
 ## 重要限制
@@ -195,3 +195,5 @@ A 股/美股分别独立过滤
 ```text
 RS + 月 MACD 可以作为长期研究底座；下一步不是再叠保护层，而是做“宽基/核心池双基准”和“美股内部轮动/带类别上限的全球轮动”。
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

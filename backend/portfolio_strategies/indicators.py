@@ -5,6 +5,8 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from supertrend_contract import calculate_supertrend
+
 
 class InsufficientDataError(ValueError):
     """Raised when an indicator cannot be calculated without inventing data."""
@@ -35,54 +37,22 @@ def supertrend(
     atr_window: int = 10,
     multiplier: float = 3.0,
 ) -> pd.DataFrame:
-    """Calculate the xquant-validated SMA-ATR SuperTrend state machine."""
-    atr = true_range(high, low, close).rolling(atr_window).mean()
-    midpoint = (high + low) / 2.0
-    basic_upper = midpoint + multiplier * atr
-    basic_lower = midpoint - multiplier * atr
-    # The recurrence is causal. Arrays avoid repeated pandas scalar indexing
-    # during historical replay without changing the SMA-ATR contract.
-    size = len(close)
-    final_upper = np.full(size, np.nan)
-    final_lower = np.full(size, np.nan)
-    line = np.full(size, np.nan)
-    direction = np.zeros(size, dtype=bool)
-    atr_values = atr.to_numpy(dtype=float)
-    closes = close.to_numpy(dtype=float)
-    upper = basic_upper.to_numpy(dtype=float)
-    lower = basic_lower.to_numpy(dtype=float)
-    for position in range(size):
-        if np.isnan(atr_values[position]):
-            continue
-        if position == 0 or np.isnan(final_upper[position - 1]):
-            final_upper[position] = upper[position]
-            final_lower[position] = lower[position]
-            line[position] = final_upper[position]
-            continue
-        previous_close = closes[position - 1]
-        previous_upper = final_upper[position - 1]
-        previous_lower = final_lower[position - 1]
-        final_upper[position] = (
-            upper[position] if upper[position] < previous_upper
-            or previous_close > previous_upper else previous_upper
-        )
-        final_lower[position] = (
-            lower[position] if lower[position] > previous_lower
-            or previous_close < previous_lower else previous_lower
-        )
-        if line[position - 1] == previous_upper:
-            line[position] = (
-                final_lower[position] if closes[position] > final_upper[position]
-                else final_upper[position]
-            )
-        else:
-            line[position] = (
-                final_upper[position] if closes[position] < final_lower[position]
-                else final_lower[position]
-            )
-        direction[position] = closes[position] > line[position]
+    """Return the legacy shape backed by the shared SMA-ATR contract."""
+    result = calculate_supertrend(
+        high,
+        low,
+        close,
+        length=atr_window,
+        multiplier=multiplier,
+    )
+    suffix = f"{atr_window}_{multiplier:g}"
     return pd.DataFrame(
-        {"line": line, "direction": direction, "upper": final_upper, "lower": final_lower},
+        {
+            "line": result[f"SUPERT_{suffix}"],
+            "direction": result[f"SUPERTd_{suffix}"].eq(1),
+            "upper": result[f"SUPERTu_{suffix}"],
+            "lower": result[f"SUPERTlwr_{suffix}"],
+        },
         index=close.index,
     )
 

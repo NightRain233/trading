@@ -57,8 +57,8 @@ export function BacktestChart({ onClose }: Props) {
       });
       if (!r.ok) throw new Error(await r.text());
       setResult(await r.json());
-    } catch (e: any) {
-      setError(e.message);
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : '回测请求失败');
     } finally {
       setLoading(false);
     }

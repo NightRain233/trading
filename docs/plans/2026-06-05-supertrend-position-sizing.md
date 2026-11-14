@@ -13,8 +13,8 @@
 ### Task 1: TDD Exposure Helpers
 
 **Files:**
-- Create: `backend/tests/test_research_st_position_sizing.py`
-- Create: `scripts/research_st_position_sizing.py`
+- Create: `../xquant/tests/trading_research/test_research_st_position_sizing.py`
+- Create: `../xquant/scripts/trading_research/research_st_position_sizing.py`
 
 **Steps:**
 
@@ -24,8 +24,7 @@
 4. Run:
 
    ```bash
-   cd backend
-   PYTHONPATH=.. uv run pytest tests/test_research_st_position_sizing.py -v
+   cd ../xquant && uv run pytest tests/trading_research/test_research_st_position_sizing.py -v
    ```
 
    Expected: fail because script/functions are missing.
@@ -36,8 +35,8 @@
 ### Task 2: TDD Exposure-Aware Portfolio Simulation
 
 **Files:**
-- Modify: `backend/tests/test_research_st_position_sizing.py`
-- Modify: `scripts/research_st_position_sizing.py`
+- Modify: `../xquant/tests/trading_research/test_research_st_position_sizing.py`
+- Modify: `../xquant/scripts/trading_research/research_st_position_sizing.py`
 
 **Steps:**
 
@@ -49,7 +48,7 @@
 ### Task 3: Add Study Assembly and CLI
 
 **Files:**
-- Modify: `scripts/research_st_position_sizing.py`
+- Modify: `../xquant/scripts/trading_research/research_st_position_sizing.py`
 
 **Steps:**
 
@@ -64,9 +63,8 @@
 5. Add CLI:
 
    ```bash
-   cd backend
-   PYTHONPATH=. uv run python ../scripts/research_st_position_sizing.py \
-     --output backtest_results/supertrend_position_sizing_2026-06-05.json
+   cd ../xquant && uv run python scripts/trading_research/research_st_position_sizing.py \
+     --output outputs/trading-research/supertrend_position_sizing_2026-06-05.json
    ```
 
 ### Task 4: Run Research and Write Report

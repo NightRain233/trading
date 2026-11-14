@@ -13,7 +13,7 @@
 脚本：
 
 ```bash
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py
 ```
 
 ## BTC 结果
@@ -176,3 +176,5 @@ Crypto 敏感参数 `ST(5,3)` 下，合并结果反而不如默认组合：
 - 若参数网格继续扩大，优化参数网格为多进程或缓存每个 symbol/参数的 ST 结果。
 - 若进入产品，先把“研究模式”接到前端，而不是替换默认策略。
 - Crypto 研究模式优先支持：`daily_st`、`weekly_st`、`weekly_daily_st`、`daily_bb_p20`、`weekly_daily_bb_p20`。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

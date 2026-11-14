@@ -4,7 +4,8 @@ from analysis_constants import CHART_DAYS, MINI_CHART_DAYS
 
 
 def _make_json_safe(value):
-    import math, numbers
+    import math
+    import numbers
     if isinstance(value, dict):
         return {k: _make_json_safe(v) for k, v in value.items()}
     if isinstance(value, list):

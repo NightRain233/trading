@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 import json
 import os

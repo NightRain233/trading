@@ -10,7 +10,7 @@ Use only:
 
 - `backend/watchlist.json`
 - `backend/data/*.parquet`
-- Existing SuperTrend execution semantics from `scripts/compare_supertrend_timeframes.py`
+- Existing SuperTrend execution semantics from `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
 
 Do not download new data. Do not change backend API behavior, frontend behavior, or production strategy defaults.
 
@@ -26,7 +26,7 @@ The script computes all scores from `trainStart <= date <= trainEnd`. The valida
 
 ## Asset Buckets
 
-Reuse `_asset_bucket()` from `scripts/compare_supertrend_timeframes.py`:
+Reuse `_asset_bucket()` from `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`:
 
 - `a_share_etf`
 - `a_share_stock`
@@ -173,7 +173,7 @@ Summaries by score mode, asset bucket, and tier:
 
 Create:
 
-- `backend/backtest_results/supertrend_fit_research_2026-06-05.json`
+- `../xquant/outputs/trading-research/supertrend_fit_research_2026-06-05.json`
 - `docs/supertrend-fit-research-2026-06-05.md`
 
 JSON shape:

@@ -96,8 +96,8 @@ cd <workspace>/trading
 scripts/run_portfolio_daily.sh
 ```
 
-默认输出为 `backend/backtest_results/openclaw_portfolio_daily.md`，状态文件为
-`backend/backtest_results/portfolio_daily_job_status.json`。定时任务应保持现有的 16:40 和
+默认输出为 `../xquant/outputs/trading-research/openclaw_portfolio_daily.md`，状态文件为
+`../xquant/outputs/trading-research/portfolio_daily_job_status.json`。定时任务应保持现有的 16:40 和
 次日 07:15 两次检查；如果数据源或某个策略失败，状态必须在日报中保留。
 
 ### 只读查看
@@ -141,3 +141,5 @@ python3 scripts/openclaw_supertrend_alerts.py \
 - 变种比较：`.../three_asset_variant_comparison_2026_09_05/README.md`
 - 纸面策略合同：[`docs/portfolio-strategies-paper-tracking.md`](../docs/portfolio-strategies-paper-tracking.md)
 - 日报 skill：[`portfolio-daily-brief/SKILL.md`](../.agents/skills/portfolio-daily-brief/SKILL.md)
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

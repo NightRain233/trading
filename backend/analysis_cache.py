@@ -40,7 +40,6 @@ def _cache_put(symbol: str, entry: dict) -> None:
         _memory_cache[symbol] = entry
         if len(_memory_cache) > _MEMORY_CACHE_MAX:
             _memory_cache.popitem(last=False)
-    return symbol_locks[symbol.upper()]
 
 
 def _normalize_symbols(symbols: List[str]) -> List[str]:

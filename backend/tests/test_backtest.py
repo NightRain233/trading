@@ -219,7 +219,7 @@ class BacktestTests(unittest.TestCase):
         daily = _build_supertrend_next_open_daily_df()
         st = _build_supertrend_next_open_indicator(daily.index)
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -244,7 +244,7 @@ class BacktestTests(unittest.TestCase):
             113.0, 115.0, 112.0, 114.0,
         ]
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             trades = run_supertrend_backtest(
                 "TEST", daily, fee_bps=0, slippage_bps=0,
                 entry_signal_mode="daily_bull_flip",
@@ -264,7 +264,7 @@ class BacktestTests(unittest.TestCase):
         st.loc[daily.index[4], "SUPERTd_7_3.0"] = 1
         st.loc[daily.index[4], "SUPERT_7_3.0"] = 99.0
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             trades = run_supertrend_backtest(
                 "TEST", daily, fee_bps=0, slippage_bps=0,
                 entry_signal_mode="daily_bull_flip",
@@ -285,7 +285,7 @@ class BacktestTests(unittest.TestCase):
             index=weekly.index,
         )
 
-        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+        with patch("backtest.calculate_supertrend", side_effect=[st, weekly_st]):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -309,7 +309,7 @@ class BacktestTests(unittest.TestCase):
             index=weekly.index,
         )
 
-        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+        with patch("backtest.calculate_supertrend", side_effect=[st, weekly_st]):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -341,7 +341,7 @@ class BacktestTests(unittest.TestCase):
             index=weekly.index,
         )
 
-        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+        with patch("backtest.calculate_supertrend", side_effect=[st, weekly_st]):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -373,7 +373,7 @@ class BacktestTests(unittest.TestCase):
             index=weekly.index,
         )
 
-        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+        with patch("backtest.calculate_supertrend", side_effect=[st, weekly_st]):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -397,7 +397,7 @@ class BacktestTests(unittest.TestCase):
             index=weekly.index,
         )
 
-        with patch("backtest.ta.supertrend", side_effect=[st, weekly_st]):
+        with patch("backtest.calculate_supertrend", side_effect=[st, weekly_st]):
             trades = run_supertrend_backtest(
                 "TEST",
                 daily,
@@ -428,7 +428,7 @@ class BacktestTests(unittest.TestCase):
         daily = _build_supertrend_next_open_daily_df()
         st = _build_supertrend_next_open_indicator(daily.index)
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             review = build_supertrend_history_review(
                 "test",
                 daily,
@@ -486,7 +486,7 @@ class BacktestTests(unittest.TestCase):
             index=dates,
         )
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             review = build_supertrend_history_review("TEST", daily, fee_bps=0, slippage_bps=0)
 
         self.assertEqual(len(review["trades"]), 1)
@@ -526,7 +526,7 @@ class BacktestTests(unittest.TestCase):
             index=dates,
         )
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             review = build_supertrend_history_review("TEST", daily, fee_bps=0, slippage_bps=0)
 
         self.assertEqual(review["exitMode"], "close_only")
@@ -540,7 +540,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(comparisons["close_only"]["exitReasonCounts"], {"st_flip": 1})
         self.assertLess(comparisons["close_only"]["totalReturnPct"], comparisons["baseline"]["totalReturnPct"])
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             baseline_review = build_supertrend_history_review(
                 "TEST",
                 daily,
@@ -558,7 +558,7 @@ class BacktestTests(unittest.TestCase):
         daily = _build_supertrend_daily_df(adx_at_entry=28.0)
         st = _build_supertrend_indicator(daily.index)
 
-        with patch("backtest.ta.supertrend", return_value=st):
+        with patch("backtest.calculate_supertrend", return_value=st):
             review = build_supertrend_history_review(
                 "TEST",
                 daily,

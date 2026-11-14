@@ -1,11 +1,11 @@
 # A 股 SuperTrend 优化专项 2026-06-04
 
-本报告只研究现有观察池中的 A 股相关分桶：`a_share_etf` 与 `a_share_stock`。没有修改主后端策略、前端、数据库，也没有修改 `scripts/compare_supertrend_timeframes.py`。
+本报告只研究现有观察池中的 A 股相关分桶：`a_share_etf` 与 `a_share_stock`。没有修改主后端策略、前端、数据库，也没有修改 `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`。
 
 ## 研究口径
 
 - 数据来源：`backend/watchlist.json` 中的观察池，以及 `backend/data/*.parquet` 本地缓存。
-- 回测脚本：`scripts/compare_supertrend_timeframes.py`。
+- 回测脚本：`../xquant/scripts/trading_research/compare_supertrend_timeframes.py`。
 - 回测区间：`2021-06-04` 至 `2026-06-04`。
 - 成本：单边手续费 `5 bps`，单边滑点 `5 bps`。
 - 执行：日线信号收盘确认，下一根日线开盘执行；周线信号在周线收盘后第一根日线开盘执行。
@@ -15,11 +15,11 @@
 ## 跑过的命令
 
 ```bash
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --annual --param-grid --include-rows --json > /tmp/a_share_supertrend_full_2026_06_04.json
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --annual --param-grid --include-rows --json > /tmp/a_share_supertrend_full_2026_06_04.json
 ```
 
 ```bash
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --st-length 10 --st-multiplier 3 --json > /tmp/a_share_supertrend_st10_3_2026_06_04.json
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --st-length 10 --st-multiplier 3 --json > /tmp/a_share_supertrend_st10_3_2026_06_04.json
 ```
 
 解析命令使用 `jq` 和 `node` 读取上述 `/tmp` JSON，只做汇总，不写入项目文件。
@@ -186,3 +186,5 @@ ETF 的收益主要来自 2024、2025。周线过滤在 2025 接近日线 ST，�
    - 个股：`daily ST(7,3)`、`daily ST(10,3)`、`weekly ST(7,3)`。
 3. 个股专项需要更干净的样本：把指数、ETF、ST 股票、强周期大涨样本拆开，否则平均值容易被少数标的主导。
 4. 在产品化前补充样本外验证：至少分 2021-2023 训练观察、2024-2026 验证观察，避免用同一段行情挑参数。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

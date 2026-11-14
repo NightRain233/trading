@@ -13,8 +13,8 @@
 ### Task 1: Add Fair-Comparison Tests
 
 **Files:**
-- Create: `backend/tests/test_research_a_share_etf_st_rs_fair_comparison.py`
-- Create later: `scripts/research_a_share_etf_st_rs_fair_comparison.py`
+- Create: `../xquant/tests/trading_research/test_research_a_share_etf_st_rs_fair_comparison.py`
+- Create later: `../xquant/scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py`
 
 **Step 1: Write failing tests**
 
@@ -28,15 +28,15 @@ Test three behaviors:
 Run:
 
 ```bash
-cd backend && uv run pytest tests/test_research_a_share_etf_st_rs_fair_comparison.py -q
+cd ../xquant && uv run pytest tests/trading_research/test_research_a_share_etf_st_rs_fair_comparison.py -q
 ```
 
-Expected: fail because `scripts/research_a_share_etf_st_rs_fair_comparison.py` does not exist yet.
+Expected: fail because `../xquant/scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py` does not exist yet.
 
 ### Task 2: Implement Offline Fair-Comparison Script
 
 **Files:**
-- Create: `scripts/research_a_share_etf_st_rs_fair_comparison.py`
+- Create: `../xquant/scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py`
 
 **Step 1: Implement imports and helpers**
 
@@ -66,14 +66,14 @@ Create `docs/a-share-etf-st-rs-fair-comparison-2026-06-06.md` with:
 ### Task 3: Verify and Commit
 
 **Files:**
-- `scripts/research_a_share_etf_st_rs_fair_comparison.py`
-- `backend/tests/test_research_a_share_etf_st_rs_fair_comparison.py`
+- `../xquant/scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py`
+- `../xquant/tests/trading_research/test_research_a_share_etf_st_rs_fair_comparison.py`
 - `docs/a-share-etf-st-rs-fair-comparison-2026-06-06.md`
 
 **Step 1: Run tests**
 
 ```bash
-cd backend && uv run pytest tests/test_research_a_share_etf_st_rs_fair_comparison.py -q
+cd ../xquant && uv run pytest tests/trading_research/test_research_a_share_etf_st_rs_fair_comparison.py -q
 ```
 
 Expected: all pass.
@@ -81,7 +81,7 @@ Expected: all pass.
 **Step 2: Run research**
 
 ```bash
-cd backend && PYTHONHASHSEED=0 PYTHONPATH=. uv run python ../scripts/research_a_share_etf_st_rs_fair_comparison.py --output backtest_results/a_share_etf_st_rs_fair_comparison_2026-06-06.json --report ../docs/a-share-etf-st-rs-fair-comparison-2026-06-06.md
+cd ../xquant && PYTHONHASHSEED=0 uv run python scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py --output outputs/trading-research/a_share_etf_st_rs_fair_comparison_2026-06-06.json --report docs/notes/a-share-etf-st-rs-fair-comparison-2026-06-06.md
 ```
 
 Expected: JSON and Markdown are written.
@@ -89,6 +89,6 @@ Expected: JSON and Markdown are written.
 **Step 3: Commit**
 
 ```bash
-git add scripts/research_a_share_etf_st_rs_fair_comparison.py backend/tests/test_research_a_share_etf_st_rs_fair_comparison.py docs/a-share-etf-st-rs-fair-comparison-2026-06-06.md docs/plans/2026-06-06-a-share-etf-st-rs-fair-comparison.md
+git add ../xquant/scripts/trading_research/research_a_share_etf_st_rs_fair_comparison.py ../xquant/tests/trading_research/test_research_a_share_etf_st_rs_fair_comparison.py docs/a-share-etf-st-rs-fair-comparison-2026-06-06.md docs/plans/2026-06-06-a-share-etf-st-rs-fair-comparison.md
 git commit -m "research: compare a-share etf st and rs fairly"
 ```

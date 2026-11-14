@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
 from typing import List, Optional, Literal
+import pandas_ta as ta
 from backtest import (
     load_universe_symbols,
     run_backtest_for_symbol,
@@ -19,12 +20,12 @@ from backtest import (
     evaluate_weekly_bb_exit,
     replay_weekly_bb_markers,
     build_supertrend_history_review,
-    run_supertrend_backtest,
     SUPER_TREND_EXECUTION_MODE,
     SUPER_TREND_DEFAULT_HISTORY_EXIT_MODE,
     SUPER_TREND_HISTORY_EXIT_MODES,
 )
 from strategy_versions import get_strategy_version, list_strategy_versions
+from supertrend_contract import calculate_supertrend
 from supertrend_alerts import classify_supertrend_alert
 from supertrend_scan_policy import (
     MARKET_REPRESENTATIVE_FALLBACKS,
@@ -49,13 +50,14 @@ from data_source_guard import MarketDataUnavailableError
 from portfolio_strategies.registry import (
     UnknownStrategyError,
     ComparisonStrategyError,
-    list_strategies as list_portfolio_strategies,
 )
 from portfolio_strategies.service import PortfolioStrategyService
 from portfolio_strategies.market_freshness import assess_freshness
 from portfolio_strategies.period_bars import completed_bars
 from portfolio_strategies.operation_lock import PortfolioOperationLockedError
 from portfolio_strategies import api_models as pm
+from rs_holdings_cache import load as load_rs_holdings_cache
+from rs_holdings_cache import save as save_rs_holdings_cache
 import json
 import os
 import copy
@@ -68,11 +70,11 @@ import threading
 import hashlib
 import pandas as pd
 import exchange_calendars as xcals
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
 from zoneinfo import ZoneInfo
-from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_HOURS, PREWARM_TIMES
+from analysis_constants import BACKGROUND_PREWARM_ENABLED, PREWARM_TIMES
 
 # 获取日志记录器，用于在控制台输出信息
 logger = logging.getLogger(__name__)
@@ -90,7 +92,15 @@ def timer(name: str):
     end_time = time.perf_counter()
     logger.info(f"==> [耗时统计] {name}: {end_time - start_time:.4f} 秒")
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start background maintenance once per application lifetime."""
+    logger.info("==> [系统启动] 正在启动后台数据管家...")
+    _start_background_prewarm()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -965,44 +975,11 @@ def run_backtest(request: BacktestRequest):
     return {**report, "rsRotationPortfolio": rs_rotation, "missingSymbols": missing}
 
 
-def _is_rs_holdings_cache_valid(cache: dict) -> bool:
-    """缓存有效条件：今天是交易日则当天计算过；否则上一个交易日计算过。"""
-    cached_date = cache.get("cached_date")
-    if not cached_date:
-        return False
-    tz = ZoneInfo("Asia/Shanghai")
-    now = datetime.now(tz).date()
-    cached = datetime.fromisoformat(cached_date).date()
-    # 简单判断：同一自然日内有效（非交易日也不会有新数据）
-    return cached >= now
-
-
-def _load_rs_holdings_cache() -> dict | None:
-    if not os.path.exists(RS_HOLDINGS_CACHE_FILE):
-        return None
-    try:
-        with open(RS_HOLDINGS_CACHE_FILE) as f:
-            cache = json.load(f)
-        if _is_rs_holdings_cache_valid(cache):
-            return cache.get("data")
-    except Exception:
-        pass
-    return None
-
-
-def _save_rs_holdings_cache(data: dict) -> None:
-    os.makedirs(os.path.dirname(RS_HOLDINGS_CACHE_FILE), exist_ok=True)
-    tz = ZoneInfo("Asia/Shanghai")
-    payload = {"cached_date": datetime.now(tz).isoformat(), "data": data}
-    with open(RS_HOLDINGS_CACHE_FILE, "w") as f:
-        json.dump(payload, f, ensure_ascii=False)
-
-
 @app.get("/api/rs-rotation/holdings")
 def get_rs_rotation_holdings(force: bool = False):
     """返回两个 RS 轮动预设当前持仓（最新 rebalance 选出的 top5），结果按天缓存。"""
     if not force:
-        cached = _load_rs_holdings_cache()
+        cached = load_rs_holdings_cache(RS_HOLDINGS_CACHE_FILE)
         if cached is not None:
             return cached
 
@@ -1041,7 +1018,7 @@ def get_rs_rotation_holdings(force: bool = False):
             "date": last.get("date"),
         }
 
-    _save_rs_holdings_cache(result)
+    save_rs_holdings_cache(RS_HOLDINGS_CACHE_FILE, result)
     return result
 
 
@@ -1653,8 +1630,7 @@ def weekly_breakout_scan():
         # Ensure weekly ST fields exist
         if "ST_Val" not in weekly.columns or "ST_Dir" not in weekly.columns:
             from analysis_constants import ST_LENGTH, ST_MULTIPLIER
-            import pandas_ta as ta
-            st = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+            st = calculate_supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
             if st is not None:
                 st_val_col = next((c for c in st.columns if "SUPERT_" in c and "d" not in c.lower() and "l" not in c.lower()), None)
                 st_dir_col = next((c for c in st.columns if "SUPERTd_" in c), None)
@@ -1697,8 +1673,7 @@ def weekly_breakout_scan():
         if daily is not None:
             if "ST_Val" not in daily.columns or "ST_Dir" not in daily.columns:
                 from analysis_constants import ST_LENGTH, ST_MULTIPLIER
-                import pandas_ta as ta
-                st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
+                st = calculate_supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
                 if st is not None:
                     st_val_col = next((c for c in st.columns if "SUPERT_" in c and "d" not in c.lower() and "l" not in c.lower()), None)
                     st_dir_col = next((c for c in st.columns if "SUPERTd_" in c), None)
@@ -2251,7 +2226,6 @@ def _build_supertrend_scan_item(
     Callers performing historical replay must pass frames truncated to the
     information available at ``now``.
     """
-    import pandas_ta as ta
     from analysis_constants import ST_LENGTH, ST_MULTIPLIER
 
     if daily is None or daily.empty:
@@ -2272,7 +2246,7 @@ def _build_supertrend_scan_item(
             daily["_st_val"] = daily["ST_Val"]
             daily["_st_dir"] = daily["ST_Dir"]
         else:
-            st = ta.supertrend(
+            st = calculate_supertrend(
                 daily["High"], daily["Low"], daily["Close"],
                 length=ST_LENGTH, multiplier=ST_MULTIPLIER,
             )
@@ -2355,7 +2329,7 @@ def _build_supertrend_scan_item(
     weekly_frame = weekly.sort_index().copy() if weekly is not None and not weekly.empty else None
     if weekly_frame is not None:
         if "_wst_val" not in weekly_frame.columns or "_wst_dir" not in weekly_frame.columns:
-            wst = ta.supertrend(
+            wst = calculate_supertrend(
                 weekly_frame["High"], weekly_frame["Low"], weekly_frame["Close"],
                 length=ST_LENGTH, multiplier=ST_MULTIPLIER,
             )
@@ -2563,8 +2537,6 @@ def _supertrend_scan_impl(
 ):
     """扫描所有 watchlist 标的并返回统一的右侧交易决策契约。"""
     import pandas as pd
-    from analysis_constants import ST_LENGTH, ST_MULTIPLIER
-
     explicit_symbols = requested_symbols is not None
     user_symbols, alias_map = [], {}
     if explicit_symbols:
@@ -2619,298 +2591,6 @@ def _supertrend_scan_impl(
             continue
 
     signature = _st_scan_signature(symbols)
-
-    import pandas_ta as ta
-
-    def _process_sym_legacy(sym):
-        daily_path = _st_path(sym)
-        if not os.path.exists(daily_path):
-            return None
-        daily_mtime = _st_file_mtime(daily_path)
-        daily = pd.read_parquet(daily_path)
-        if daily.empty:
-            return None
-        daily = daily.sort_index()
-        latest_data_date = _st_latest_data_date(daily)
-        latest_row = daily.dropna(subset=["Close"]).iloc[-1]
-        live_price = float(latest_row["Close"]) if pd.notna(latest_row.get("Close")) else None
-        daily_session_complete = _st_volume_session_complete(sym, latest_data_date)
-        data_integrity = _st_recent_gap_info(sym, daily)
-        cache_stale = daily_mtime is None or daily_mtime < stale_before
-
-        st = ta.supertrend(daily["High"], daily["Low"], daily["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
-        if st is None or st.empty:
-            return None
-        val_col = next((c for c in st.columns if c.startswith("SUPERT_") and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))), None)
-        dir_col = next((c for c in st.columns if c.startswith("SUPERTd_")), None)
-        if not val_col or not dir_col:
-            return None
-
-        daily["_st_val"] = st[val_col]
-        daily["_st_dir"] = st[dir_col]
-        if "ATR" not in daily.columns or daily["ATR"].isnull().all():
-            daily["ATR"] = ta.atr(daily["High"], daily["Low"], daily["Close"], length=14)
-
-        decision_daily = daily if daily_session_complete is not False else daily.iloc[:-1]
-        decision_as_of = _st_latest_data_date(decision_daily)
-        decision_daily_available = not decision_daily.empty
-        has_provisional_bar = bool(
-            daily_session_complete is False
-            and latest_data_date is not None
-            and latest_data_date != decision_as_of
-        )
-        data_stale = _st_data_stale(
-            sym,
-            decision_as_of,
-            latest_data_date,
-            daily_session_complete,
-            data_integrity,
-        )
-        all_dir_rows = daily.dropna(subset=["_st_dir"])
-        formal_rows = decision_daily.dropna(subset=["Close"])
-        last = formal_rows.iloc[-1] if not formal_rows.empty else daily.dropna(subset=["Close"]).iloc[-1]
-        cur_dir = int(last["_st_dir"]) if pd.notna(last.get("_st_dir")) else 0
-        dir_rows = decision_daily.dropna(subset=["_st_dir"])
-        provisional_state, _ = classify_trend_state(all_dir_rows["_st_dir"].tail(2).tolist())
-        state, just_flipped = (
-            classify_trend_state(dir_rows["_st_dir"].tail(2).tolist())
-            if decision_daily_available
-            else (provisional_state, False)
-        )
-
-        trend_age_bars = 0
-        if cur_dir != 0:
-            for direction in reversed([int(r) for r in dir_rows["_st_dir"].tolist()]):
-                if direction != cur_dir:
-                    break
-                trend_age_bars += 1
-
-        def _to_candles(df, val_key, dir_key, n):
-            rows = []
-            for ts, row in df.sort_index().tail(n).iterrows():
-                rows.append({
-                    "time": pd.Timestamp(ts).date().isoformat(),
-                    "open": float(row["Open"]) if pd.notna(row.get("Open")) else float(row["Close"]),
-                    "high": float(row["High"]) if pd.notna(row.get("High")) else float(row["Close"]),
-                    "low": float(row["Low"]) if pd.notna(row.get("Low")) else float(row["Close"]),
-                    "close": float(row["Close"]),
-                    "st_val": float(row[val_key]) if pd.notna(row.get(val_key)) else None,
-                    "st_dir": int(row[dir_key]) if pd.notna(row.get(dir_key)) else None,
-                })
-            return rows
-
-        candles = _to_candles(decision_daily, "_st_val", "_st_dir", 60)
-
-        weekly_state = None
-        weekly_st_val = None
-        weekly_candles = []
-        weekly = None
-        weekly_just_flipped = False
-        weekly_provisional_state = None
-        weekly_period_complete = None
-        wcur_dir = 0
-        wprev_rows = None
-        weekly_path = _st_path(sym, weekly=True)
-        if os.path.exists(weekly_path):
-            weekly = pd.read_parquet(weekly_path)
-            if not weekly.empty:
-                weekly = weekly.sort_index()
-                wst = ta.supertrend(weekly["High"], weekly["Low"], weekly["Close"], length=ST_LENGTH, multiplier=ST_MULTIPLIER)
-                if wst is not None and not wst.empty:
-                    wval_col = next((c for c in wst.columns if c.startswith("SUPERT_") and not any(c.startswith(p) for p in ("SUPERTd_", "SUPERTs_", "SUPERTl_", "SUPERTu_"))), None)
-                    wdir_col = next((c for c in wst.columns if c.startswith("SUPERTd_")), None)
-                    if wval_col and wdir_col:
-                        weekly["_wst_val"] = wst[wval_col]
-                        weekly["_wst_dir"] = wst[wdir_col]
-                        all_weekly_rows = weekly.dropna(subset=["_wst_dir"])
-                        weekly_provisional_state, _ = classify_trend_state(
-                            all_weekly_rows["_wst_dir"].tail(2).tolist()
-                        )
-                        completed_weekly = filter_completed_weekly_bars(sym, weekly, decision_as_of)
-                        if not completed_weekly.empty:
-                            completed_through = completed_weekly.index[-1]
-                            wprev_rows = all_weekly_rows.loc[all_weekly_rows.index <= completed_through]
-                        if wprev_rows is not None and not wprev_rows.empty:
-                            wlast = wprev_rows.dropna(subset=["Close"]).iloc[-1]
-                            wcur_dir = int(wlast["_wst_dir"]) if pd.notna(wlast.get("_wst_dir")) else 0
-                            weekly_state, weekly_just_flipped = classify_trend_state(
-                                wprev_rows["_wst_dir"].tail(2).tolist()
-                            )
-                            weekly_st_val = float(wlast["_wst_val"]) if pd.notna(wlast.get("_wst_val")) else None
-                            weekly_period_complete = wprev_rows.index[-1] == all_weekly_rows.index[-1]
-                        weekly_candles = _to_candles(weekly, "_wst_val", "_wst_dir", 30)
-
-        # Weekly trend age (consecutive bars in current weekly ST direction)
-        weekly_trend_age_bars = 0
-        if wcur_dir is not None and wcur_dir != 0:
-            for wdir in reversed([int(r) for r in wprev_rows["_wst_dir"].tolist()]):
-                if wdir != wcur_dir:
-                    break
-                weekly_trend_age_bars += 1
-
-        # Quality indicators from daily parquet (already pre-computed)
-        def _fv(key, default=None):
-            val = last.get(key)
-            return float(val) if pd.notna(val) else default
-
-        macd_hist_rows = (
-            pd.to_numeric(daily.loc[:last.name, "MACD_Hist"], errors="coerce").dropna().tail(2)
-            if "MACD_Hist" in daily.columns
-            else pd.Series(dtype=float)
-        )
-        macd_hist_prev = float(macd_hist_rows.iloc[-2]) if len(macd_hist_rows) >= 2 else None
-        macd_hist_current = _fv("MACD_Hist")
-        adx_rows = (
-            pd.to_numeric(daily.loc[:last.name, "ADX"], errors="coerce").dropna().tail(2)
-            if "ADX" in daily.columns
-            else pd.Series(dtype=float)
-        )
-        adx_prev = float(adx_rows.iloc[-2]) if len(adx_rows) >= 2 else None
-        adx_current = _fv("ADX")
-
-        indicators = {
-            "adx": adx_current,
-            "adxPrev": adx_prev,
-            "adxDelta": (
-                adx_current - adx_prev
-                if adx_current is not None and adx_prev is not None
-                else None
-            ),
-            "rsi7": _fv("RSI_7"),
-            "rsi14": _fv("RSI_14"),
-            "rsi21": _fv("RSI_21"),
-            "macdDif": _fv("MACD_DIF"),
-            "macdDea": _fv("MACD_DEA"),
-            "macdHist": macd_hist_current,
-            "macdHistPrev": macd_hist_prev,
-            "macdHistDelta": (
-                macd_hist_current - macd_hist_prev
-                if macd_hist_current is not None and macd_hist_prev is not None
-                else None
-            ),
-            "kdjK": _fv("K"),
-            "kdjD": _fv("D"),
-            "kdjJ": _fv("J"),
-            "bollUpper": _fv("BOLL_Upper"),
-            "bollMid": _fv("BOLL_Mid"),
-            "bollLower": _fv("BOLL_Lower"),
-            "atr": _fv("ATR"),
-        }
-
-        # Daily BOLL squeeze detection
-        # Formal authorization must use completed bars only. Provisional BOLL
-        # values may be displayed elsewhere but never feed the decision policy.
-        (
-            boll_width,
-            is_squeeze,
-            recent_squeeze,
-            boll_width_ratio,
-            boll_width_series,
-            boll_width_average,
-        ) = _st_daily_boll_squeeze(decision_daily)
-        indicators["bollWidth"] = boll_width
-        indicators["bollSqueeze"] = is_squeeze
-        indicators["bollSqueezeRecent"] = recent_squeeze
-        indicators["bollWidthRatio20"] = boll_width_ratio
-
-        decision_history = []
-        history_source = decision_daily.dropna(subset=["Close", "_st_val", "_st_dir"]).tail(10)
-        prior_direction = None
-        for ts, row in history_source.iterrows():
-            direction = int(row["_st_dir"])
-            if direction == 1:
-                history_state = "bull_flip" if prior_direction == -1 else "bull"
-            else:
-                history_state = "bear_flip" if prior_direction == 1 else "bear"
-            row_close = float(row["Close"])
-            row_st = float(row["_st_val"])
-            row_atr = float(row["ATR"]) if pd.notna(row.get("ATR")) and float(row["ATR"]) > 0 else None
-            row_bw = None
-            row_bw_ratio = None
-            row_squeeze = False
-            row_recent_squeeze = False
-            if all(pd.notna(row.get(key)) for key in ("BOLL_Upper", "BOLL_Lower", "BOLL_Mid")) and float(row["BOLL_Mid"]) != 0:
-                row_bw = (float(row["BOLL_Upper"]) - float(row["BOLL_Lower"])) / float(row["BOLL_Mid"])
-                if ts in boll_width_average.index and pd.notna(boll_width_average.loc[ts]) and float(boll_width_average.loc[ts]) > 0:
-                    row_bw_ratio = row_bw / float(boll_width_average.loc[ts])
-                    row_squeeze = row_bw_ratio < 0.85
-                    historical_ratios = (
-                        boll_width_series.loc[:ts]
-                        / boll_width_average.loc[:ts].replace(0, float("nan"))
-                    ).dropna().tail(5)
-                    row_recent_squeeze = bool((historical_ratios < 0.85).any() and row_bw_ratio <= 1.10)
-            decision_history.append({
-                "date": pd.Timestamp(ts).date().isoformat(),
-                "state": history_state,
-                "close": row_close,
-                "stVal": row_st,
-                "distanceToSupertrendAtr": (row_close - row_st) / row_atr if row_atr else None,
-                "adx": float(row["ADX"]) if pd.notna(row.get("ADX")) else None,
-                "macdHist": float(row["MACD_Hist"]) if pd.notna(row.get("MACD_Hist")) else None,
-                "bollWidth": row_bw,
-                "bollWidthRatio20": row_bw_ratio,
-                "bollSqueeze": row_squeeze,
-                "bollSqueezeRecent": row_recent_squeeze,
-            })
-            prior_direction = direction
-        macd_divergence = build_macd_divergence_summary(sym, daily, weekly)
-        multitimeframe_context = _st_multitimeframe_context(daily, symbol=sym)
-
-        alert = classify_supertrend_alert(
-            state=state,
-            weekly_state=weekly_state,
-            close=float(last["Close"]) if pd.notna(last.get("Close")) else None,
-            st_val=float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
-            atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None,
-            just_flipped=state in ("bull_flip", "bear_flip"),
-            trend_age_bars=trend_age_bars,
-        )
-
-        freshness = assess_freshness(
-            sym, daily, known_at=datetime.now(timezone.utc),
-        )
-        return {
-            "symbol": sym.upper(),
-            "alias": alias_map.get(sym, ""),
-            "state": state,
-            "dailyProvisionalState": provisional_state,
-            "decisionDailyState": state if decision_daily_available else None,
-            "decisionAsOf": decision_as_of,
-            "decisionDailyAvailable": decision_daily_available,
-            "hasProvisionalBar": has_provisional_bar,
-            "isCrypto": sym.upper().endswith("-USD"),
-            "livePrice": live_price,
-            "liveAsOf": latest_data_date,
-            "close": float(last["Close"]) if pd.notna(last.get("Close")) else None,
-            "stVal": float(last["_st_val"]) if pd.notna(last.get("_st_val")) else None,
-            "candles": candles,
-            "weeklyState": weekly_state,
-            "weeklyProvisionalState": weekly_provisional_state,
-            "weeklyPeriodComplete": weekly_period_complete,
-            "weeklyStVal": weekly_st_val,
-            "weeklyCandles": weekly_candles,
-            "justFlipped": state in ("bull_flip", "bear_flip"),
-            "weeklyJustFlipped": weekly_just_flipped,
-            "trendAgeBars": trend_age_bars,
-            "dailySessionComplete": daily_session_complete,
-            "latestDataDate": latest_data_date,
-            "dataUpdatedAt": _st_iso_from_timestamp(daily_mtime),
-            "cacheStale": cache_stale,
-            "dataStale": data_stale,
-            "freshness": freshness,
-            "freshnessStatus": freshness["freshnessStatus"],
-            "refreshTriggered": bool(refresh_symbols) and not refresh_completed,
-            "dataIntegrity": data_integrity,
-            "indicators": indicators,
-            "decisionHistory": decision_history,
-            "macdDivergence": macd_divergence,
-            "bollWidth": boll_width,
-            "bollSqueeze": is_squeeze,
-            "bollSqueezeRecent": recent_squeeze,
-            **multitimeframe_context,
-            "weeklyTrendAgeBars": weekly_trend_age_bars,
-            **alert,
-        }
 
     def _process_sym(sym):
         daily_path = _st_path(sym)
@@ -3189,13 +2869,6 @@ def api_portfolio_deposit(strategy_id: str, request: pm.DepositRequest):
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.on_event("startup")
-async def startup_event():
-    """系统启动时，启动后台维护线程"""
-    logger.info("==> [系统启动] 正在启动后台数据管家...")
-    _start_background_prewarm()
 
 
 def main(argv: Optional[List[str]] = None) -> int:

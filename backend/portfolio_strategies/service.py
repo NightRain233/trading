@@ -45,11 +45,9 @@ from .next_open_strategies import (
 from .operation_lock import portfolio_operation_lock
 from .schedules import schedule_status, xshg_sessions
 from .registry import (
-    ComparisonStrategyError,
     PRIMARY_STRATEGY_IDS,
     UnknownStrategyError,
     get_strategy,
-    list_paper_strategies,
     list_strategies,
     require_paper_strategy,
 )
@@ -318,8 +316,6 @@ class PortfolioStrategyService:
         # Ledger state
         current_weights: list[dict[str, Any]] = []
         desired_weights: list[dict[str, Any]] = []
-        executable_weights: list[dict[str, Any]] = []
-        delta_weights: list[dict[str, Any]] = []
         nav_metrics: dict[str, Any] = {}
         ledger_summary: dict[str, Any] = {"status": "empty" if account is None else "bootstrapped"}
         pending = None
@@ -339,7 +335,6 @@ class PortfolioStrategyService:
                     "drawdown": nav["drawdown"],
                 }
             if positions:
-                total_value = sum(float(p["value"]) for p in positions)
                 for p in positions:
                     current_weights.append({
                         "symbol": p["symbol"],

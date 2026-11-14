@@ -24,10 +24,10 @@ from analysis_weinstein import add_view_columns, weinstein_summary
 from analysis_constants import (  # noqa: F401
     DATA_DIR, CACHE_DURATION_SECONDS, ALLOW_STALE_SECONDS, DATA_RETENTION_DAYS,
     REFRESH_MIN_INTERVAL_SECONDS, TICKFLOW_INCREMENTAL_OVERLAP_DAYS,
-    EMA_LONG_PERIOD,
     EMA_FAST_5, EMA_FAST_10, EMA_SHORT_PERIOD, EMA_LONG_PERIOD,
     CHART_DAYS, MINI_CHART_DAYS,
 )
+from supertrend_contract import CONTRACT_VERSION
 from analysis_cache import (  # noqa: F401
     get_symbol_lock, global_download_lock, ta_calculation_lock,
     symbol_locks, _memory_cache, _memory_cache_lock, _cache_put,
@@ -193,9 +193,10 @@ def batch_fetch_and_update(symbols: list) -> dict:
                     not _is_a_share_symbol(symbol)
                     or entry.get("sourceVersion") == A_SHARE_DATA_SOURCE_VERSION
                 )
-                if source_is_current and elapsed < CACHE_DURATION_SECONDS:
+                indicator_is_current = entry.get("indicatorContractVersion") == CONTRACT_VERSION
+                if source_is_current and indicator_is_current and elapsed < CACHE_DURATION_SECONDS:
                     return symbol, (entry["df"], entry["df_weekly"], entry.get("summary")), 0, True, "mem_hit"
-                if source_is_current and elapsed < ALLOW_STALE_SECONDS:
+                if source_is_current and indicator_is_current and elapsed < ALLOW_STALE_SECONDS:
                     return symbol, (entry["df"], entry["df_weekly"], entry.get("summary")), 0, False, "mem_stale"
 
         t0 = time.time()
@@ -210,7 +211,18 @@ def batch_fetch_and_update(symbols: list) -> dict:
             source_is_current = _has_current_data_source(file_path, symbol)
             is_fresh = elapsed < CACHE_DURATION_SECONDS and source_is_current
             is_stale_but_usable = elapsed < ALLOW_STALE_SECONDS
-            has_indicators = 'EMA20' in df_local.columns and 'EMA5' in df_local.columns
+            has_st_columns = 'ST_Val' in df_local.columns or 'ST_Dir' in df_local.columns
+            has_indicators = (
+                'EMA20' in df_local.columns
+                and 'EMA5' in df_local.columns
+                and (
+                    not has_st_columns
+                    or (
+                        'ST_ContractVersion' in df_local.columns
+                        and df_local['ST_ContractVersion'].eq(CONTRACT_VERSION).all()
+                    )
+                )
+            )
 
             if has_indicators:
                 df_weekly, _ = _load_local_data(weekly_file_path, symbol)
@@ -225,6 +237,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
                             if source_is_current and _is_a_share_symbol(symbol)
                             else None
                         ),
+                        "indicatorContractVersion": CONTRACT_VERSION,
                     })
                     res_data = (df_local, df_weekly, summary)
                     if is_fresh:
@@ -439,6 +452,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
             and cached_entry.get("df") is not None
             and cached_entry.get("df_weekly") is not None
             and cached_entry.get("summary") is not None
+            and cached_entry.get("indicatorContractVersion") == CONTRACT_VERSION
         ):
             if source_refreshed:
                 with get_symbol_lock(symbol):
@@ -482,6 +496,7 @@ def batch_fetch_and_update(symbols: list) -> dict:
             "sourceVersion": (
                 A_SHARE_DATA_SOURCE_VERSION if source_refreshed else None
             ),
+            "indicatorContractVersion": CONTRACT_VERSION,
         })
         return symbol, (df, df_weekly, summary)
 

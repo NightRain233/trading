@@ -15,20 +15,20 @@
 ## 跑过的命令
 
 ```bash
-cd backend && uv run python ../scripts/compare_supertrend_timeframes.py \
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py \
   --start 2021-06-04 --end 2026-06-05 \
   --annual --param-grid --json > /tmp/us_st_full_20260605.json
 ```
 
 ```bash
-cd backend && uv run python ../scripts/compare_supertrend_timeframes.py \
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py \
   --start 2021-06-04 --end 2026-06-05 \
   --st-length 10 --st-multiplier 3 \
   --annual --json > /tmp/us_st_10_3_20260605.json
 ```
 
 ```bash
-cd backend && uv run python ../scripts/compare_supertrend_timeframes.py \
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py \
   --start 2021-06-04 --end 2026-06-05 \
   --json > /tmp/us_st_7_3_rows_20260605.json
 ```
@@ -163,3 +163,5 @@ ETF 里 `ST(7,3)` 虽然不追求跑赢买入持有收益，但在 2/2 标的上
 2. 对个股参数做稳健性检验：按行业、市值、波动率、趋势强度分层，重点检查 `ST(10,3)` 是否只是由 NVDA 这类超强趋势股驱动。
 3. 若要产品化个股 `ST(10,3)`，建议先以实验标签上线：展示 `ST(7,3)` 与 `ST(10,3)` 双信号、双收益/回撤摘要，不改变主策略默认。
 4. 暂缓开发周线过滤、BB squeeze p20、ATR no-chase 作为默认规则；如要保留，可做成研究开关或高级筛选项。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

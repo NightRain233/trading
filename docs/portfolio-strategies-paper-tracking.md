@@ -132,7 +132,7 @@ Calling activation again with the same date is idempotent. A different date is r
 
 ## Database
 
-Path: `backend/backtest_results/portfolio_paper.sqlite`
+Path: `../xquant/outputs/trading-research/portfolio_paper.sqlite`
 
 Legacy next-close tables remain unchanged: `paper_accounts`, `signal_snapshots`, `signal_weights`, `rebalance_events`, `paper_trades`, `position_snapshots`, `nav_snapshots`, `data_quality_events`.
 
@@ -170,7 +170,7 @@ The maintained runner updates data, refreshes all four tracked paper accounts in
 scripts/run_portfolio_daily.sh
 ```
 
-It writes `backend/backtest_results/portfolio_daily_job_status.json` and `openclaw_portfolio_daily.md`. A strategy failure is recorded and does not stop the remaining strategies. File locks prevent overlapping runners and overlapping refreshes of one account.
+It writes `../xquant/outputs/trading-research/portfolio_daily_job_status.json` and `openclaw_portfolio_daily.md`. A strategy failure is recorded and does not stop the remaining strategies. File locks prevent overlapping runners and overlapping refreshes of one account.
 
 Recommended `Asia/Shanghai` schedule:
 
@@ -182,8 +182,8 @@ Example cron entries:
 
 ```cron
 CRON_TZ=Asia/Shanghai
-40 16 * * 1-5 /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/backend/backtest_results/portfolio_daily.log 2>&1
-15 7 * * * /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/backend/backtest_results/portfolio_daily.log 2>&1
+40 16 * * 1-5 /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/../xquant/outputs/trading-research/portfolio_daily.log 2>&1
+15 7 * * * /home/zsd/trading/scripts/run_portfolio_daily.sh >> /home/zsd/trading/../xquant/outputs/trading-research/portfolio_daily.log 2>&1
 ```
 
 The report can also be generated independently after a successful refresh:
@@ -244,3 +244,5 @@ uv run pytest \
 # Frontend build
 cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

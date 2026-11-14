@@ -21,7 +21,7 @@
 | 文档 | 内容 |
 |---|---|
 | [three-asset-core-guide.md](three-asset-core-guide.md) | 三组合分红修正版纸面账户：初始金额、逐笔入金、复核命令 |
-| [strategy-backtesting-guide.md](strategy-backtesting-guide.md) | 本仓库的策略比较脚本怎么跑 |
+| [strategy-backtesting-guide.md](strategy-backtesting-guide.md) | 历史策略比较脚本已迁移至同级 xquant，见对应研究报告中的复现命令 |
 | [rs-rotation-usage.md](rs-rotation-usage.md) | RS 轮动页面和回测怎么用 |
 | [trading-ledger-handoff-2026-09-06.md](trading-ledger-handoff-2026-09-06.md) | 跨仓库交接：研究包、日报入口、账本复现 |
 | [../scripts/openclaw_daily_brief_prompt.md](../scripts/openclaw_daily_brief_prompt.md) | 每日推送助手的系统提示词 |

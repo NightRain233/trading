@@ -20,9 +20,10 @@ const splitTimeKey = (time: Time): string | null => {
     return d.toISOString().slice(0, 10);
   }
   if (typeof time === 'object' && time !== null && 'year' in time && 'month' in time && 'day' in time) {
-    const year = (time as any).year;
-    const month = (time as any).month;
-    const day = (time as any).day;
+    const businessDay = time as { year: number; month: number; day: number };
+    const year = businessDay.year;
+    const month = businessDay.month;
+    const day = businessDay.day;
     if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
     return `${String(year)}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
@@ -35,17 +36,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
   const macdContainerRef = useRef<HTMLDivElement>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
   const macdChartRef = useRef<IChartApi | null>(null);
-
-  // Stabilize candles reference — only update when content actually changes
-  const candlesRef = useRef(candles);
-  const stableCandles = useMemo(() => {
-    const prev = candlesRef.current;
-    if (prev.length === candles.length && prev[0]?.time === candles[0]?.time && prev[prev.length - 1]?.close === candles[candles.length - 1]?.close) {
-      return prev;
-    }
-    candlesRef.current = candles;
-    return candles;
-  }, [candles]);
+  const [chartWidth, setChartWidth] = useState(0);
 
   // Local state for EMA mode to allow per-stock overrides
   const [internalEmaMode, setInternalEmaMode] = useState(propsEmaMode);
@@ -77,9 +68,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
   const isBusinessDay = (value: unknown): value is Time =>
     typeof value === 'object' &&
     value !== null &&
-    isFiniteNumber((value as any).year) &&
-    isFiniteNumber((value as any).month) &&
-    isFiniteNumber((value as any).day);
+    isFiniteNumber((value as { year?: unknown }).year) &&
+    isFiniteNumber((value as { month?: unknown }).month) &&
+    isFiniteNumber((value as { day?: unknown }).day);
 
   const isValidTime = (value: unknown): value is Time =>
     (typeof value === 'string' && isValidDateString(value)) ||
@@ -123,7 +114,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     minPrice,
     changePercent,
   } = useMemo(() => {
-    const validCandles = stableCandles.filter(isValidCandle);
+    const validCandles = candles.filter(isValidCandle);
 
     if (validCandles.length === 0) {
       return {
@@ -205,7 +196,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       try {
         const date = new Date(d);
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } catch (_e) {
+      } catch {
         return d;
       }
     };
@@ -229,7 +220,10 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       maxPrice: Math.max(...prices),
       minPrice: Math.min(...prices),
     };
-  }, [stableCandles, ema1Key, ema2Key]);
+  // The validator is a stable pure predicate; keeping it out of dependencies
+  // avoids rebuilding chart data on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, ema1Key, ema2Key]);
 
   useEffect(() => {
     if (!mainContainerRef.current || !macdContainerRef.current || !wrapperRef.current || candleData.length === 0) return;
@@ -243,7 +237,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       macdChartRef.current = null;
     }
 
-    const commonChartOptions: any = {
+    const commonChartOptions = {
       width: wrapperRef.current.clientWidth,
       layout: {
         background: { type: ColorType.Solid as const, color: 'transparent' },
@@ -269,9 +263,9 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
       crosshair: {
         mode: CrosshairMode.Magnet,
         vertLine: {
-          width: 1,
+          width: 1 as const,
           color: 'rgba(255, 255, 255, 0.1)',
-          style: 3,
+          style: 3 as const,
           labelVisible: false,
         },
         horzLine: {
@@ -451,6 +445,7 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
     const resizeObserver = new ResizeObserver(entries => {
       if (entries.length === 0 || !entries[0].contentRect) return;
       const { width } = entries[0].contentRect;
+      setChartWidth(width);
       if (mainChartRef.current) {
         mainChartRef.current.applyOptions({ width });
       }
@@ -570,7 +565,6 @@ export const MiniChart = memo(function MiniChart({ candles, timeframe, emaMode: 
         {/* Tooltip */}
         {hoverData && (() => {
           const tooltipWidth = 148;
-          const chartWidth = wrapperRef.current?.offsetWidth || 0;
           const leftPos = Math.max(0, Math.min(chartWidth - tooltipWidth, hoverData.x - tooltipWidth / 2));
           const arrowPos = Math.max(10, Math.min(tooltipWidth - 14, hoverData.x - leftPos));
 

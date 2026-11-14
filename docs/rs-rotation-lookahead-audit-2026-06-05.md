@@ -16,7 +16,7 @@
 
 ```text
 backend/tests/test_backtest.py::RsRotationLookaheadTests
-backend/tests/test_research_rs_rotation_lookahead_audit.py
+../xquant/tests/trading_research/test_research_rs_rotation_lookahead_audit.py
 ```
 
 验证点：
@@ -33,13 +33,13 @@ backend/tests/test_research_rs_rotation_lookahead_audit.py
 新增审计脚本：
 
 ```text
-scripts/research_rs_rotation_lookahead_audit.py
+../xquant/scripts/trading_research/research_rs_rotation_lookahead_audit.py
 ```
 
 输出：
 
 ```text
-backend/backtest_results/rs_rotation_lookahead_audit_2026-06-05.json
+../xquant/outputs/trading-research/rs_rotation_lookahead_audit_2026-06-05.json
 ```
 
 比较两种口径：
@@ -98,3 +98,5 @@ backend/backtest_results/rs_rotation_lookahead_audit_2026-06-05.json
 补齐历史数据后，A 股宽基池、当前核心池、美股池的结论仍然成立。
 下一步应把执行口径产品化为 next-open，并继续处理 universe 选择偏差和全球池类别上限。
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

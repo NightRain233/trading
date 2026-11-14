@@ -20,15 +20,14 @@
 输出文件：
 
 ```text
-backend/backtest_results/supertrend_fit_research_2026-06-05.json
+../xquant/outputs/trading-research/supertrend_fit_research_2026-06-05.json
 ```
 
 运行命令：
 
 ```bash
-cd backend
-PYTHONPATH=. uv run python ../scripts/research_supertrend_fit.py \
-  --output backtest_results/supertrend_fit_research_2026-06-05.json
+cd ../xquant && uv run python scripts/trading_research/research_supertrend_fit.py \
+  --output outputs/trading-research/supertrend_fit_research_2026-06-05.json
 ```
 
 ## 三种评分
@@ -130,3 +129,5 @@ A 股 ETF 是本轮唯一看到弱正向样本外信号的分桶。
 - A 股 ETF 可以继续做只读研究排序：默认展示 `history` 与 `hybrid` 的 fitScore，但必须标注“研究信号”。
 - 个股侧先不要上 fitScore；先扩样本、清洗指数/ST 股票/特殊周期样本，再复跑。
 - 下一轮若继续推进，优先扩展样本池，而不是调权重。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

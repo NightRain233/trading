@@ -6,6 +6,13 @@ import { buildHistoryTradesQuery } from './historyTradesQuery.js';
 // 开发环境下使用 hardcode 的 IP，生产环境下使用相对路径（由 Nginx 转发）
 const API_BASE_URL = '/api';
 
+declare global {
+  interface Window {
+    __BATCH_PROMISE__?: Promise<unknown> | null;
+    __WATCHLIST_PROMISE__?: Promise<WatchlistGroup[]> | null;
+  }
+}
+
 export type BatchQuotesConditionalResult =
   | {
       status: 'not_modified';
@@ -51,10 +58,12 @@ export async function fetchBatchQuotes(symbols: string[]): Promise<Record<string
 export async function fetchBatchQuotesSnapshot(symbols: string[]): Promise<BatchQuotesSnapshot> {
   try {
     // 优先使用 index.html 中预抓取的 Promise
-    const prefetchPromise = (window as any).__BATCH_PROMISE__;
+    const prefetchPromise = window.__BATCH_PROMISE__;
     if (prefetchPromise) {
-      const snapshot = normalizeBatchSnapshot(await prefetchPromise);
-      (window as any).__BATCH_PROMISE__ = null;
+      const snapshot = normalizeBatchSnapshot(
+        (await prefetchPromise) as Parameters<typeof normalizeBatchSnapshot>[0]
+      );
+      window.__BATCH_PROMISE__ = null;
       if (Object.keys(snapshot.data).length > 0 || snapshot.updatedAt) return snapshot;
     }
 
@@ -147,11 +156,11 @@ export async function fetchBatchCharts(
 export async function fetchWatchlist(): Promise<WatchlistGroup[]> {
   try {
     // 优先使用 index.html 中预抓取的 Promise
-    const prefetchPromise = (window as any).__WATCHLIST_PROMISE__;
+    const prefetchPromise = window.__WATCHLIST_PROMISE__;
     if (prefetchPromise) {
       const data = await prefetchPromise;
       // 使用完后清除，防止后续刷新又用了旧的（或者由 loadData 自行决定）
-      (window as any).__WATCHLIST_PROMISE__ = null;
+      window.__WATCHLIST_PROMISE__ = null;
       if (data) return data;
     }
 

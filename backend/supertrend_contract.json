@@ -1,0 +1,16 @@
+{
+  "version": "sma-atr-v1",
+  "atrMode": "SMA",
+  "signalConfirmation": "close",
+  "primary": {
+    "length": 10,
+    "multiplier": 3.0,
+    "execution": "next_close",
+    "symbol": "BTC-USD"
+  },
+  "learningScan": {
+    "length": 7,
+    "multiplier": 3.0,
+    "execution": "next_open"
+  }
+}

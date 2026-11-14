@@ -12,7 +12,7 @@ interface FilterBarProps {
     key: keyof StockData | 'weeklyStatus';
     direction: 'asc' | 'desc' | null;
   };
-  toggleSort: (key: any) => void;
+  toggleSort: (key: keyof StockData | 'weeklyStatus') => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -108,7 +108,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         ].map(item => (
           <button
             key={item.key}
-            onClick={() => toggleSort(item.key)}
+            onClick={() => toggleSort(item.key as keyof StockData | 'weeklyStatus')}
             className={clsx(
               "px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap border transition-all duration-200 flex items-center gap-1",
               sortConfig.key === item.key

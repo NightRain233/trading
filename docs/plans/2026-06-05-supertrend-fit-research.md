@@ -4,7 +4,7 @@
 
 **Goal:** Build and run an offline SuperTrend fit-screening study that scores symbols using prior two-year data and validates on future six-month windows.
 
-**Architecture:** Add one research script that reuses existing SuperTrend data loading, asset bucketing, buy-hold stats, and daily ST backtest helpers from `scripts/compare_supertrend_timeframes.py`. The script computes history, shape, and hybrid scores on each training window, assigns tiers before reading validation metrics, then writes JSON and a Markdown report.
+**Architecture:** Add one research script that reuses existing SuperTrend data loading, asset bucketing, buy-hold stats, and daily ST backtest helpers from `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`. The script computes history, shape, and hybrid scores on each training window, assigns tiers before reading validation metrics, then writes JSON and a Markdown report.
 
 **Tech Stack:** Python, pandas, pandas-ta, pytest, local parquet cache, existing backend research helpers.
 
@@ -13,12 +13,12 @@
 ### Task 1: Add Walk-Forward and Scoring Tests
 
 **Files:**
-- Create: `backend/tests/test_research_supertrend_fit.py`
-- Create: `scripts/research_supertrend_fit.py`
+- Create: `../xquant/tests/trading_research/test_research_supertrend_fit.py`
+- Create: `../xquant/scripts/trading_research/research_supertrend_fit.py`
 
 **Step 1: Write failing tests**
 
-Add tests that import `scripts/research_supertrend_fit.py` by file path, following the style in `backend/tests/test_compare_supertrend_timeframes.py`.
+Add tests that import `../xquant/scripts/trading_research/research_supertrend_fit.py` by file path, following the style in `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`.
 
 Test these behaviors:
 
@@ -32,14 +32,14 @@ Test these behaviors:
 Run:
 
 ```bash
-PYTHONPATH=. uv run pytest backend/tests/test_research_supertrend_fit.py -v
+PYTHONPATH=. uv run pytest ../xquant/tests/trading_research/test_research_supertrend_fit.py -v
 ```
 
-Expected: fail because `scripts/research_supertrend_fit.py` does not exist or functions are missing.
+Expected: fail because `../xquant/scripts/trading_research/research_supertrend_fit.py` does not exist or functions are missing.
 
 **Step 3: Implement minimal helpers**
 
-Create `scripts/research_supertrend_fit.py` with:
+Create `../xquant/scripts/trading_research/research_supertrend_fit.py` with:
 
 - imports
 - `_date_str`
@@ -56,8 +56,8 @@ Run the same pytest command. Expected: pass for Task 1 tests.
 ### Task 2: Add Feature and Score Tests
 
 **Files:**
-- Modify: `backend/tests/test_research_supertrend_fit.py`
-- Modify: `scripts/research_supertrend_fit.py`
+- Modify: `../xquant/tests/trading_research/test_research_supertrend_fit.py`
+- Modify: `../xquant/scripts/trading_research/research_supertrend_fit.py`
 
 **Step 1: Write failing tests**
 
@@ -73,7 +73,7 @@ Add tests for:
 Run:
 
 ```bash
-PYTHONPATH=. uv run pytest backend/tests/test_research_supertrend_fit.py -v
+PYTHONPATH=. uv run pytest ../xquant/tests/trading_research/test_research_supertrend_fit.py -v
 ```
 
 Expected: new tests fail because scoring helpers are missing.
@@ -97,8 +97,8 @@ Run the same pytest command. Expected: pass.
 ### Task 3: Add Walk-Forward Study Assembly
 
 **Files:**
-- Modify: `backend/tests/test_research_supertrend_fit.py`
-- Modify: `scripts/research_supertrend_fit.py`
+- Modify: `../xquant/tests/trading_research/test_research_supertrend_fit.py`
+- Modify: `../xquant/scripts/trading_research/research_supertrend_fit.py`
 
 **Step 1: Write failing tests**
 
@@ -113,14 +113,14 @@ Add tests for:
 Run:
 
 ```bash
-PYTHONPATH=. uv run pytest backend/tests/test_research_supertrend_fit.py -v
+PYTHONPATH=. uv run pytest ../xquant/tests/trading_research/test_research_supertrend_fit.py -v
 ```
 
 **Step 3: Implement assembly**
 
 Implement:
 
-- dynamic import of `scripts/compare_supertrend_timeframes.py`
+- dynamic import of `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
 - `_load_prepared_symbols`
 - `_build_window_rows`
 - `_summarize_score_mode`
@@ -134,7 +134,7 @@ Reuse `_analyze_symbol_from_data()` for train and validation stats.
 Run:
 
 ```bash
-PYTHONPATH=. uv run pytest backend/tests/test_research_supertrend_fit.py backend/tests/test_compare_supertrend_timeframes.py -v
+PYTHONPATH=. uv run pytest ../xquant/tests/trading_research/test_research_supertrend_fit.py ../xquant/tests/trading_research/test_compare_supertrend_timeframes.py -v
 ```
 
 Expected: pass.
@@ -142,7 +142,7 @@ Expected: pass.
 ### Task 4: Add CLI and Run Research
 
 **Files:**
-- Modify: `scripts/research_supertrend_fit.py`
+- Modify: `../xquant/scripts/trading_research/research_supertrend_fit.py`
 
 **Step 1: Add CLI**
 
@@ -153,7 +153,7 @@ Add arguments:
 - `--train-years`, default `2`
 - `--test-months`, default `6`
 - `--step-months`, default `6`
-- `--output`, default `backend/backtest_results/supertrend_fit_research_2026-06-05.json`
+- `--output`, default `../xquant/outputs/trading-research/supertrend_fit_research_2026-06-05.json`
 - `--json`, print payload to stdout
 
 **Step 2: Run script**
@@ -161,7 +161,7 @@ Add arguments:
 Run:
 
 ```bash
-PYTHONPATH=. uv run python scripts/research_supertrend_fit.py --output backend/backtest_results/supertrend_fit_research_2026-06-05.json
+cd ../xquant && uv run python scripts/trading_research/research_supertrend_fit.py --output ../xquant/outputs/trading-research/supertrend_fit_research_2026-06-05.json
 ```
 
 Expected: JSON result file is written.
@@ -198,7 +198,7 @@ Report:
 Run:
 
 ```bash
-PYTHONPATH=. uv run pytest backend/tests/test_research_supertrend_fit.py backend/tests/test_compare_supertrend_timeframes.py -v
+PYTHONPATH=. uv run pytest ../xquant/tests/trading_research/test_research_supertrend_fit.py ../xquant/tests/trading_research/test_compare_supertrend_timeframes.py -v
 ```
 
 Expected: pass.

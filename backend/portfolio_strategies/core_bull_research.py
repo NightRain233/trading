@@ -9,8 +9,6 @@ from datetime import date
 from pathlib import Path
 from dataclasses import replace
 from collections.abc import Callable, Mapping
-import json
-import sqlite3
 import pandas as pd
 
 from .frozen_xquant import frozen_universe, normalize_daily

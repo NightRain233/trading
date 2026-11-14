@@ -21,7 +21,7 @@ A 股 ETF RS 轮动 + 510300 月 MACD
 输出：
 
 ```text
-backend/backtest_results/a_share_weekly_daily_st_equal_weight_2026-06-06.json
+../xquant/outputs/trading-research/a_share_weekly_daily_st_equal_weight_2026-06-06.json
 ```
 
 ## 全周期结果
@@ -179,3 +179,5 @@ A 股主题趋势雷达：显示周线+日线 ST 同时转强的 ETF，并计算
 1. 给核心池加选择偏差约束：只允许使用当时已经上市且有足够历史的 ETF，并按主题类别限制数量。
 2. 增加风险预算：例如最多持有 5-8 只，单一行业/主题最多 1-2 只。
 3. 加入月 MACD 或组合回撤保护，测试能否把核心 ST 等权的最大回撤从 44% 压到 30% 以下。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

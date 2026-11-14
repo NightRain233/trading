@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-fe dev-be build build-fe docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-backend deploy-frontend deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx update-data
+.PHONY: help install dev dev-fe dev-be build build-fe lint lint-fe lint-be runtime-audit docker-up docker-down docker-build docker-build-x docker-save docker-logs clean deploy deploy-up deploy-backend deploy-frontend deploy-nginx deploy-images deploy-full deploy-images-tx deploy-full-tx update-data
 
 
 # 初始化项目: make install
@@ -73,6 +73,17 @@ build-fe: ## Build frontend production bundle
 	cd frontend && pnpm build
 
 build: build-fe ## Build all (frontend only for now, backend is interpreted)
+
+lint: lint-fe lint-be runtime-audit ## Run frontend ESLint, backend Ruff, and runtime boundary checks
+
+lint-fe: ## Check frontend source
+	cd frontend && pnpm exec eslint src
+
+lint-be: ## Check backend source with Ruff
+	cd backend && uv run --frozen ruff check . --exclude .venv
+
+runtime-audit: ## Ensure trading runtime does not import xquant
+	backend/.venv/bin/python scripts/check_runtime_boundaries.py
 
 # --- Docker Management ---
 

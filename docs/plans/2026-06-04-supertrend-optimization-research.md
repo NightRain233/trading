@@ -4,7 +4,7 @@
 
 **Goal:** Extend the SuperTrend research script so ST variants and asset buckets can be compared under the same close-confirmed, next-open execution rules.
 
-**Architecture:** Keep this as a research-only layer. Modify `scripts/compare_supertrend_timeframes.py` to calculate reusable ST, ATR, and Bollinger Band context, then run several simple variants without changing backend API behavior, cache schema, or frontend defaults. Add focused tests for signal timing, squeeze filtering, no-chase filtering, and bucket summaries.
+**Architecture:** Keep this as a research-only layer. Modify `../xquant/scripts/trading_research/compare_supertrend_timeframes.py` to calculate reusable ST, ATR, and Bollinger Band context, then run several simple variants without changing backend API behavior, cache schema, or frontend defaults. Add focused tests for signal timing, squeeze filtering, no-chase filtering, and bucket summaries.
 
 **Tech Stack:** Python 3.12, pandas, pandas-ta, uv, pytest.
 
@@ -13,12 +13,12 @@
 ### Task 1: Add Script-Level Regression Tests
 
 **Files:**
-- Create: `backend/tests/test_compare_supertrend_timeframes.py`
+- Create: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 - Modify: none
 
 **Step 1: Write failing tests**
 
-Add tests that import `scripts/compare_supertrend_timeframes.py` via `importlib.util.spec_from_file_location`.
+Add tests that import `../xquant/scripts/trading_research/compare_supertrend_timeframes.py` via `importlib.util.spec_from_file_location`.
 
 Cover these behaviors:
 - A daily ST bull flip confirmed on one bar enters at the next bar open.
@@ -40,8 +40,8 @@ Expected: FAIL because the new variant/bucket APIs do not exist yet.
 ### Task 2: Add Indicator Context Helpers
 
 **Files:**
-- Modify: `scripts/compare_supertrend_timeframes.py`
-- Test: `backend/tests/test_compare_supertrend_timeframes.py`
+- Modify: `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- Test: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 
 **Step 1: Extend `_add_supertrend`**
 
@@ -67,8 +67,8 @@ Run the focused test file. Expected: remaining failures only for strategy varian
 ### Task 3: Add ST Variant Engine
 
 **Files:**
-- Modify: `scripts/compare_supertrend_timeframes.py`
-- Test: `backend/tests/test_compare_supertrend_timeframes.py`
+- Modify: `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- Test: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 
 **Step 1: Add variant config**
 
@@ -107,8 +107,8 @@ Expected: PASS.
 ### Task 4: Add Asset Bucket Summary
 
 **Files:**
-- Modify: `scripts/compare_supertrend_timeframes.py`
-- Test: `backend/tests/test_compare_supertrend_timeframes.py`
+- Modify: `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- Test: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 
 **Step 1: Add `_asset_bucket(meta)`**
 
@@ -142,7 +142,7 @@ Run the focused test file. Expected: PASS.
 
 ```bash
 cd <workspace>/trading
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --symbols BTC-USD --json
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --symbols BTC-USD --json
 ```
 
 Record baseline, squeeze, no-chase, weekly, and combo results.
@@ -151,7 +151,7 @@ Record baseline, squeeze, no-chase, weekly, and combo results.
 
 ```bash
 cd <workspace>/trading
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --limit 80
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --limit 80
 ```
 
 Record global and bucket-level summaries.
@@ -186,8 +186,8 @@ Summarize:
 ### Task 7: Add Parameter Grid Research
 
 **Files:**
-- Modify: `scripts/compare_supertrend_timeframes.py`
-- Test: `backend/tests/test_compare_supertrend_timeframes.py`
+- Modify: `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- Test: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 
 **Step 1: Write failing tests**
 
@@ -214,8 +214,8 @@ Output compact JSON with `parameterGrid`, including global and `byAssetBucket` r
 ### Task 8: Add Annual Stability Summary
 
 **Files:**
-- Modify: `scripts/compare_supertrend_timeframes.py`
-- Test: `backend/tests/test_compare_supertrend_timeframes.py`
+- Modify: `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- Test: `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 
 **Step 1: Write failing tests**
 
@@ -249,8 +249,8 @@ Then:
 
 ```bash
 cd <workspace>/trading
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --symbols BTC-USD --annual --json
-uv run --directory backend python ../scripts/compare_supertrend_timeframes.py --param-grid --json
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --symbols BTC-USD --annual --json
+cd ../xquant && uv run python scripts/trading_research/compare_supertrend_timeframes.py --param-grid --json
 ```
 
 Summarize:

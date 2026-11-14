@@ -203,7 +203,7 @@ separately.
 
 Database path:
 
-`backend/backtest_results/portfolio_paper.sqlite`
+`../xquant/outputs/trading-research/portfolio_paper.sqlite`
 
 Tables:
 

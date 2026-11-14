@@ -12,8 +12,8 @@
 
 包含：
 
-- `scripts/compare_supertrend_timeframes.py`
-- `backend/tests/test_compare_supertrend_timeframes.py`
+- `../xquant/scripts/trading_research/compare_supertrend_timeframes.py`
+- `../xquant/tests/trading_research/test_compare_supertrend_timeframes.py`
 - `docs/plans/2026-06-04-supertrend-optimization-research.md`
 - `docs/supertrend-optimization-research-2026-06-04.md`
 
@@ -137,3 +137,5 @@
 2. 提交 A 股、Crypto、美股和本总结报告。
 3. 再进入下一阶段：设计“研究模式”API/前端，而不是替换默认策略。
 4. 在产品化前，继续做样本扩展与样本外验证。
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

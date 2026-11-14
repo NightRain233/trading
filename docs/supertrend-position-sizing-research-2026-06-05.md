@@ -26,15 +26,14 @@ ST 能不能作为组合仓位控制层，降低回撤，同时保留足够收�
 输出文件：
 
 ```text
-backend/backtest_results/supertrend_position_sizing_2026-06-05.json
+../xquant/outputs/trading-research/supertrend_position_sizing_2026-06-05.json
 ```
 
 运行命令：
 
 ```bash
-cd backend
-PYTHONPATH=. uv run python ../scripts/research_st_position_sizing.py \
-  --output backtest_results/supertrend_position_sizing_2026-06-05.json
+cd ../xquant && uv run python scripts/trading_research/research_st_position_sizing.py \
+  --output outputs/trading-research/supertrend_position_sizing_2026-06-05.json
 ```
 
 ## 比较方案
@@ -155,3 +154,5 @@ light 档最接近可用：
 ```text
 ST 仓位控制有风控价值，但当前固定仓位表太钝；它适合做回撤期保护，不适合常态化压仓。
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。

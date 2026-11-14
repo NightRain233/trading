@@ -13,8 +13,8 @@
 ### Task 1: Specify the deterministic grid
 
 **Files:**
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
 
 1. Add failing tests for 85 broad points, 19 core points, unique IDs, exact 100% sums, and deterministic ordering.
 2. Run the focused tests and confirm failure due to missing grid helpers.
@@ -24,8 +24,8 @@
 ### Task 2: Specify neighborhood gates
 
 **Files:**
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
 
 1. Add failing tests for core unanimity, broad 80% target rate, and broad 20% hard drawdown rejection.
 2. Run the focused tests and confirm failure.
@@ -35,8 +35,8 @@
 ### Task 3: Generalize static allocation simulation
 
 **Files:**
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
 
 1. Add a failing test proving custom category weights split A-shares equally and US equities equally.
 2. Expose a reusable target-weight helper and allow `simulate_static_allocation_benchmark()` to accept category weights.
@@ -45,10 +45,10 @@
 ### Task 4: Integrate the grid and report
 
 **Files:**
-- Modify: `scripts/research_multi_asset_balanced_portfolio.py`
-- Modify: `backend/tests/test_research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/scripts/trading_research/research_multi_asset_balanced_portfolio.py`
+- Modify: `../xquant/tests/trading_research/test_research_multi_asset_balanced_portfolio.py`
 - Modify: `docs/multi-asset-balanced-portfolio-research-2026-06-06.md`
-- Modify: `backend/backtest_results/multi_asset_balanced_portfolio_2026-06-06.json`
+- Modify: `../xquant/outputs/trading-research/multi_asset_balanced_portfolio_2026-06-06.json`
 
 1. Add failing report and recommendation tests.
 2. Backtest all 85 points using the existing simulation cache.
@@ -58,7 +58,7 @@
 
 ### Task 5: Verify
 
-1. Run `uv run pytest tests/test_research_multi_asset_balanced_portfolio.py -v`.
+1. Run `uv run pytest tests/trading_research/test_research_multi_asset_balanced_portfolio.py -v`.
 2. Run the relevant broader research/backtest regression suite.
 3. Run `git diff --check`.
 4. Inspect grid counts, pass rates, worst points, recommendation, and report wording from the generated JSON.

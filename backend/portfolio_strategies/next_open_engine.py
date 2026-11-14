@@ -436,7 +436,6 @@ class NextOpenPaperEngine:
                 )
             if not bool(run["authoritative"]):
                 return ()
-            state = self._load_state(account["id"], conn=conn)
             latest_nav = self._latest_nav(account["id"], conn=conn)
             account_nav = float(latest_nav["net_nav"]) if latest_nav else config.initial_nav
             current_values: dict[str, float] = defaultdict(float)

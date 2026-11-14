@@ -23,9 +23,9 @@ const isValidDateString = (value: string) =>
 const isBusinessDay = (value: unknown): value is Time =>
   typeof value === 'object' &&
   value !== null &&
-  isFiniteNumber((value as any).year) &&
-  isFiniteNumber((value as any).month) &&
-  isFiniteNumber((value as any).day);
+    isFiniteNumber((value as { year?: unknown }).year) &&
+    isFiniteNumber((value as { month?: unknown }).month) &&
+    isFiniteNumber((value as { day?: unknown }).day);
 
 const isValidTime = (value: unknown): value is Time =>
   (typeof value === 'string' && isValidDateString(value)) ||
@@ -78,7 +78,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
       if (data && isMounted) setStock(data);
     });
     return () => { isMounted = false; };
-  }, [initialStock?.symbol]);
+  }, [initialStock]);
 
   useEffect(() => {
     if (!stock || !priceRef.current || !rsiRef.current || !kdjRef.current || !macdRef.current || !atrRef.current) return;
@@ -244,6 +244,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     // ATR
     const atrLine = charts[4].addSeries(LineSeries, { color: '#fb923c', lineWidth: 1 as LineWidth });
     atrLine.setData(validCandles.filter(c => isFiniteNumber(c.atr) && c.atr > 0).map((c: Candle) => ({ time: c.time as Time, value: c.atr! })));
+    const primarySeries = [candleSeries, rsiLine, kLine, macdHist, atrLine];
 
     // Sync
     let isBroadcasting = false;
@@ -265,7 +266,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
         charts.forEach((targetChart, targetIdx) => {
           if (sourceIdx !== targetIdx) {
             if (!param.point || !time) targetChart.clearCrosshairPosition();
-            else targetChart.setCrosshairPosition(0, time, (targetChart as any)._series && (targetChart as any)._series[0] ? (targetChart as any)._series[0] : undefined);
+            else targetChart.setCrosshairPosition(0, time, primarySeries[targetIdx]);
           }
         });
         isBroadcasting = false;
@@ -284,7 +285,7 @@ export function ChartModal({ stock: initialStock, onClose }: ChartModalProps) {
     return () => {
       window.removeEventListener('resize', handleResize);
       charts.forEach(c => {
-        try { c.remove(); } catch (e) { }
+        try { c.remove(); } catch { /* chart may already be disposed */ }
       });
     };
   }, [stock, timeframe, mainInd, isMobile]);

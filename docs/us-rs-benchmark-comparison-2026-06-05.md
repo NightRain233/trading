@@ -22,7 +22,7 @@
 输出文件：
 
 ```text
-backend/backtest_results/us_rs_benchmark_comparison_2026-06-05.json
+../xquant/outputs/trading-research/us_rs_benchmark_comparison_2026-06-05.json
 ```
 
 ## 全周期结果
@@ -114,3 +114,5 @@ A 股 RS + 月 MACD 是一个可继续研究的本土策略底座；
 ```text
 美股动量有效，但这轮证据更支持“长牛 beta 很强”，不支持“美股 RS 轮动明显优于简单买持”。
 ```
+
+> 迁移说明（2026-11-14）：本报告引用的研究实现已迁移至同级仓库 `../xquant/scripts/trading_research/`，历史结论和原始口径保持不变。
